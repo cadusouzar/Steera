@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light Theme (Clean SaaS aesthetic) */
+    --background: #F8FAFC; /* slate-50 */
+    --foreground: #0F172A; /* slate-900 */
+    
+    --primary: #2563EB; /* blue-600 */
+    --secondary: #E2E8F0; /* slate-200 */
+    --accent: #4F46E5; /* indigo-600 */
+    
+    --muted: #64748B; /* slate-500 */
+    --border: #CBD5E1; /* slate-300 */
+    
+    --panel: rgba(255, 255, 255, 0.8);
+  }
+
+  .dark {
+    /* Dark Theme (High-tech) */
+    --background: #0F172A; /* slate-900 */
+    --foreground: #F8FAFC; /* slate-50 */
+    
+    --primary: #3B82F6; /* blue-500 */
+    --secondary: #1E293B; /* slate-800 */
+    --accent: #6366F1; /* indigo-500 */
+    
+    --muted: #94A3B8; /* slate-400 */
+    --border: #334155; /* slate-700 */
+    
+    --panel: rgba(255, 255, 255, 0.05);
+  }
+
+  body {
+    @apply bg-background text-foreground transition-colors duration-300;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-panel backdrop-blur-lg border border-border shadow-sm dark:shadow-none;
+  }
+}
