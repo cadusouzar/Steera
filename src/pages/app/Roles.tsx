@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, MoreHorizontal, X, FileQuestion, Briefcase, ChevronRight, Check, Trash2 } from 'lucide-react';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface Role {
   id: string;
@@ -34,13 +35,18 @@ const AVAILABLE_COLORS = [
 const Roles = () => {
   const [roles, setRoles] = useState<Role[]>(mockRoles);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
+
   // Drawer state
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [newRole, setNewRole] = useState({ name: '', department: '' });
+
+  useEscapeKey(() => {
+    setSelectedRole(null);
+    setIsModalOpen(false);
+  });
 
   // Prevent background scrolling when Drawer/Modal is open
   useEffect(() => {
@@ -63,8 +69,8 @@ const Roles = () => {
     const lowerQuery = searchQuery.toLowerCase().trim();
     if (!lowerQuery) return roles;
     return roles.filter(
-      role => 
-        role.name.toLowerCase().includes(lowerQuery) || 
+      role =>
+        role.name.toLowerCase().includes(lowerQuery) ||
         role.department.toLowerCase().includes(lowerQuery)
     );
   }, [roles, searchQuery]);
@@ -90,7 +96,7 @@ const Roles = () => {
 
   return (
     <div className="p-6 md:p-8 relative">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: "easeOut" }}
@@ -104,7 +110,7 @@ const Roles = () => {
               Estruture a hierarquia da sua empresa. Os cargos definidos aqui serão utilizados no cadastro de funcionários.
             </p>
           </div>
-          <motion.button 
+          <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setIsModalOpen(true)}
@@ -119,15 +125,15 @@ const Roles = () => {
         <div className="glass-panel p-2 rounded-2xl border border-border/60 mb-8 flex items-center shadow-sm">
           <div className="flex-1 flex items-center px-4">
             <Search size={20} className="text-primary/70 shrink-0" />
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar cargos por nome ou departamento..." 
+              placeholder="Buscar cargos por nome ou departamento..."
               className="w-full bg-transparent border-none px-4 py-3 text-base text-foreground placeholder:text-muted focus:outline-none focus:ring-0"
             />
             {searchQuery && (
-              <button 
+              <button
                 onClick={() => setSearchQuery('')}
                 className="p-1.5 rounded-full hover:bg-secondary/80 text-muted hover:text-foreground transition-colors shrink-0"
               >
@@ -158,13 +164,13 @@ const Roles = () => {
                 <tbody className="divide-y divide-border/40">
                   <AnimatePresence>
                     {filteredRoles.map((role, index) => (
-                      <motion.tr 
-                        key={role.id} 
+                      <motion.tr
+                        key={role.id}
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2, delay: index * 0.03 }}
-                        onDoubleClick={() => setSelectedRole(role)}
+                        onClick={() => setSelectedRole(role)}
                         className="hover:bg-secondary/40 transition-colors group cursor-pointer"
                       >
                         <td className="px-8 py-6">
@@ -184,7 +190,7 @@ const Roles = () => {
                           </span>
                         </td>
                         <td className="px-8 py-6 text-right">
-                          <button 
+                          <button
                             onClick={() => setSelectedRole(role)}
                             className="inline-flex items-center gap-1 text-sm font-medium text-muted group-hover:text-primary transition-colors hover:bg-secondary px-4 py-2 rounded-xl"
                           >
@@ -200,7 +206,7 @@ const Roles = () => {
             </div>
           ) : (
             /* Empty State */
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="py-24 px-6 text-center flex flex-col items-center justify-center"
@@ -212,7 +218,7 @@ const Roles = () => {
               <p className="text-muted max-w-md text-base">
                 Não encontramos resultados para "{searchQuery}". Tente buscar por outros termos ou crie um novo cargo.
               </p>
-              <button 
+              <button
                 onClick={() => setSearchQuery('')}
                 className="mt-8 text-primary font-medium hover:bg-primary/10 px-6 py-2.5 rounded-full transition-colors"
               >
@@ -224,12 +230,12 @@ const Roles = () => {
       </motion.div>
 
       {/* PORTALS FOR MODAL AND DRAWER */}
-      
+
       {/* 1. Modal: Novo Cargo */}
       {isModalOpen && createPortal(
         <AnimatePresence>
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -237,7 +243,7 @@ const Roles = () => {
               className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
             />
             <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -247,7 +253,7 @@ const Roles = () => {
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
                 <div className="flex items-center justify-between mb-8 mt-2">
                   <h2 className="text-2xl font-heading font-bold text-foreground">Novo Cargo</h2>
-                  <button 
+                  <button
                     onClick={() => setIsModalOpen(false)}
                     className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors"
                   >
@@ -259,12 +265,12 @@ const Roles = () => {
                     <label className="block text-sm font-semibold text-foreground/90 mb-2">
                       Nome do Cargo <span className="text-red-500">*</span>
                     </label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       required
                       autoFocus
                       value={newRole.name}
-                      onChange={(e) => setNewRole({...newRole, name: e.target.value})}
+                      onChange={(e) => setNewRole({ ...newRole, name: e.target.value })}
                       className="w-full bg-background border border-border/80 rounded-xl px-4 py-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm placeholder:text-muted/60"
                       placeholder="Ex: Diretor de Arte"
                     />
@@ -273,24 +279,24 @@ const Roles = () => {
                     <label className="block text-sm font-semibold text-foreground/90 mb-2">
                       Departamento <span className="text-red-500">*</span>
                     </label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       required
                       value={newRole.department}
-                      onChange={(e) => setNewRole({...newRole, department: e.target.value})}
+                      onChange={(e) => setNewRole({ ...newRole, department: e.target.value })}
                       className="w-full bg-background border border-border/80 rounded-xl px-4 py-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm placeholder:text-muted/60"
                       placeholder="Ex: Criação"
                     />
                   </div>
                   <div className="pt-6 flex gap-3">
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => setIsModalOpen(false)}
                       className="flex-1 py-4 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-base"
                     >
                       Cancelar
                     </button>
-                    <motion.button 
+                    <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       type="submit"
@@ -312,7 +318,7 @@ const Roles = () => {
       {selectedRole && createPortal(
         <AnimatePresence>
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -320,7 +326,7 @@ const Roles = () => {
               className="fixed inset-0 z-[100] bg-background/60 backdrop-blur-sm"
             />
             <div className="fixed inset-0 z-[101] flex justify-end pointer-events-none">
-              <motion.div 
+              <motion.div
                 initial={{ x: "100%", opacity: 0.5 }}
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: "100%", opacity: 0.5 }}
@@ -339,7 +345,7 @@ const Roles = () => {
                         {selectedRole.name}
                       </h2>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setSelectedRole(null)}
                       className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
                     >
@@ -351,7 +357,7 @@ const Roles = () => {
                 {/* Drawer Body (Form) */}
                 <div className="p-6 md:p-8 flex-1 overflow-y-auto">
                   <div className="space-y-8">
-                    
+
                     {/* Atribuições */}
                     <div>
                       <label className="block text-sm font-semibold text-foreground/90 mb-3">
@@ -360,10 +366,10 @@ const Roles = () => {
                       <p className="text-sm text-muted mb-3">
                         Defina o que este profissional faz no dia a dia. Isso ajuda no alinhamento de expectativas da equipe.
                       </p>
-                      <textarea 
+                      <textarea
                         rows={5}
                         value={selectedRole.attributions || ''}
-                        onChange={(e) => setSelectedRole({...selectedRole, attributions: e.target.value})}
+                        onChange={(e) => setSelectedRole({ ...selectedRole, attributions: e.target.value })}
                         placeholder="Ex: Responsável por liderar as iniciativas de design da empresa, gerenciar o time de criação..."
                         className="w-full bg-background border border-border/80 rounded-xl p-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm placeholder:text-muted/50 resize-none"
                       />
@@ -382,7 +388,7 @@ const Roles = () => {
                           <button
                             key={color.id}
                             type="button"
-                            onClick={() => setSelectedRole({...selectedRole, color: color.class})}
+                            onClick={() => setSelectedRole({ ...selectedRole, color: color.class })}
                             className={`w-10 h-10 rounded-full transition-transform flex items-center justify-center ${color.class} ${selectedRole.color === color.class ? 'ring-4 ring-primary/30 scale-110 shadow-lg' : 'hover:scale-105 shadow-sm opacity-90'}`}
                           >
                             {selectedRole.color === color.class && <Check size={16} className="text-white" />}
@@ -408,7 +414,7 @@ const Roles = () => {
                       Confirmar Exclusão
                     </motion.button>
                   ) : (
-                    <button 
+                    <button
                       onClick={() => setIsConfirmingDelete(true)}
                       className="px-5 py-3.5 rounded-xl font-medium text-red-500 hover:bg-red-500/10 transition-colors text-sm flex items-center gap-2"
                     >
@@ -416,15 +422,15 @@ const Roles = () => {
                       Excluir Cargo
                     </button>
                   )}
-                  
+
                   <div className="flex gap-3 ml-auto">
-                    <button 
+                    <button
                       onClick={() => setSelectedRole(null)}
                       className="px-5 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
                     >
                       Cancelar
                     </button>
-                    <motion.button 
+                    <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => handleUpdateRole(selectedRole)}

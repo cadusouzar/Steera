@@ -9,6 +9,11 @@ import Roles from './pages/app/Roles';
 import EmployeesList from './pages/app/EmployeesList';
 import EmployeeForm from './pages/app/EmployeeForm';
 import ClientsList from './pages/app/ClientsList';
+import InventoryList from './pages/app/InventoryList';
+import QuotesList from './pages/app/QuotesList';
+import PurchasingList from './pages/app/PurchasingList';
+import TimeTracking from './pages/app/TimeTracking';
+import FinancesSaaS from './pages/app/FinancesSaaS';
 
 function App() {
   return (
@@ -24,7 +29,12 @@ function App() {
             <Route path="cargos" element={<Roles />} />
             <Route path="funcionarios" element={<EmployeesList />} />
             <Route path="funcionarios/novo" element={<EmployeeForm />} />
+            <Route path="ponto" element={<TimeTracking />} />
             <Route path="clientes" element={<ClientsList />} />
+            <Route path="estoque" element={<InventoryList />} />
+            <Route path="compras" element={<PurchasingList />} />
+            <Route path="orcamentos" element={<QuotesList />} />
+            <Route path="financas" element={<FinancesSaaS />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Filter, X, FileText, AlertCircle, Calendar, User, Briefcase, DollarSign, Activity, ChevronRight, Edit2, Save, MapPin, Phone, Mail, Building, CreditCard, ChevronDown } from 'lucide-react';
+import { Plus, Search, Filter, X, FileText, AlertCircle, Calendar, User, Briefcase, DollarSign, Activity, ChevronRight, Edit2, Save, MapPin, Phone, Mail, Building, CreditCard, ChevronDown, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
 import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface Warning {
   id: string;
@@ -41,14 +42,15 @@ export interface Employee {
     daysTaken: number;
     history: { startDate: string; endDate: string }[];
   };
+  salaryRecurrence?: boolean;
 }
 
 const initialEmployees: Employee[] = [
-  { 
-    id: '1', name: 'João Silva', role: 'Desenvolvedor Front-end', salary: 'R$ 7.500', status: 'active', 
+  {
+    id: '1', name: 'João Silva', role: 'Desenvolvedor Front-end', salary: 'R$ 7.500', status: 'active',
     cpf: '111.222.333-44', admissionDate: '2023-01-15', department: 'Tecnologia',
     email: 'joao.silva@exemplo.com', phone: '(11) 99999-9999', address: 'Rua das Flores, 123, São Paulo - SP',
-    contractType: 'clt', paymentDay: '5', bankDetails: 'Banco Itaú, Ag 1234, CC 56789-0',
+    contractType: 'clt', paymentDay: '5', bankDetails: 'Banco Itaú, Ag 1234, CC 56789-0', salaryRecurrence: true,
     warnings: [],
     payments: [
       { id: 'p1', month: 'maio', year: 2026, status: 'paid', amount: 'R$ 7.500' },
@@ -56,11 +58,11 @@ const initialEmployees: Employee[] = [
     ],
     vacation: { daysTaken: 0, history: [] }
   },
-  { 
-    id: '2', name: 'Maria Santos', role: 'Analista de RH', salary: 'R$ 4.200', status: 'active', 
+  {
+    id: '2', name: 'Maria Santos', role: 'Analista de RH', salary: 'R$ 4.200', status: 'active',
     cpf: '222.333.444-55', admissionDate: '2022-05-10', department: 'Recursos Humanos',
     email: 'maria.santos@exemplo.com', phone: '(11) 88888-8888', address: 'Av. Paulista, 1000, São Paulo - SP',
-    contractType: 'clt', paymentDay: '5', bankDetails: 'Banco Bradesco, Ag 4321, CC 98765-4',
+    contractType: 'clt', paymentDay: '5', bankDetails: 'Banco Bradesco, Ag 4321, CC 98765-4', salaryRecurrence: true,
     warnings: [{ id: 'w1', date: '2023-11-20', reason: 'Atraso injustificado' }],
     payments: [
       { id: 'p3', month: 'maio', year: 2026, status: 'paid', amount: 'R$ 4.200' },
@@ -68,11 +70,11 @@ const initialEmployees: Employee[] = [
     ],
     vacation: { daysTaken: 15, history: [{ startDate: '2024-01-10', endDate: '2024-01-25' }] }
   },
-  { 
-    id: '3', name: 'Pedro Almeida', role: 'Gerente de Vendas', salary: 'R$ 9.000', status: 'inactive', 
+  {
+    id: '3', name: 'Pedro Almeida', role: 'Gerente de Vendas', salary: 'R$ 9.000', status: 'inactive',
     cpf: '333.444.555-66', admissionDate: '2021-08-01', department: 'Comercial',
     email: 'pedro.almeida@exemplo.com', phone: '(11) 77777-7777', address: 'Rua Augusta, 500, São Paulo - SP',
-    contractType: 'pj', paymentDay: '15', bankDetails: 'Nubank, Ag 0001, CC 123456-7',
+    contractType: 'pj', paymentDay: '15', bankDetails: 'Nubank, Ag 0001, CC 123456-7', salaryRecurrence: false,
     warnings: [],
     payments: [
       { id: 'p5', month: 'maio', year: 2026, status: 'paid', amount: 'R$ 9.000' }
@@ -84,13 +86,13 @@ const initialEmployees: Employee[] = [
 const EmployeesList = () => {
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Drawer state
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
-  
+
   // Finance Modal state
   const [financeEmployee, setFinanceEmployee] = useState<Employee | null>(null);
-  
+
   // Edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Employee>>({});
@@ -99,6 +101,12 @@ const EmployeesList = () => {
   const [warningModalOpen, setWarningModalOpen] = useState(false);
   const [warningDate, setWarningDate] = useState('');
   const [warningReason, setWarningReason] = useState('');
+
+  useEscapeKey(() => {
+    setSelectedEmployee(null);
+    setFinanceEmployee(null);
+    setWarningModalOpen(false);
+  });
 
   // Prevent background scrolling when Drawer/Modal is open
   useEffect(() => {
@@ -122,9 +130,9 @@ const EmployeesList = () => {
   const filteredEmployees = employees.filter(emp => {
     if (!searchQuery) return true;
     const lowerQuery = searchQuery.toLowerCase().trim();
-    return emp.name.toLowerCase().includes(lowerQuery) || 
-           emp.role.toLowerCase().includes(lowerQuery) || 
-           emp.department.toLowerCase().includes(lowerQuery);
+    return emp.name.toLowerCase().includes(lowerQuery) ||
+      emp.role.toLowerCase().includes(lowerQuery) ||
+      emp.department.toLowerCase().includes(lowerQuery);
   });
 
   const handleEditClick = () => {
@@ -139,15 +147,15 @@ const EmployeesList = () => {
   const handleSaveEdit = () => {
     if (!editForm.name || !editForm.cpf || !editForm.role) return; // basic validation
     const updatedEmployee = editForm as Employee;
-    
+
     setEmployees(employees.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp));
-    setSelectedEmployee(updatedEmployee);
+    setSelectedEmployee(null);
     setIsEditing(false);
   };
 
   const handleMarkAsPaid = (paymentId: string) => {
     if (!financeEmployee) return;
-    
+
     const updatedEmployees = employees.map(emp => {
       if (emp.id === financeEmployee.id) {
         const updatedPayments = emp.payments.map(p => p.id === paymentId ? { ...p, status: 'paid' as const } : p);
@@ -162,18 +170,18 @@ const EmployeesList = () => {
 
   const handleScheduleVacation = (days: number) => {
     if (!financeEmployee) return;
-    
+
     const updatedEmployees = employees.map(emp => {
       if (emp.id === financeEmployee.id) {
-        const updatedEmp = { 
-          ...emp, 
-          vacation: { 
-            daysTaken: emp.vacation.daysTaken + days, 
+        const updatedEmp = {
+          ...emp,
+          vacation: {
+            daysTaken: emp.vacation.daysTaken + days,
             history: [
-              ...emp.vacation.history, 
+              ...emp.vacation.history,
               { startDate: new Date().toISOString(), endDate: new Date(Date.now() + days * 86400000).toISOString() }
-            ] 
-          } 
+            ]
+          }
         };
         setFinanceEmployee(updatedEmp);
         return updatedEmp;
@@ -216,7 +224,7 @@ const EmployeesList = () => {
 
   return (
     <div className="p-6 md:p-8 relative">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: "easeOut" }}
@@ -227,7 +235,7 @@ const EmployeesList = () => {
             <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Gestão de Funcionários</h1>
             <p className="text-muted text-sm mt-1">Gerencie a base de pessoas da sua empresa.</p>
           </div>
-          <Link 
+          <Link
             to="/app/funcionarios/novo"
             className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
           >
@@ -240,15 +248,15 @@ const EmployeesList = () => {
         <div className="glass-panel p-2 rounded-2xl border border-border/60 mb-8 flex flex-col md:flex-row items-center gap-4 shadow-sm">
           <div className="flex-1 flex items-center px-4 w-full">
             <Search size={20} className="text-primary/70 shrink-0" />
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar por nome, cargo ou departamento..." 
+              placeholder="Buscar por nome, cargo ou departamento..."
               className="w-full bg-transparent border-none px-4 py-3 text-base text-foreground placeholder:text-muted focus:outline-none focus:ring-0"
             />
             {searchQuery && (
-              <button 
+              <button
                 onClick={() => setSearchQuery('')}
                 className="p-1.5 rounded-full hover:bg-secondary/80 text-muted hover:text-foreground transition-colors shrink-0"
               >
@@ -273,6 +281,7 @@ const EmployeesList = () => {
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Nome</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Cargo</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Departamento</th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Salário</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Status</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Ações</th>
                   </tr>
@@ -280,8 +289,8 @@ const EmployeesList = () => {
                 <tbody className="divide-y divide-border/40">
                   <AnimatePresence>
                     {filteredEmployees.map((emp, index) => (
-                      <motion.tr 
-                        key={emp.id} 
+                      <motion.tr
+                        key={emp.id}
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
@@ -303,6 +312,20 @@ const EmployeesList = () => {
                         <td className="px-8 py-6 text-muted font-medium">{emp.role}</td>
                         <td className="px-8 py-6 text-muted font-medium">{emp.department}</td>
                         <td className="px-8 py-6">
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-sm font-bold text-foreground">{emp.salary}</span>
+                            {emp.salaryRecurrence !== false ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full w-fit">
+                                <RefreshCw size={10} /> Recorrente
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-muted bg-secondary px-2 py-0.5 rounded-full w-fit border border-border/50">
+                                <X size={10} /> Manual
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-8 py-6">
                           {emp.status === 'active' ? (
                             <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 shadow-sm">
                               <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
@@ -316,7 +339,7 @@ const EmployeesList = () => {
                           )}
                         </td>
                         <td className="px-8 py-6 text-right">
-                          <button 
+                          <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedEmployee(emp);
@@ -353,7 +376,7 @@ const EmployeesList = () => {
       {selectedEmployee && createPortal(
         <AnimatePresence>
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -361,7 +384,7 @@ const EmployeesList = () => {
               className="fixed inset-0 z-[100] bg-background/60 backdrop-blur-sm"
             />
             <div className="fixed inset-0 z-[101] flex justify-end pointer-events-none">
-              <motion.div 
+              <motion.div
                 initial={{ x: "100%", opacity: 0.5 }}
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: "100%", opacity: 0.5 }}
@@ -378,10 +401,10 @@ const EmployeesList = () => {
                       </div>
                       <div className="flex-1 w-full min-w-0">
                         {isEditing ? (
-                          <input 
-                            type="text" 
-                            value={editForm.name || ''} 
-                            onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                          <input
+                            type="text"
+                            value={editForm.name || ''}
+                            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                             className="w-full bg-background border border-border/80 rounded-lg px-3 py-1.5 text-2xl font-heading font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
                             placeholder="Nome Completo"
                           />
@@ -390,13 +413,13 @@ const EmployeesList = () => {
                             {selectedEmployee.name}
                           </h2>
                         )}
-                        
+
                         {isEditing ? (
                           <div className="mt-2">
-                            <input 
-                              type="text" 
-                              value={editForm.role || ''} 
-                              onChange={(e) => setEditForm({...editForm, role: e.target.value})}
+                            <input
+                              type="text"
+                              value={editForm.role || ''}
+                              onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
                               className="w-full bg-background border border-border/80 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
                               placeholder="Cargo"
                             />
@@ -408,10 +431,10 @@ const EmployeesList = () => {
                         )}
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2 shrink-0">
                       {!isEditing && (
-                        <button 
+                        <button
                           onClick={handleEditClick}
                           className="p-2 text-primary hover:text-primary bg-primary/10 hover:bg-primary/20 rounded-full transition-colors flex items-center justify-center"
                           title="Editar Funcionário"
@@ -419,7 +442,7 @@ const EmployeesList = () => {
                           <Edit2 size={18} />
                         </button>
                       )}
-                      <button 
+                      <button
                         onClick={() => setSelectedEmployee(null)}
                         className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
                       >
@@ -432,19 +455,19 @@ const EmployeesList = () => {
                 {/* Drawer Body */}
                 <div className="p-6 md:p-8 flex-1 overflow-y-auto custom-scrollbar">
                   <div className="space-y-8 pb-10">
-                    
+
                     {/* Status Section */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-secondary/20 rounded-2xl border border-border/40 gap-4">
                       <div>
                         <p className="text-xs text-muted uppercase font-bold tracking-wider mb-1">Status Atual</p>
                         <p className="text-sm font-medium text-foreground">Condição do vínculo</p>
                       </div>
-                      
+
                       {isEditing ? (
                         <div className="w-40">
                           <CustomSelect
                             value={editForm.status || 'active'}
-                            onChange={(val) => setEditForm({...editForm, status: val as 'active' | 'inactive'})}
+                            onChange={(val) => setEditForm({ ...editForm, status: val as 'active' | 'inactive' })}
                             options={[
                               { value: 'active', label: 'ATIVO' },
                               { value: 'inactive', label: 'INATIVO' }
@@ -468,7 +491,7 @@ const EmployeesList = () => {
                     {!isEditing ? (
                       <>
                         {/* VIEW MODE */}
-                        
+
                         {/* Infos Card - Dados Pessoais */}
                         <div>
                           <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -533,9 +556,20 @@ const EmployeesList = () => {
                                 {selectedEmployee.paymentDay === 'last' ? 'Último dia útil' : (selectedEmployee.paymentDay ? `Dia ${selectedEmployee.paymentDay}` : 'Não informado')}
                               </p>
                             </div>
-                            <div className="bg-background border border-border/60 rounded-xl p-4 shadow-sm hover:border-primary/30 transition-colors sm:col-span-2">
+                            <div className="bg-background border border-border/60 rounded-xl p-4 shadow-sm hover:border-primary/30 transition-colors">
                               <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Dados Bancários</p>
                               <p className="text-sm font-medium text-foreground">{selectedEmployee.bankDetails || 'Não informado'}</p>
+                            </div>
+                            <div className="bg-background border border-border/60 rounded-xl p-4 shadow-sm hover:border-primary/30 transition-colors flex items-center justify-between">
+                              <div>
+                                <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Recorrência Automática</p>
+                                <p className="text-sm font-medium text-foreground">
+                                  {selectedEmployee.salaryRecurrence !== false ? 'Ativada (Mensal)' : 'Desativada'}
+                                </p>
+                              </div>
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${selectedEmployee.salaryRecurrence !== false ? 'bg-primary/10 text-primary' : 'bg-secondary text-muted'}`}>
+                                <DollarSign size={16} />
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -547,14 +581,14 @@ const EmployeesList = () => {
                               <AlertCircle size={16} className="text-orange-500" />
                               Histórico de Advertências
                             </h4>
-                            <button 
+                            <button
                               onClick={openWarning}
                               className="text-xs font-bold text-red-500 hover:text-red-600 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg transition-colors"
                             >
                               + Adicionar
                             </button>
                           </div>
-                          
+
                           {selectedEmployee.warnings.length > 0 ? (
                             <div className="space-y-3">
                               {selectedEmployee.warnings.map(warning => (
@@ -587,7 +621,7 @@ const EmployeesList = () => {
                       <>
                         {/* EDIT MODE FORM */}
                         <div className="space-y-6">
-                          
+
                           {/* Dados Pessoais */}
                           <div className="bg-secondary/10 p-5 rounded-2xl border border-border/40">
                             <h4 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
@@ -596,19 +630,19 @@ const EmployeesList = () => {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">CPF</label>
-                                <input type="text" value={editForm.cpf || ''} onChange={(e) => setEditForm({...editForm, cpf: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="text" value={editForm.cpf || ''} onChange={(e) => setEditForm({ ...editForm, cpf: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">E-mail Pessoal</label>
-                                <input type="email" value={editForm.email || ''} onChange={(e) => setEditForm({...editForm, email: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="email" value={editForm.email || ''} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Telefone / WhatsApp</label>
-                                <input type="text" value={editForm.phone || ''} onChange={(e) => setEditForm({...editForm, phone: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="text" value={editForm.phone || ''} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                               <div className="sm:col-span-2">
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Endereço Completo</label>
-                                <input type="text" value={editForm.address || ''} onChange={(e) => setEditForm({...editForm, address: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="text" value={editForm.address || ''} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                             </div>
                           </div>
@@ -621,17 +655,17 @@ const EmployeesList = () => {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="sm:col-span-2">
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Departamento</label>
-                                <input type="text" value={editForm.department || ''} onChange={(e) => setEditForm({...editForm, department: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="text" value={editForm.department || ''} onChange={(e) => setEditForm({ ...editForm, department: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Admissão</label>
-                                <input type="date" value={editForm.admissionDate || ''} onChange={(e) => setEditForm({...editForm, admissionDate: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="date" value={editForm.admissionDate || ''} onChange={(e) => setEditForm({ ...editForm, admissionDate: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Tipo de Contrato</label>
                                 <CustomSelect
                                   value={editForm.contractType || ''}
-                                  onChange={(val) => setEditForm({...editForm, contractType: val})}
+                                  onChange={(val) => setEditForm({ ...editForm, contractType: val })}
                                   options={[
                                     { value: 'clt', label: 'CLT' },
                                     { value: 'pj', label: 'PJ' },
@@ -651,13 +685,13 @@ const EmployeesList = () => {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Salário Base</label>
-                                <input type="text" value={editForm.salary || ''} onChange={(e) => setEditForm({...editForm, salary: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" placeholder="R$ 0,00" />
+                                <input type="text" value={editForm.salary || ''} onChange={(e) => setEditForm({ ...editForm, salary: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" placeholder="R$ 0,00" />
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Dia de Pagamento</label>
                                 <CustomSelect
                                   value={editForm.paymentDay || ''}
-                                  onChange={(val) => setEditForm({...editForm, paymentDay: val})}
+                                  onChange={(val) => setEditForm({ ...editForm, paymentDay: val })}
                                   options={[
                                     { value: '5', label: 'Dia 5 útil' },
                                     { value: '15', label: 'Dia 15' },
@@ -667,9 +701,21 @@ const EmployeesList = () => {
                                   className="!py-2.5 !px-3"
                                 />
                               </div>
-                              <div className="sm:col-span-2">
+                              <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Dados Bancários (Opcional)</label>
-                                <input type="text" value={editForm.bankDetails || ''} onChange={(e) => setEditForm({...editForm, bankDetails: e.target.value})} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" placeholder="Banco, Agência, Conta PIX..." />
+                                <input type="text" value={editForm.bankDetails || ''} onChange={(e) => setEditForm({ ...editForm, bankDetails: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" placeholder="Banco, Agência, Conta PIX..." />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-foreground/80 mb-1.5">Recorrência Automática</label>
+                                <CustomSelect
+                                  value={editForm.salaryRecurrence !== false ? 'yes' : 'no'}
+                                  onChange={(val) => setEditForm({ ...editForm, salaryRecurrence: val === 'yes' })}
+                                  options={[
+                                    { value: 'yes', label: 'Sim (Gerar despesa mensal)' },
+                                    { value: 'no', label: 'Não' }
+                                  ]}
+                                  className="!py-2.5 !px-3"
+                                />
                               </div>
                             </div>
                           </div>
@@ -678,23 +724,23 @@ const EmployeesList = () => {
                     )}
                   </div>
                 </div>
-                
+
                 {/* Edit Actions Footer */}
                 <AnimatePresence>
                   {isEditing && (
-                    <motion.div 
+                    <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 20 }}
                       className="p-6 md:p-8 border-t border-border/40 bg-background/80 backdrop-blur-md shrink-0 flex gap-3"
                     >
-                      <button 
+                      <button
                         onClick={handleCancelEdit}
                         className="flex-1 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
                       >
                         Cancelar
                       </button>
-                      <button 
+                      <button
                         onClick={handleSaveEdit}
                         className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                       >
@@ -716,7 +762,7 @@ const EmployeesList = () => {
       {warningModalOpen && selectedEmployee && createPortal(
         <AnimatePresence>
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -724,7 +770,7 @@ const EmployeesList = () => {
               className="fixed inset-0 z-[110] bg-background/80 backdrop-blur-sm"
             />
             <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -737,14 +783,14 @@ const EmployeesList = () => {
                     <AlertCircle size={24} />
                     Nova Advertência
                   </h2>
-                  <button 
+                  <button
                     onClick={() => setWarningModalOpen(false)}
                     className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors"
                   >
                     <X size={20} />
                   </button>
                 </div>
-                
+
                 <form onSubmit={handleAddWarning} className="space-y-6">
                   <div className="bg-secondary/20 border border-border/40 p-4 rounded-2xl flex items-center gap-4">
                     <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">
@@ -760,20 +806,20 @@ const EmployeesList = () => {
                     <label className="block text-sm font-semibold text-foreground/90 mb-2">
                       Data da Ocorrência <span className="text-red-500">*</span>
                     </label>
-                    <input 
-                      type="date" 
+                    <input
+                      type="date"
                       required
                       value={warningDate}
                       onChange={(e) => setWarningDate(e.target.value)}
                       className="w-full bg-background border border-border/80 rounded-xl px-4 py-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-red-500/50 transition-all shadow-sm"
                     />
                   </div>
-                  
+
                   <div>
                     <label className="block text-sm font-semibold text-foreground/90 mb-2">
                       Motivo / Descrição <span className="text-red-500">*</span>
                     </label>
-                    <textarea 
+                    <textarea
                       required
                       value={warningReason}
                       onChange={(e) => setWarningReason(e.target.value)}
@@ -784,14 +830,14 @@ const EmployeesList = () => {
                   </div>
 
                   <div className="pt-6 flex gap-3">
-                    <button 
+                    <button
                       type="button"
                       onClick={() => setWarningModalOpen(false)}
                       className="flex-1 py-4 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-base"
                     >
                       Cancelar
                     </button>
-                    <motion.button 
+                    <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       type="submit"
@@ -811,9 +857,9 @@ const EmployeesList = () => {
 
       {/* 3. Modal: Gestão Financeira e Férias */}
       {financeEmployee && createPortal(
-        <FinanceAndVacationModal 
-          employee={financeEmployee} 
-          onClose={() => setFinanceEmployee(null)} 
+        <FinanceAndVacationModal
+          employee={financeEmployee}
+          onClose={() => setFinanceEmployee(null)}
           onMarkAsPaid={handleMarkAsPaid}
           onScheduleVacation={handleScheduleVacation}
         />,

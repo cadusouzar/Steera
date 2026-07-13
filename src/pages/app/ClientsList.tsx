@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, Filter, X, HeartHandshake, FileText, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import ClientFinanceDrawer from '../../components/ClientFinanceDrawer';
 import ClientReportModal from '../../components/ClientReportModal';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 export interface Receivable {
   id: string;
@@ -87,6 +88,12 @@ const ClientsList = () => {
   // New Client Form Modal State
   const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
   const [newClient, setNewClient] = useState({ name: '', category: '', contact: '', email: '' });
+
+  useEscapeKey(() => {
+    setSelectedClient(null);
+    setIsNewClientModalOpen(false);
+    setIsReportModalOpen(false);
+  });
 
   useEffect(() => {
     if (selectedClient || isNewClientModalOpen || isReportModalOpen) {

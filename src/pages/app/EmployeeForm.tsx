@@ -13,6 +13,7 @@ const EmployeeForm = () => {
   const [roleId, setRoleId] = useState('');
   const [contractType, setContractType] = useState('clt');
   const [paymentDay, setPaymentDay] = useState('5');
+  const [salaryRecurrence, setSalaryRecurrence] = useState(true);
 
   const tabs = [
     { id: 'pessoal', label: 'Dados Pessoais', icon: <User size={16} /> },
@@ -186,6 +187,16 @@ const EmployeeForm = () => {
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Dados Bancários (Opcional)</label>
                     <input type="text" className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Banco, Agência, Conta PIX..." />
+                  </div>
+                  <div className="md:col-span-2 flex items-center justify-between p-5 bg-primary/5 rounded-xl border border-primary/20 mt-2">
+                    <div>
+                      <h4 className="font-semibold text-primary mb-1">Recorrência de Salário</h4>
+                      <p className="text-sm text-muted">Gerar despesa de salário automaticamente todo mês, para não precisar adicionar manualmente.</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input type="checkbox" className="sr-only peer" checked={salaryRecurrence} onChange={(e) => setSalaryRecurrence(e.target.checked)} />
+                      <div className="w-14 h-7 bg-secondary border-border border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary shadow-inner"></div>
+                    </label>
                   </div>
                 </div>
               </motion.div>

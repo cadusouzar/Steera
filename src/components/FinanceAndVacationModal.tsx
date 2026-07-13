@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, ChevronRight } from 'lucide-react';
+import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, ChevronRight, Repeat, Zap } from 'lucide-react';
 
 interface Payment {
   id: string;
@@ -42,13 +42,13 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
     const admission = new Date(employee.admissionDate);
     const today = new Date();
-    
+
     // Meses de trabalho
     const monthsWorked = (today.getFullYear() - admission.getFullYear()) * 12 + (today.getMonth() - admission.getMonth());
     const yearsWorked = monthsWorked / 12;
-    
+
     const totalAcquiredDays = Math.floor(yearsWorked) * 30; // 30 dias a cada ano fechado
-    
+
     // Calcula dias proporcionais do período aquisitivo atual
     const currentPeriodMonths = monthsWorked % 12;
     const proportionalDays = Math.floor((currentPeriodMonths / 12) * 30);
@@ -93,14 +93,14 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
   return (
     <AnimatePresence>
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
         className="fixed inset-0 z-[120] bg-background/80 backdrop-blur-sm flex justify-center items-center p-4 md:p-6"
       >
-        <motion.div 
+        <motion.div
           onClick={(e) => e.stopPropagation()}
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -109,7 +109,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
           className="bg-background border border-border/60 rounded-[2rem] w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl relative overflow-hidden"
         >
           <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-          
+
           {/* Header */}
           <div className="p-6 md:p-8 border-b border-border/40 flex items-start justify-between shrink-0">
             <div className="flex items-center gap-4 mt-2">
@@ -127,7 +127,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                 </div>
               </div>
             </div>
-            <button 
+            <button
               onClick={onClose}
               className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors mt-2"
             >
@@ -139,21 +139,19 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
           <div className="flex border-b border-border/50 px-6 md:px-8 shrink-0">
             <button
               onClick={() => setActiveTab('finance')}
-              className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${
-                activeTab === 'finance' 
-                  ? 'border-primary text-primary' 
+              className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'finance'
+                  ? 'border-primary text-primary'
                   : 'border-transparent text-muted hover:text-foreground'
-              }`}
+                }`}
             >
               <DollarSign size={16} /> Pagamentos
             </button>
             <button
               onClick={() => setActiveTab('vacation')}
-              className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${
-                activeTab === 'vacation' 
-                  ? 'border-primary text-primary' 
+              className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'vacation'
+                  ? 'border-primary text-primary'
                   : 'border-transparent text-muted hover:text-foreground'
-              }`}
+                }`}
             >
               <Umbrella size={16} /> Férias
             </button>
@@ -177,8 +175,40 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                   </div>
                 </div>
 
+                {employee.salaryRecurrence !== false && (
+                  <div>
+                    <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2 mb-4 mt-6">
+                      <Repeat size={18} className="text-accent" /> Pagamento Recorrente
+                    </h3>
+                    <div className="flex flex-col p-4 bg-accent/5 border border-accent/20 rounded-2xl relative overflow-hidden transition-colors hover:border-accent/40">
+                      <div className="absolute top-0 left-0 bottom-0 w-1 bg-accent"></div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <p className="font-bold text-foreground flex items-center gap-2">
+                            Salário Mensal Automático
+                            <span className="px-2 py-0.5 rounded-md text-[10px] uppercase font-bold bg-accent/10 text-accent">Recorrente</span>
+                          </p>
+                          <div className="flex items-center gap-3 mt-1.5">
+                            <span className="text-sm font-bold text-foreground/80">{employee.salary}</span>
+                            <span className="text-xs text-muted flex items-center gap-1"><Calendar size={12} /> Vence todo {employee.paymentDay === 'last' ? 'último dia útil' : `dia ${employee.paymentDay}`}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-end gap-2">
+                          <button
+                            className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-white bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm"
+                          >
+                            <Zap size={14} /> Gerar Fatura do Mês
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <h3 className="text-lg font-heading font-bold text-foreground mb-4 flex items-center gap-2">
+                  <h3 className="text-lg font-heading font-bold text-foreground mb-4 flex items-center gap-2 mt-6">
                     <History size={18} className="text-primary/70" /> Histórico de Pagamentos
                   </h3>
                   <div className="space-y-3">
@@ -200,7 +230,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                               {getPaymentStatusText(payment.status)}
                             </span>
                             {payment.status !== 'paid' && (
-                              <button 
+                              <button
                                 onClick={() => onMarkAsPaid(payment.id)}
                                 className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors"
                               >
@@ -230,7 +260,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                     </div>
                     <h3 className="text-lg font-bold text-foreground mb-2">Férias Indisponíveis</h3>
                     <p className="text-sm text-muted max-w-md mx-auto leading-relaxed">
-                      Este funcionário possui um contrato do tipo <strong className="uppercase text-foreground">{employee.contractType || 'N/A'}</strong>. 
+                      Este funcionário possui um contrato do tipo <strong className="uppercase text-foreground">{employee.contractType || 'N/A'}</strong>.
                       A gestão de férias de 30 dias está disponível apenas para funcionários <strong>CLT</strong>, de acordo com as leis trabalhistas.
                     </p>
                   </div>
@@ -283,7 +313,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                         <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2">
                           <History size={18} className="text-primary/70" /> Histórico de Férias Tiradas
                         </h3>
-                        <button 
+                        <button
                           onClick={() => onScheduleVacation(10)} // Simulated action
                           disabled={!vacationData?.balance || vacationData.balance === 0}
                           className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -291,7 +321,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                           Agendar Férias
                         </button>
                       </div>
-                      
+
                       <div className="space-y-3">
                         {employee.vacation.history.length > 0 ? (
                           employee.vacation.history.map((hist, idx) => (

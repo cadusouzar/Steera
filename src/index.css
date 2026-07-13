@@ -43,3 +43,40 @@
     @apply bg-panel backdrop-blur-lg border border-border shadow-sm dark:shadow-none;
   }
 }
+
+@media print {
+  html, body, #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  
+  /* Fix for AppLayout flex container */
+  .flex.h-screen {
+    height: auto !important;
+    display: block !important;
+  }
+  
+  /* Let modals stretch the page */
+  .fixed.z-\[120\] {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    background: white !important;
+    padding: 0 !important;
+  }
+  
+  /* Remove height limits */
+  .max-h-\[90vh\] {
+    max-height: none !important;
+    height: auto !important;
+    border: none !important;
+    box-shadow: none !important;
+    display: block !important;
+  }
+  
+  /* Make sure all scrollable containers show full content */
+  .overflow-y-auto, .overflow-hidden, .custom-scrollbar {
+    overflow: visible !important;
+    height: auto !important;
+  }
+}
