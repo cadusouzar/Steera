@@ -7,14 +7,18 @@ import { UpdateReceivableDto } from './dto/update-receivable.dto';
 
 export type DerivedReceivableStatus = 'pending' | 'paid' | 'overdue';
 
+// `dueDate` is `@db.Date` in Postgres and Prisma always reads those back as UTC
+// midnight, so every date-only value handled here is normalized to UTC midnight
+// too. Using local midnight would make a receivable due "today" compare as
+// overdue in any timezone west of UTC (e.g. UTC-3).
 export function startOfToday(): Date {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
 }
 
 function parseDateOnly(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day);
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 export function deriveReceivableStatus(
@@ -37,9 +41,10 @@ export class ReceivablesService {
     if (!client) throw new NotFoundException(`Cliente ${clientId} não encontrado`);
   }
 
-  private async assertExists(id: string) {
+  private async assertExists(id: string): Promise<Receivable> {
     const found = await this.prisma.receivable.findUnique({ where: { id } });
     if (!found) throw new NotFoundException(`Lançamento ${id} não encontrado`);
+    return found;
   }
 
   async create(clientId: string, dto: CreateReceivableDto) {
@@ -70,7 +75,7 @@ export class ReceivablesService {
     const [rows, total] = await Promise.all([
       this.prisma.receivable.findMany({
         where,
-        orderBy: { dueDate: 'desc' },
+        orderBy: { dueDate: query.sort === 'dueDate_asc' ? 'asc' : 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -81,8 +86,7 @@ export class ReceivablesService {
   }
 
   async findOne(id: string) {
-    const receivable = await this.prisma.receivable.findUnique({ where: { id } });
-    if (!receivable) throw new NotFoundException(`Lançamento ${id} não encontrado`);
+    const receivable = await this.assertExists(id);
     return toResponse(receivable);
   }
 

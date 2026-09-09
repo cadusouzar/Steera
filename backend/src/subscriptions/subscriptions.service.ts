@@ -47,8 +47,13 @@ export class SubscriptionsService {
   async generateCharge(id: string) {
     const subscription = await this.assertExists(id);
     const now = new Date();
-    const dueDate = new Date(now.getFullYear(), now.getMonth(), subscription.dueDay);
-    const monthLabel = dueDate.toLocaleString('pt-BR', { month: 'long' });
+    // UTC midnight to match how `@db.Date` values are stored/read everywhere else
+    // (see startOfToday/parseDateOnly in receivables.service.ts).
+    const dueDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), subscription.dueDay));
+    // Label comes from the CURRENT month, mirroring the frontend
+    // (src/pages/app/ClientsList.tsx, handleGenerateSubscriptionCharge) — a dueDay
+    // of 29-31 can roll `dueDate` into the next month, which must not change the label.
+    const monthLabel = now.toLocaleString('pt-BR', { month: 'long' });
 
     return this.prisma.receivable.create({
       data: {

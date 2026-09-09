@@ -40,4 +40,27 @@ describe('ReportsService', () => {
       { clientId: 'c2', name: 'Cliente 2', category: null, contact: 'y', overdueAmount: 700 },
     ]);
   });
+
+  it('uses a UTC-midnight boundary for the pending/overdue split', async () => {
+    prisma.receivable.aggregate
+      .mockResolvedValueOnce({ _sum: { amount: 0 } })
+      .mockResolvedValueOnce({ _sum: { amount: 0 } });
+    prisma.receivable.findMany.mockResolvedValue([]);
+    prisma.subscription.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+
+    await service.financialSummary();
+
+    // Prisma reads `dueDate` (@db.Date) back as UTC midnight, so the boundary
+    // compared against it must be UTC midnight too — not local midnight.
+    const pendingBoundary: Date = prisma.receivable.aggregate.mock.calls[1][0].where.dueDate.gte;
+    const overdueBoundary: Date = prisma.receivable.findMany.mock.calls[0][0].where.dueDate.lt;
+
+    for (const boundary of [pendingBoundary, overdueBoundary]) {
+      expect(boundary.getUTCHours()).toBe(0);
+      expect(boundary.getUTCMinutes()).toBe(0);
+      expect(boundary.getUTCSeconds()).toBe(0);
+      expect(boundary.getUTCMilliseconds()).toBe(0);
+    }
+    expect(pendingBoundary.getTime()).toBe(overdueBoundary.getTime());
+  });
 });

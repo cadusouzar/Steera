@@ -22,11 +22,41 @@ describe('deriveReceivableStatus', () => {
     expect(result).toBe('pending');
   });
 
-  it('correctly handles a date exactly at local midnight today (timezone safety)', () => {
-    // A date at local midnight today should be classified as 'pending', not 'overdue'
-    const today = new Date();
-    const localMidnightToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const result = deriveReceivableStatus({ status: ReceivableStatus.PENDING, dueDate: localMidnightToday });
+  it('treats a receivable due today as pending, not overdue (regression: UTC-midnight @db.Date)', () => {
+    // Prisma reads a `@db.Date` column back as UTC midnight, never local midnight.
+    // A PENDING receivable due exactly today must therefore derive to 'pending'
+    // in any local timezone offset (this failed in UTC-3 while startOfToday()
+    // built local midnight).
+    const now = new Date();
+    const utcMidnightToday = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const result = deriveReceivableStatus({
+      status: ReceivableStatus.PENDING,
+      dueDate: utcMidnightToday,
+    });
+    expect(result).toBe('pending');
+  });
+
+  it('treats a receivable due yesterday as overdue (UTC-midnight @db.Date)', () => {
+    const now = new Date();
+    const utcMidnightYesterday = new Date(
+      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+    );
+    const result = deriveReceivableStatus({
+      status: ReceivableStatus.PENDING,
+      dueDate: utcMidnightYesterday,
+    });
+    expect(result).toBe('overdue');
+  });
+
+  it('treats a receivable due tomorrow as pending (UTC-midnight @db.Date)', () => {
+    const now = new Date();
+    const utcMidnightTomorrow = new Date(
+      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+    );
+    const result = deriveReceivableStatus({
+      status: ReceivableStatus.PENDING,
+      dueDate: utcMidnightTomorrow,
+    });
     expect(result).toBe('pending');
   });
 });
@@ -99,37 +129,37 @@ describe('ReceivablesService', () => {
     expect(result.derivedStatus).toBe('pending');
   });
 
-  it('parses date strings as local midnight, not UTC (timezone safety)', async () => {
-    // When creating a receivable with today's date as "YYYY-MM-DD", it should parse
-    // as local midnight (matching startOfToday()), not UTC midnight
+  it('stores a "YYYY-MM-DD" dueDate as UTC midnight, matching how Prisma reads @db.Date back', async () => {
     prisma.client.findUnique.mockResolvedValue({ id: 'client1' });
 
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0]; // e.g., "2026-09-09"
-    const expectedLocalMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    // Build the string from the same calendar-day components startOfToday() uses.
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const expectedUtcMidnight = new Date(
+      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()),
+    );
 
-    prisma.receivable.create.mockResolvedValue({
+    prisma.receivable.create.mockImplementation(({ data }: any) => ({
       id: '1',
+      clientId: 'client1',
+      description: data.description,
+      amount: data.amount,
+      dueDate: data.dueDate,
+      status: ReceivableStatus.PENDING,
+      paidAt: null,
+    }));
+
+    const created = await service.create('client1', {
       description: 'today receivable',
       amount: 100,
-      dueDate: expectedLocalMidnight,
-      status: ReceivableStatus.PENDING,
-      clientId: 'client1',
-      paidAt: null,
+      dueDate: todayStr,
     });
 
-    await service.create('client1', { description: 'today receivable', amount: 100, dueDate: todayStr });
-
-    // Verify that create was called with a date at local midnight (not UTC midnight)
-    expect(prisma.receivable.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        dueDate: expect.any(Date),
-      }),
-    });
-    const callArgs = prisma.receivable.create.mock.calls[0][0];
-    const passedDate = callArgs.data.dueDate as Date;
-    expect(passedDate.getHours()).toBe(0);
-    expect(passedDate.getMinutes()).toBe(0);
-    expect(passedDate.getSeconds()).toBe(0);
+    const passedDate = prisma.receivable.create.mock.calls[0][0].data.dueDate as Date;
+    expect(passedDate.toISOString()).toBe(expectedUtcMidnight.toISOString());
+    expect(passedDate.getUTCHours()).toBe(0);
+    // Regression: a receivable created for *today* must never come back as overdue.
+    expect(created.derivedStatus).toBe('pending');
   });
 });

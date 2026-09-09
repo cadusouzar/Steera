@@ -61,4 +61,35 @@ describe('SubscriptionsService', () => {
       }),
     });
   });
+
+  describe('generateCharge date handling', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('builds dueDate at UTC midnight and labels the charge with the CURRENT month, even when dueDay rolls over', async () => {
+      // 2026-04-15, April has 30 days, so dueDay 31 rolls the due date into May.
+      jest.useFakeTimers().setSystemTime(new Date('2026-04-15T12:00:00Z'));
+
+      prisma.subscription.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        clientId: 'client-1',
+        description: 'Mensalidade Escolar',
+        amount: 850,
+        dueDay: 31,
+        status: SubscriptionStatus.ACTIVE,
+      });
+      prisma.receivable.create.mockResolvedValue({ id: 'rec-1' });
+
+      await service.generateCharge('sub-1');
+
+      const data = prisma.receivable.create.mock.calls[0][0].data;
+      const dueDate: Date = data.dueDate;
+
+      // Rollover itself is intentional parity with the frontend: April 31 -> May 1.
+      expect(dueDate.toISOString()).toBe('2026-05-01T00:00:00.000Z');
+      // ...but the label must still say April, matching the frontend's use of `now`.
+      expect(data.description).toBe('Mensalidade Escolar (abril)');
+    });
+  });
 });
