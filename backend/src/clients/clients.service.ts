@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ReceivableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { startOfToday } from '../receivables/receivables.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { QueryClientsDto } from './dto/query-clients.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -42,14 +44,41 @@ export class ClientsService {
     return { items, total, page, pageSize };
   }
 
-  async findOne(id: string) {
+  private async assertExists(id: string) {
     const client = await this.prisma.client.findUnique({ where: { id } });
     if (!client) throw new NotFoundException(`Cliente ${id} não encontrado`);
     return client;
   }
 
+  async findOne(id: string) {
+    const client = await this.assertExists(id);
+    const today = startOfToday();
+
+    const [paidAgg, pendingAgg, overdueAgg] = await Promise.all([
+      this.prisma.receivable.aggregate({
+        _sum: { amount: true },
+        where: { clientId: id, status: ReceivableStatus.PAID },
+      }),
+      this.prisma.receivable.aggregate({
+        _sum: { amount: true },
+        where: { clientId: id, status: ReceivableStatus.PENDING, dueDate: { gte: today } },
+      }),
+      this.prisma.receivable.aggregate({
+        _sum: { amount: true },
+        where: { clientId: id, status: ReceivableStatus.PENDING, dueDate: { lt: today } },
+      }),
+    ]);
+
+    return {
+      ...client,
+      totalPaid: Number(paidAgg._sum.amount ?? 0),
+      totalPending: Number(pendingAgg._sum.amount ?? 0),
+      totalOverdue: Number(overdueAgg._sum.amount ?? 0),
+    };
+  }
+
   async update(id: string, dto: UpdateClientDto) {
-    await this.findOne(id);
+    await this.assertExists(id);
     return this.prisma.client.update({ where: { id }, data: dto });
   }
 }
