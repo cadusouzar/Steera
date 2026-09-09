@@ -12,6 +12,11 @@ export function startOfToday(): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
+function parseDateOnly(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 export function deriveReceivableStatus(
   receivable: Pick<Receivable, 'status' | 'dueDate'>,
 ): DerivedReceivableStatus {
@@ -40,7 +45,7 @@ export class ReceivablesService {
   async create(clientId: string, dto: CreateReceivableDto) {
     await this.ensureClientExists(clientId);
     const created = await this.prisma.receivable.create({
-      data: { ...dto, dueDate: new Date(dto.dueDate), clientId },
+      data: { ...dto, dueDate: parseDateOnly(dto.dueDate), clientId },
     });
     return toResponse(created);
   }
@@ -84,7 +89,7 @@ export class ReceivablesService {
   async update(id: string, dto: UpdateReceivableDto) {
     await this.assertExists(id);
     const data: Record<string, unknown> = { ...dto };
-    if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
+    if (dto.dueDate) data.dueDate = parseDateOnly(dto.dueDate);
     const updated = await this.prisma.receivable.update({ where: { id }, data });
     return toResponse(updated);
   }
