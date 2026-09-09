@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ReceivableStatus {
+  PENDING
+  PAID
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Client {
+  id            String         @id @default(cuid())
+  name          String
+  category      String?
+  contact       String
+  email         String?
+  status        ClientStatus   @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  receivables   Receivable[]
+  subscriptions Subscription[]
+
+  @@index([status])
+}
+
+model Receivable {
+  id          String           @id @default(cuid())
+  clientId    String
+  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  description String
+  amount      Decimal          @db.Decimal(10, 2)
+  dueDate     DateTime         @db.Date
+  status      ReceivableStatus @default(PENDING)
+  paidAt      DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([clientId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model Subscription {
+  id          String             @id @default(cuid())
+  clientId    String
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  description String
+  amount      Decimal            @db.Decimal(10, 2)
+  dueDay      Int
+  status      SubscriptionStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([clientId])
+}
