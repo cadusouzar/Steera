@@ -185,4 +185,53 @@ describe('QuickFlow backend (e2e)', () => {
       await prisma.client.delete({ where: { id: clientRes.body.id } });
     }
   });
+
+  it('client trash: deactivating with includeInRevenueReport=false enters the trash, can be restored, and purges for real after 30 days — while includeInRevenueReport=true never gets purged', async () => {
+    const server = app.getHttpServer();
+
+    const trashed = (
+      await request(server).post('/clients').send({ name: 'Cliente E2E Lixeira', contact: '(11) 94444-4444' }).expect(201)
+    ).body;
+    const kept = (
+      await request(server).post('/clients').send({ name: 'Cliente E2E Mantido', contact: '(11) 95555-5555' }).expect(201)
+    ).body;
+
+    try {
+      await request(server).patch(`/clients/${trashed.id}/deactivate`).send({ includeInRevenueReport: false }).expect(200);
+      await request(server).patch(`/clients/${kept.id}/deactivate`).send({ includeInRevenueReport: true }).expect(200);
+
+      // Rule: only the "not kept in reports" client shows up in the trash.
+      const trashListing = await request(server).get('/clients/trash').expect(200);
+      const trashIds = trashListing.body.map((c: { id: string }) => c.id);
+      expect(trashIds).toContain(trashed.id);
+      expect(trashIds).not.toContain(kept.id);
+
+      // Rule: restoring reactivates and removes it from the trash.
+      await request(server).patch(`/clients/${trashed.id}/restore`).expect(200);
+      const afterRestore = await request(server).get('/clients/trash').expect(200);
+      expect(afterRestore.body.map((c: { id: string }) => c.id)).not.toContain(trashed.id);
+      const activeListing = await request(server).get('/clients?status=ACTIVE&pageSize=100').expect(200);
+      expect(activeListing.body.items.map((c: { id: string }) => c.id)).toContain(trashed.id);
+
+      // Restoring an already-active client is rejected.
+      await request(server).patch(`/clients/${trashed.id}/restore`).expect(409);
+
+      // Put it back in the trash, then simulate 31 days having passed.
+      await request(server).patch(`/clients/${trashed.id}/deactivate`).send({ includeInRevenueReport: false }).expect(200);
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 31);
+      await prisma.client.update({ where: { id: trashed.id }, data: { deactivatedAt: cutoff } });
+      await prisma.client.update({ where: { id: kept.id }, data: { deactivatedAt: cutoff } });
+
+      // Opening the trash triggers the defensive purge: `trashed` (flag=false,
+      // past the cutoff) is really gone; `kept` (flag=true) survives untouched
+      // even though its deactivatedAt is just as old.
+      await request(server).get('/clients/trash').expect(200);
+      await request(server).get(`/clients/${trashed.id}`).expect(404);
+      await request(server).get(`/clients/${kept.id}`).expect(200);
+    } finally {
+      await prisma.receivable.deleteMany({ where: { clientId: { in: [trashed.id, kept.id] } } });
+      await prisma.client.deleteMany({ where: { id: { in: [trashed.id, kept.id] } } });
+    }
+  });
 });
