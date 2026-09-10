@@ -78,6 +78,17 @@ npm run test:e2e          # teste de integração (precisa de PostgreSQL local r
 (nunca persistido). Ver `[[ARQUITETURA]]`, `[[BANCO-DE-DADOS]]`, `[[API]]`, `[[AMBIENTE-LOCAL]]` e
 `[[DECISOES-TECNICAS]]` no vault (`B:\Quickflow\Quickflow`) para detalhes.
 
+**Exclusão de cliente é sempre lógica, nunca física:** `PATCH /clients/:id/deactivate` marca o
+cliente como `INACTIVE` (some da listagem padrão) mas nunca apaga o registro nem seus lançamentos.
+O flag `Client.includeInRevenueReport` (independente de `status`) decide se os lançamentos desse
+cliente continuam somando no relatório financeiro (`GET /reports/financial-summary`) — é obrigatório
+no body da desativação. Detalhes completos em `[[DECISOES-TECNICAS]]`, `[[BANCO-DE-DADOS]]` e
+`[[API]]` no vault.
+
+**Lixeira de clientes:** clientes desativados com `includeInRevenueReport=false` entram numa
+lixeira e são purgados fisicamente após 30 dias (`PATCH /clients/:id/restore`,
+`GET /clients/trash`); detalhes completos em `[[DECISOES-TECNICAS]]` no vault.
+
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
 integralmente suas instruções. Skills não relacionadas à tarefa não devem ser utilizadas.
