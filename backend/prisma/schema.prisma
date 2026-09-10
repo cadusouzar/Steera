@@ -29,18 +29,33 @@ model Client {
   contact       String
   email         String?
   status        ClientStatus   @default(ACTIVE)
+  // Independent of `status`: whether this client's receivables/subscriptions
+  // count toward the company-wide financial report (GET /reports/financial-summary).
+  // Set explicitly when deactivating a client (PATCH /clients/:id/deactivate) —
+  // never inferred from `status`. An inactive client can still have this true
+  // (kept in reports) and, in principle, an active client could have it false.
+  includeInRevenueReport Boolean @default(true)
+  // Null while status=ACTIVE. Set to now() by /deactivate, cleared by /restore.
+  // Only clients with includeInRevenueReport=false are ever purged based on
+  // this timestamp (see ClientsService.purgeExpiredTrash) — clients kept in
+  // the report (includeInRevenueReport=true) stay inactive forever, never purged.
+  deactivatedAt DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   receivables   Receivable[]
   subscriptions Subscription[]
 
   @@index([status])
+  @@index([deactivatedAt])
 }
 
 model Receivable {
   id          String           @id @default(cuid())
   clientId    String
-  // Cascade is currently unreachable via the API (Client is never hard-deleted, only inactivated) — reconsider if a hard-delete-client endpoint is ever added.
+  // Cascade is reachable via ClientsService.purgeExpiredTrash (the client
+  // trash — 30-day auto-purge for clients deactivated with
+  // includeInRevenueReport=false) — deleting a Client there deletes its
+  // receivables/subscriptions too.
   client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   // Null for manually-created receivables. Set only for charges generated via
   // Subscription.generateCharge — SetNull (not Cascade) so deleting a subscription
@@ -72,7 +87,10 @@ model Receivable {
 model Subscription {
   id          String             @id @default(cuid())
   clientId    String
-  // Cascade is currently unreachable via the API (Client is never hard-deleted, only inactivated) — reconsider if a hard-delete-client endpoint is ever added.
+  // Cascade is reachable via ClientsService.purgeExpiredTrash (the client
+  // trash — 30-day auto-purge for clients deactivated with
+  // includeInRevenueReport=false) — deleting a Client there deletes its
+  // receivables/subscriptions too.
   client      Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
   description String
   amount      Decimal            @db.Decimal(10, 2)
