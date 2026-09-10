@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Receivable, ReceivableStatus } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ClientStatus, Receivable, ReceivableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
 import { QueryReceivablesDto } from './dto/query-receivables.dto';
@@ -39,6 +39,7 @@ export class ReceivablesService {
   private async ensureClientExists(clientId: string) {
     const client = await this.prisma.client.findUnique({ where: { id: clientId } });
     if (!client) throw new NotFoundException(`Cliente ${clientId} não encontrado`);
+    return client;
   }
 
   private async assertExists(id: string): Promise<Receivable> {
@@ -48,7 +49,10 @@ export class ReceivablesService {
   }
 
   async create(clientId: string, dto: CreateReceivableDto) {
-    await this.ensureClientExists(clientId);
+    const client = await this.ensureClientExists(clientId);
+    if (client.status === ClientStatus.INACTIVE) {
+      throw new BadRequestException(`Não é possível criar lançamentos para o cliente ${clientId}: cliente inativo`);
+    }
     const created = await this.prisma.receivable.create({
       data: { ...dto, dueDate: parseDateOnly(dto.dueDate), clientId },
     });

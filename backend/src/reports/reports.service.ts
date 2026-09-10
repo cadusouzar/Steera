@@ -17,18 +17,21 @@ export class ReportsService {
 
   async financialSummary(topDefaulters = 5) {
     const today = startOfToday();
+    // Independent of Client.status on purpose (a deactivated client can still
+    // be counted here) — see includeInRevenueReport on the Client model.
+    const revenueClientFilter = { client: { includeInRevenueReport: true } };
 
     const [paidAgg, pendingAgg, overdueRows, recurringAgg] = await Promise.all([
       this.prisma.receivable.aggregate({
         _sum: { amount: true },
-        where: { status: ReceivableStatus.PAID },
+        where: { status: ReceivableStatus.PAID, ...revenueClientFilter },
       }),
       this.prisma.receivable.aggregate({
         _sum: { amount: true },
-        where: { status: ReceivableStatus.PENDING, dueDate: { gte: today } },
+        where: { status: ReceivableStatus.PENDING, dueDate: { gte: today }, ...revenueClientFilter },
       }),
       this.prisma.receivable.findMany({
-        where: { status: ReceivableStatus.PENDING, dueDate: { lt: today } },
+        where: { status: ReceivableStatus.PENDING, dueDate: { lt: today }, ...revenueClientFilter },
         select: {
           amount: true,
           client: { select: { id: true, name: true, category: true, contact: true } },
@@ -36,7 +39,7 @@ export class ReportsService {
       }),
       this.prisma.subscription.aggregate({
         _sum: { amount: true },
-        where: { status: SubscriptionStatus.ACTIVE },
+        where: { status: SubscriptionStatus.ACTIVE, ...revenueClientFilter },
       }),
     ]);
 

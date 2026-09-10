@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ReceivableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -90,6 +90,14 @@ describe('ReceivablesService', () => {
     await expect(
       service.create('missing', { description: 'x', amount: 10, dueDate: '2026-01-01' }),
     ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.receivable.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects creating a receivable for an inactive client', async () => {
+    prisma.client.findUnique.mockResolvedValue({ id: 'client1', status: 'INACTIVE' });
+    await expect(
+      service.create('client1', { description: 'x', amount: 10, dueDate: '2026-01-01' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.receivable.create).not.toHaveBeenCalled();
   });
 

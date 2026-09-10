@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -63,6 +63,21 @@ describe('SubscriptionsService', () => {
         description: expect.stringContaining('Mensalidade Escolar'),
       }),
     });
+  });
+
+  it('rejects generating a charge when the subscription\'s client is inactive', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({
+      id: 'sub-1',
+      clientId: 'client-1',
+      description: 'Mensalidade Escolar',
+      amount: 850,
+      dueDay: 5,
+      status: SubscriptionStatus.ACTIVE,
+    });
+    prisma.client.findUnique.mockResolvedValue({ id: 'client-1', status: 'INACTIVE' });
+
+    await expect(service.generateCharge('sub-1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.receivable.create).not.toHaveBeenCalled();
   });
 
   it('rejects generating a second charge for the same subscription in the same month', async () => {

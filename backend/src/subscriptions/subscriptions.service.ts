@@ -1,5 +1,5 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ReceivableStatus, Subscription } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ClientStatus, Prisma, ReceivableStatus, Subscription } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
@@ -46,6 +46,10 @@ export class SubscriptionsService {
 
   async generateCharge(id: string) {
     const subscription = await this.assertExists(id);
+    const client = await this.prisma.client.findUnique({ where: { id: subscription.clientId } });
+    if (client?.status === ClientStatus.INACTIVE) {
+      throw new BadRequestException(`Não é possível gerar fatura para o cliente ${subscription.clientId}: cliente inativo`);
+    }
     const now = new Date();
     // UTC midnight to match how `@db.Date` values are stored/read everywhere else
     // (see startOfToday/parseDateOnly in receivables.service.ts).

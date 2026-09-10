@@ -216,6 +216,19 @@ describe('QuickFlow backend (e2e)', () => {
       // Restoring an already-active client is rejected.
       await request(server).patch(`/clients/${trashed.id}/restore`).expect(409);
 
+      // Give `trashed` a receivable and a subscription while it's still active,
+      // so the purge below has real child rows to cascade-delete — otherwise
+      // this test would only prove the Client row disappears, never that the
+      // FK cascade (onDelete: Cascade on Receivable/Subscription) actually works.
+      await request(server)
+        .post(`/clients/${trashed.id}/receivables`)
+        .send({ description: 'Lançamento antes do purge', amount: 50, dueDate: '2026-01-01' })
+        .expect(201);
+      await request(server)
+        .post(`/clients/${trashed.id}/subscriptions`)
+        .send({ description: 'Assinatura antes do purge', amount: 30, dueDay: 10 })
+        .expect(201);
+
       // Put it back in the trash, then simulate 31 days having passed.
       await request(server).patch(`/clients/${trashed.id}/deactivate`).send({ includeInRevenueReport: false }).expect(200);
       const cutoff = new Date();
@@ -229,6 +242,13 @@ describe('QuickFlow backend (e2e)', () => {
       await request(server).get('/clients/trash').expect(200);
       await request(server).get(`/clients/${trashed.id}`).expect(404);
       await request(server).get(`/clients/${kept.id}`).expect(200);
+
+      // Rule: the purge really cascades — trashed's receivable and subscription
+      // are gone too, not just the Client row.
+      const remainingReceivables = await prisma.receivable.findMany({ where: { clientId: trashed.id } });
+      expect(remainingReceivables).toEqual([]);
+      const remainingSubscriptions = await prisma.subscription.findMany({ where: { clientId: trashed.id } });
+      expect(remainingSubscriptions).toEqual([]);
     } finally {
       await prisma.receivable.deleteMany({ where: { clientId: { in: [trashed.id, kept.id] } } });
       await prisma.client.deleteMany({ where: { id: { in: [trashed.id, kept.id] } } });

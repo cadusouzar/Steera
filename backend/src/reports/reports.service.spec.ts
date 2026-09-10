@@ -41,6 +41,25 @@ describe('ReportsService', () => {
     ]);
   });
 
+  it('only counts clients with includeInRevenueReport = true, in every one of the four aggregates', async () => {
+    prisma.receivable.aggregate
+      .mockResolvedValueOnce({ _sum: { amount: 500 } }) // paid
+      .mockResolvedValueOnce({ _sum: { amount: 100 } }); // pending
+    prisma.receivable.findMany.mockResolvedValue([]);
+    prisma.subscription.aggregate.mockResolvedValue({ _sum: { amount: 50 } });
+
+    await service.financialSummary();
+
+    const [paidCall, pendingCall] = prisma.receivable.aggregate.mock.calls;
+    // Deliberately NOT filtered by client.status — an inactive client with the
+    // flag on must still count (rule: don't confuse active/inactive with the
+    // revenue-report flag).
+    expect(paidCall[0].where.client).toEqual({ includeInRevenueReport: true });
+    expect(pendingCall[0].where.client).toEqual({ includeInRevenueReport: true });
+    expect(prisma.receivable.findMany.mock.calls[0][0].where.client).toEqual({ includeInRevenueReport: true });
+    expect(prisma.subscription.aggregate.mock.calls[0][0].where.client).toEqual({ includeInRevenueReport: true });
+  });
+
   it('uses a UTC-midnight boundary for the pending/overdue split', async () => {
     prisma.receivable.aggregate
       .mockResolvedValueOnce({ _sum: { amount: 0 } })
