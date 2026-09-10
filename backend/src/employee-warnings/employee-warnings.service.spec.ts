@@ -49,4 +49,13 @@ describe('EmployeeWarningsService', () => {
       orderBy: { occurredAt: 'desc' },
     });
   });
+
+  it('rejects fetching a warning that belongs to a different employee, even in the same company', async () => {
+    employeesService.assertExists.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+    prisma.employeeWarning.findFirst.mockResolvedValue(null);
+    await expect(service.findOne('warning-1', 'employee-2')).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.employeeWarning.findFirst).toHaveBeenCalledWith({
+      where: { id: 'warning-1', companyId: 'company-1', employeeId: 'employee-2' },
+    });
+  });
 });

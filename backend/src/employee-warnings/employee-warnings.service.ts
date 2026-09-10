@@ -29,20 +29,20 @@ export class EmployeeWarningsService {
     return this.prisma.employeeWarning.findMany({ where: { employeeId }, orderBy: { occurredAt: 'desc' } });
   }
 
-  private async assertExists(id: string, companyId: string) {
-    const warning = await this.prisma.employeeWarning.findFirst({ where: { id, companyId } });
+  private async assertExists(id: string, companyId: string, employeeId: string) {
+    const warning = await this.prisma.employeeWarning.findFirst({ where: { id, companyId, employeeId } });
     if (!warning) throw new NotFoundException(`Advertência ${id} não encontrada`);
     return warning;
   }
 
   async findOne(id: string, employeeId: string) {
     const employee = await this.employeesService.assertExists(employeeId);
-    return this.assertExists(id, employee.companyId);
+    return this.assertExists(id, employee.companyId, employeeId);
   }
 
   async update(id: string, employeeId: string, dto: UpdateEmployeeWarningDto) {
     const employee = await this.employeesService.assertExists(employeeId);
-    await this.assertExists(id, employee.companyId);
+    await this.assertExists(id, employee.companyId, employeeId);
     return this.prisma.employeeWarning.update({
       where: { id },
       data: { ...dto, ...(dto.occurredAt ? { occurredAt: parseDateOnly(dto.occurredAt) } : {}) },
