@@ -1,4 +1,5 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { ClientStatus, ReceivableStatus, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { startOfToday } from '../receivables/receivables.service';
@@ -9,7 +10,23 @@ import { UpdateClientDto } from './dto/update-client.dto';
 
 @Injectable()
 export class ClientsService {
+  private readonly logger = new Logger(ClientsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  // Daily safety net for the 30-day trash purge — findTrash() already
+  // purges defensively on every read, so this only matters when nobody
+  // opens the Lixeira for a while. Errors are logged, never thrown: a
+  // failed purge attempt must not crash the whole backend process.
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async purgeExpiredTrashCron() {
+    try {
+      const count = await this.purgeExpiredTrash();
+      if (count > 0) this.logger.log(`Purged ${count} client(s) from the trash`);
+    } catch (err) {
+      this.logger.error('Failed to purge expired client trash', err instanceof Error ? err.stack : String(err));
+    }
+  }
 
   create(dto: CreateClientDto) {
     return this.prisma.client.create({ data: dto });
