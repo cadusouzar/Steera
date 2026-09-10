@@ -228,4 +228,21 @@ describe('ClientsService', () => {
       expect(Math.abs(cutoff.getTime() - expectedCutoff)).toBeLessThan(5000);
     });
   });
+
+  describe('findTrash', () => {
+    it('purges expired entries first, then returns only INACTIVE clients with includeInRevenueReport=false, oldest deactivation first', async () => {
+      prisma.client.deleteMany.mockResolvedValue({ count: 0 });
+      const trashed = [{ id: '1', status: 'INACTIVE', includeInRevenueReport: false, deactivatedAt: new Date('2026-09-01') }];
+      prisma.client.findMany.mockResolvedValue(trashed);
+
+      const result = await service.findTrash();
+
+      expect(prisma.client.deleteMany).toHaveBeenCalledTimes(1);
+      expect(prisma.client.findMany).toHaveBeenCalledWith({
+        where: { status: 'INACTIVE', includeInRevenueReport: false },
+        orderBy: { deactivatedAt: 'asc' },
+      });
+      expect(result).toEqual(trashed);
+    });
+  });
 });

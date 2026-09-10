@@ -149,4 +149,17 @@ export class ClientsService {
     });
     return result.count;
   }
+
+  // The "Lixeira" view — only ever shows the group that's actually subject
+  // to the 30-day auto-purge (includeInRevenueReport=false). Runs a
+  // defensive purge first so the list — and the purge itself — stays
+  // correct even if the daily cron missed a run (this is a local app, not
+  // always running).
+  async findTrash() {
+    await this.purgeExpiredTrash();
+    return this.prisma.client.findMany({
+      where: { status: ClientStatus.INACTIVE, includeInRevenueReport: false },
+      orderBy: { deactivatedAt: 'asc' },
+    });
+  }
 }

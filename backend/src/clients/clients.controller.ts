@@ -19,6 +19,11 @@ export class ClientsController {
     return this.clientsService.findAll(query);
   }
 
+  @Get('trash')
+  findTrash() {
+    return this.clientsService.findTrash();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.clientsService.findOne(id);
