@@ -1,5 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EmployeeRecurringPayment, Prisma } from '@prisma/client';
+import { startOfToday } from '../common/date.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { EmployeesService } from '../employees/employees.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +9,8 @@ import { UpdateEmployeeRecurringPaymentDto } from './dto/update-employee-recurri
 
 @Injectable()
 export class EmployeeRecurringPaymentsService {
+  private readonly logger = new Logger(EmployeeRecurringPaymentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly employeesService: EmployeesService,
@@ -93,5 +96,37 @@ export class EmployeeRecurringPaymentsService {
       }
       throw err;
     }
+  }
+
+  async generateDueCharges(): Promise<{ checked: number; generated: number }> {
+    const today = startOfToday();
+    const currentDay = today.getUTCDate();
+    const referenceYear = today.getUTCFullYear();
+    const referenceMonth = today.getUTCMonth() + 1;
+
+    const dueRecurringPayments = await this.prisma.employeeRecurringPayment.findMany({
+      where: {
+        status: 'ACTIVE',
+        dueDay: { lte: currentDay },
+        employee: { status: { not: 'INACTIVE' } },
+        payments: { none: { referenceYear, referenceMonth } },
+      },
+    });
+
+    let generated = 0;
+    for (const recurring of dueRecurringPayments) {
+      try {
+        await this.generateCharge(recurring.id);
+        generated++;
+      } catch (err) {
+        if (!(err instanceof ConflictException)) {
+          this.logger.error(
+            `Falha ao gerar pagamento da recorrência ${recurring.id}`,
+            err instanceof Error ? err.stack : String(err),
+          );
+        }
+      }
+    }
+    return { checked: dueRecurringPayments.length, generated };
   }
 }

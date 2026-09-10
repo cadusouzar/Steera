@@ -98,4 +98,82 @@ describe('EmployeeRecurringPaymentsService', () => {
       where: { id: 'rec-other-company', companyId: 'company-1' },
     });
   });
+
+  describe('generateDueCharges', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('queries only ACTIVE recurring payments whose dueDay has arrived, whose employee is not inactive, and that have no payment for the current reference month', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-15T12:00:00Z'));
+      prisma.employeeRecurringPayment.findMany.mockResolvedValue([]);
+
+      await service.generateDueCharges();
+
+      expect(prisma.employeeRecurringPayment.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'ACTIVE',
+          dueDay: { lte: 15 },
+          employee: { status: { not: 'INACTIVE' } },
+          payments: { none: { referenceYear: 2026, referenceMonth: 6 } },
+        },
+      });
+    });
+
+    it('calls generateCharge for each recurring payment returned and counts how many succeeded', async () => {
+      prisma.employeeRecurringPayment.findMany.mockResolvedValue([
+        { id: 'rec-1', companyId: 'company-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      prisma.employeeRecurringPayment.findFirst.mockResolvedValue({
+        id: 'rec-1', companyId: 'company-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE',
+      });
+      employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' });
+      prisma.employeePayment.create.mockResolvedValue({ id: 'payment-1' });
+
+      const result = await service.generateDueCharges();
+
+      expect(prisma.employeePayment.create).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ checked: 1, generated: 1 });
+    });
+
+    it('ignores a ConflictException from one recurring payment and still processes the rest', async () => {
+      prisma.employeeRecurringPayment.findMany.mockResolvedValue([
+        { id: 'rec-1', companyId: 'company-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE' },
+        { id: 'rec-2', companyId: 'company-1', employeeId: 'employee-2', description: 'Salário', amount: 6000, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      prisma.employeeRecurringPayment.findFirst
+        .mockResolvedValueOnce({ id: 'rec-1', companyId: 'company-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE' })
+        .mockResolvedValueOnce({ id: 'rec-2', companyId: 'company-1', employeeId: 'employee-2', description: 'Salário', amount: 6000, dueDay: 5, status: 'ACTIVE' });
+      employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' });
+      prisma.employeePayment.create
+        .mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+            code: 'P2002', clientVersion: '5.22.0', meta: { target: ['recurringPaymentId', 'referenceYear', 'referenceMonth'] },
+          }),
+        )
+        .mockResolvedValueOnce({ id: 'payment-2' });
+
+      const result = await service.generateDueCharges();
+
+      expect(result).toEqual({ checked: 2, generated: 1 });
+    });
+
+    it('logs but does not throw when a non-conflict error occurs, and still processes the remaining recurring payments', async () => {
+      prisma.employeeRecurringPayment.findMany.mockResolvedValue([
+        { id: 'rec-1', companyId: 'company-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE' },
+        { id: 'rec-2', companyId: 'company-1', employeeId: 'employee-2', description: 'Salário', amount: 6000, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      prisma.employeeRecurringPayment.findFirst
+        .mockResolvedValueOnce({ id: 'rec-1', companyId: 'company-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE' })
+        .mockResolvedValueOnce({ id: 'rec-2', companyId: 'company-1', employeeId: 'employee-2', description: 'Salário', amount: 6000, dueDay: 5, status: 'ACTIVE' });
+      employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' });
+      prisma.employeePayment.create
+        .mockRejectedValueOnce(new Error('connection lost'))
+        .mockResolvedValueOnce({ id: 'payment-2' });
+
+      const result = await service.generateDueCharges();
+
+      expect(result).toEqual({ checked: 2, generated: 1 });
+    });
+  });
 });

@@ -8,5 +8,6 @@ import { EmployeeRecurringPaymentsService } from './employee-recurring-payments.
   imports: [EmployeesModule, CompanyModule],
   controllers: [EmployeeRecurringPaymentsController],
   providers: [EmployeeRecurringPaymentsService],
+  exports: [EmployeeRecurringPaymentsService],
 })
 export class EmployeeRecurringPaymentsModule {}
