@@ -85,15 +85,15 @@ describe('ClientsService', () => {
 
   it('updates only after confirming the client exists', async () => {
     prisma.client.findUnique.mockResolvedValue({ id: '1' });
-    prisma.client.update.mockResolvedValue({ id: '1', status: 'INACTIVE' });
+    prisma.client.update.mockResolvedValue({ id: '1', name: 'Ana Nova' });
 
-    const result = await service.update('1', { status: 'INACTIVE' as any });
+    const result = await service.update('1', { name: 'Ana Nova' });
 
     expect(prisma.client.update).toHaveBeenCalledWith({
       where: { id: '1' },
-      data: { status: 'INACTIVE' },
+      data: { name: 'Ana Nova' },
     });
-    expect(result).toEqual({ id: '1', status: 'INACTIVE' });
+    expect(result).toEqual({ id: '1', name: 'Ana Nova' });
   });
 
   describe('findAll', () => {
