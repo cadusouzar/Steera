@@ -14,6 +14,9 @@ import QuotesList from './pages/app/QuotesList';
 import PurchasingList from './pages/app/PurchasingList';
 import TimeTracking from './pages/app/TimeTracking';
 import FinancesSaaS from './pages/app/FinancesSaaS';
+import UsersManagement from './pages/app/UsersManagement';
+import DashboardHub from './pages/analytics/DashboardHub';
+import DashboardBuilder from './pages/analytics/DashboardBuilder';
 
 function App() {
   return (
@@ -35,6 +38,9 @@ function App() {
             <Route path="compras" element={<PurchasingList />} />
             <Route path="orcamentos" element={<QuotesList />} />
             <Route path="financas" element={<FinancesSaaS />} />
+            <Route path="usuarios" element={<UsersManagement />} />
+            <Route path="analytics" element={<DashboardHub />} />
+            <Route path="analytics/:id" element={<DashboardBuilder />} />
           </Route>
         </Routes>
       </BrowserRouter>
