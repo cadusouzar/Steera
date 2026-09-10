@@ -126,9 +126,24 @@ model Employee {
   salaryRecurrenceEnabled Boolean        @default(true)
   createdAt               DateTime       @default(now())
   updatedAt               DateTime       @updatedAt
+  warnings                EmployeeWarning[]
 
   @@unique([companyId, cpf])
   @@index([companyId])
   @@index([roleId])
   @@index([status])
+}
+
+model EmployeeWarning {
+  id         String   @id @default(cuid())
+  companyId  String
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  occurredAt DateTime @db.Date
+  reason     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([employeeId])
 }
