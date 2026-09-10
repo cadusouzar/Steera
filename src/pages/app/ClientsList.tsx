@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Filter, X, HeartHandshake, FileText, CheckCircle2, AlertCircle, Clock, Loader2 } from 'lucide-react';
+import { Plus, Search, Filter, X, HeartHandshake, FileText, CheckCircle2, AlertCircle, Clock, Loader2, ChevronRight, Trash2 } from 'lucide-react';
 import ClientFinanceDrawer from '../../components/ClientFinanceDrawer';
 import ClientReportModal from '../../components/ClientReportModal';
+import ClientTrashDrawer from '../../components/ClientTrashDrawer';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
 import type { ClientRecord, ClientTotals } from '../../lib/api';
@@ -32,6 +33,7 @@ const ClientsList = () => {
   const [isDrawerLoading, setIsDrawerLoading] = useState(false);
 
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
 
   // New Client Form Modal State
   const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
@@ -42,10 +44,11 @@ const ClientsList = () => {
     setSelectedClient(null);
     setIsNewClientModalOpen(false);
     setIsReportModalOpen(false);
+    setIsTrashOpen(false);
   });
 
   useEffect(() => {
-    if (selectedClient || isNewClientModalOpen || isReportModalOpen) {
+    if (selectedClient || isNewClientModalOpen || isReportModalOpen || isTrashOpen) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -53,7 +56,7 @@ const ClientsList = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [selectedClient, isNewClientModalOpen, isReportModalOpen]);
+  }, [selectedClient, isNewClientModalOpen, isReportModalOpen, isTrashOpen]);
 
   const loadClients = useCallback(async () => {
     setIsLoading(true);
@@ -142,7 +145,7 @@ const ClientsList = () => {
 
   const handleUpdateClient = async (
     clientId: string,
-    dto: Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>,
+    dto: Partial<{ name: string; category: string; contact: string; email: string }>,
   ): Promise<boolean> => {
     try {
       const updated = await api.updateClient(clientId, dto);
@@ -155,12 +158,19 @@ const ClientsList = () => {
     }
   };
 
-  // "Excluir Cliente" na UI — inativa o cliente (não existe hard delete no backend
-  // de propósito, pra preservar o histórico financeiro).
-  const handleDeactivateClient = async (clientId: string): Promise<boolean> => {
+  // "Excluir Cliente" na UI — exclusão lógica (inativa o cliente; não existe
+  // hard delete no backend de propósito, pra preservar o histórico financeiro).
+  // A listagem padrão só traz clientes ativos, então um cliente inativado some
+  // da tabela local também — não fica só "atualizado", é removido da view.
+  const handleDeactivateClient = async (clientId: string, includeInRevenueReport: boolean): Promise<boolean> => {
     try {
-      const updated = await api.deactivateClient(clientId);
-      setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
+      await api.deactivateClient(clientId, includeInRevenueReport);
+      setClients(prev => prev.filter(c => c.id !== clientId));
+      setTotalsByClientId(prev => {
+        const next = { ...prev };
+        delete next[clientId];
+        return next;
+      });
       setSelectedClient(null);
       return true;
     } catch (err) {
@@ -264,6 +274,13 @@ const ClientsList = () => {
             <FileText size={16} />
             Relatórios
           </button>
+          <button
+            onClick={() => setIsTrashOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 text-foreground font-medium hover:bg-secondary transition-colors shadow-sm text-sm"
+          >
+            <Trash2 size={16} />
+            Lixeira
+          </button>
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -321,12 +338,13 @@ const ClientsList = () => {
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Pendente</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Faltante</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Saúde Financeira</th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
                   {isLoading && (
                     <tr>
-                      <td colSpan={8} className="px-8 py-16 text-center text-muted">
+                      <td colSpan={9} className="px-8 py-16 text-center text-muted">
                         <Loader2 size={28} className="mx-auto animate-spin mb-3 opacity-60" />
                         <p className="text-sm font-medium">Carregando clientes...</p>
                       </td>
@@ -335,7 +353,7 @@ const ClientsList = () => {
 
                   {!isLoading && loadError && (
                     <tr>
-                      <td colSpan={8} className="px-8 py-16 text-center text-red-500">
+                      <td colSpan={9} className="px-8 py-16 text-center text-red-500">
                         <AlertCircle size={32} className="mx-auto mb-3" />
                         <p className="text-sm font-bold">{loadError}</p>
                         <button
@@ -392,6 +410,15 @@ const ClientsList = () => {
                                 {summary.label}
                               </span>
                             </td>
+                            <td className="px-8 py-5 text-right">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleSelectClient(client); }}
+                                className="inline-flex items-center gap-1 text-sm font-medium text-muted group-hover:text-primary transition-colors hover:bg-secondary px-4 py-2 rounded-xl"
+                              >
+                                Detalhes
+                                <ChevronRight size={16} />
+                              </button>
+                            </td>
                           </motion.tr>
                         );
                       })}
@@ -400,7 +427,7 @@ const ClientsList = () => {
 
                   {!isLoading && !loadError && filteredClients.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-8 py-16 text-center text-muted">
+                      <td colSpan={9} className="px-8 py-16 text-center text-muted">
                         <div className="flex flex-col items-center justify-center">
                           <HeartHandshake size={48} className="opacity-20 mb-4" />
                           <p className="text-lg font-medium">Nenhum cliente encontrado.</p>
@@ -493,6 +520,15 @@ const ClientsList = () => {
       {isReportModalOpen && createPortal(
         <ClientReportModal
           onClose={() => setIsReportModalOpen(false)}
+        />,
+        document.body
+      )}
+
+      {/* Client Trash Drawer */}
+      {isTrashOpen && createPortal(
+        <ClientTrashDrawer
+          onClose={() => setIsTrashOpen(false)}
+          onRestored={loadClients}
         />,
         document.body
       )}
