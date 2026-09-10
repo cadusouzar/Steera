@@ -46,6 +46,38 @@ describe('VacationCalculationService', () => {
     expect(result.balanceDays).toBe(0);
   });
 
+  it('does not grant the 12th month early for an admission late in the month', () => {
+    // Admitido em 31/01/2025: o período aquisitivo só fecha em 31/01/2026.
+    // Em 15/01/2026 ainda faltam 16 dias — a conta antiga (que ignorava o dia
+    // do mês) já dava 12 meses aqui, liberando 30 dias de férias cedo demais.
+    const result = service.calculate({
+      contractType: 'CLT' as never,
+      admissionDate: new Date('2025-01-31T00:00:00Z'),
+      baseValue: 3000,
+      daysAlreadyTaken: 0,
+      referenceDate: new Date('2026-01-15T00:00:00Z'),
+    });
+
+    expect(result.monthsWorked).toBe(11);
+    expect(result.acquisitionComplete).toBe(false);
+    expect(result.totalAcquiredDays).toBe(0);
+    expect(result.balanceDays).toBe(0);
+  });
+
+  it('grants the 12th month once the acquisitive period actually closes', () => {
+    const result = service.calculate({
+      contractType: 'CLT' as never,
+      admissionDate: new Date('2025-01-31T00:00:00Z'),
+      baseValue: 3000,
+      daysAlreadyTaken: 0,
+      referenceDate: new Date('2026-01-31T00:00:00Z'),
+    });
+
+    expect(result.monthsWorked).toBe(12);
+    expect(result.acquisitionComplete).toBe(true);
+    expect(result.totalAcquiredDays).toBe(30);
+  });
+
   it('throws UnprocessableEntityException for non-CLT contract types', () => {
     expect(() =>
       service.calculate({

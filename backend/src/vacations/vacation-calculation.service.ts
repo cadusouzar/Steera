@@ -38,6 +38,16 @@ function addMonths(date: Date, months: number): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, date.getUTCDate()));
 }
 
+// Meses completos entre duas datas, contando o dia do mês (mesma lógica de
+// "idade em anos"): admitido em 31/01/2025 só completa 12 meses em 31/01/2026,
+// não em 01/01/2026. Ignorar o dia adiantaria o crédito de férias em até ~30
+// dias antes do período aquisitivo realmente fechar.
+function monthsBetween(from: Date, to: Date): number {
+  const months =
+    (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + (to.getUTCMonth() - from.getUTCMonth());
+  return to.getUTCDate() < from.getUTCDate() ? months - 1 : months;
+}
+
 @Injectable()
 export class VacationCalculationService {
   calculate(input: VacationCalculationInput): VacationCalculationResult {
@@ -48,9 +58,7 @@ export class VacationCalculationService {
     }
 
     const referenceDate = input.referenceDate ?? startOfToday();
-    const monthsWorked =
-      (referenceDate.getUTCFullYear() - input.admissionDate.getUTCFullYear()) * 12 +
-      (referenceDate.getUTCMonth() - input.admissionDate.getUTCMonth());
+    const monthsWorked = monthsBetween(input.admissionDate, referenceDate);
 
     const completedPeriods = Math.floor(monthsWorked / 12);
     const acquisitivePeriodStart = addMonths(input.admissionDate, completedPeriods * 12);

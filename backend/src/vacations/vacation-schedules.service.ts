@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { VacationScheduleStatus } from '@prisma/client';
 import { parseDateOnly } from '../common/date.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { EmployeesService } from '../employees/employees.service';
@@ -15,15 +16,20 @@ export class VacationSchedulesService {
     private readonly companyContext: CompanyContextService,
   ) {}
 
-  private daysAlreadyTaken(employeeId: string) {
+  // O companyId vem sempre do funcionário já resolvido por assertExists (que é
+  // company-scoped). Repetir o filtro aqui deixa a garantia de isolamento local
+  // a cada query, em vez de depender só da ordem das chamadas.
+  private daysAlreadyTaken(employeeId: string, companyId: string) {
     return this.prisma.vacationSchedule
-      .findMany({ where: { employeeId, status: { in: ['SCHEDULED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED'] } } })
+      .findMany({
+        where: { employeeId, companyId, status: { in: ['SCHEDULED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED'] } },
+      })
       .then((rows) => rows.reduce((sum, row) => sum + row.daysCount, 0));
   }
 
   async status(employeeId: string) {
     const employee = await this.employeesService.assertExists(employeeId);
-    const daysAlreadyTaken = await this.daysAlreadyTaken(employeeId);
+    const daysAlreadyTaken = await this.daysAlreadyTaken(employeeId, employee.companyId);
     return this.calculation.calculate({
       contractType: employee.contractType,
       admissionDate: employee.admissionDate,
@@ -45,7 +51,8 @@ export class VacationSchedulesService {
   private validateRange(startDate: string, endDate: string, daysCount: number) {
     const start = parseDateOnly(startDate);
     const end = parseDateOnly(endDate);
-    if (end <= start) throw new BadRequestException('endDate deve ser posterior a startDate');
+    // `end === start` é válido: representa férias de 1 dia (daysCount: 1).
+    if (end < start) throw new BadRequestException('endDate não pode ser anterior a startDate');
     const rangeDays = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
     if (rangeDays !== daysCount) {
       throw new BadRequestException(`daysCount (${daysCount}) não corresponde ao intervalo informado (${rangeDays} dias)`);
@@ -53,9 +60,9 @@ export class VacationSchedulesService {
     return { start, end };
   }
 
-  private async assertNoOverlap(employeeId: string, start: Date, end: Date) {
+  private async assertNoOverlap(employeeId: string, companyId: string, start: Date, end: Date) {
     const existing = await this.prisma.vacationSchedule.findMany({
-      where: { employeeId, status: { not: 'CANCELLED' } },
+      where: { employeeId, companyId, status: { not: 'CANCELLED' } },
     });
     const overlaps = existing.some((row) => start <= row.endDate && end >= row.startDate);
     if (overlaps) {
@@ -65,6 +72,9 @@ export class VacationSchedulesService {
 
   async schedule(employeeId: string, dto: ScheduleVacationDto) {
     const employee = await this.employeesService.assertExists(employeeId);
+    if (employee.status === 'INACTIVE') {
+      throw new BadRequestException(`Não é possível agendar férias: funcionário ${employeeId} está inativo`);
+    }
     const vacationStatus = await this.status(employeeId);
     const { start, end } = this.validateRange(dto.startDate, dto.endDate, dto.daysCount);
 
@@ -73,7 +83,7 @@ export class VacationSchedulesService {
         `Saldo insuficiente: disponível ${vacationStatus.balanceDays} dias, solicitado ${dto.daysCount}`,
       );
     }
-    await this.assertNoOverlap(employeeId, start, end);
+    await this.assertNoOverlap(employeeId, employee.companyId, start, end);
 
     return this.prisma.vacationSchedule.create({
       data: {
@@ -91,8 +101,11 @@ export class VacationSchedulesService {
   }
 
   async findAllForEmployee(employeeId: string) {
-    await this.employeesService.assertExists(employeeId);
-    return this.prisma.vacationSchedule.findMany({ where: { employeeId }, orderBy: { startDate: 'desc' } });
+    const employee = await this.employeesService.assertExists(employeeId);
+    return this.prisma.vacationSchedule.findMany({
+      where: { employeeId, companyId: employee.companyId },
+      orderBy: { startDate: 'desc' },
+    });
   }
 
   // Rota top-level (vacation-schedules/:id/cancel, sem employeeId na URL) —
@@ -101,6 +114,20 @@ export class VacationSchedulesService {
     const companyId = await this.companyContext.getCurrentCompanyId();
     const schedule = await this.prisma.vacationSchedule.findFirst({ where: { id, companyId } });
     if (!schedule) throw new NotFoundException(`Agendamento de férias ${id} não encontrado`);
+
+    // Cancelar um período já gozado (COMPLETED/IN_PROGRESS) devolveria os dias
+    // ao saldo do funcionário — daysAlreadyTaken() soma exatamente esses status
+    // e ignora CANCELLED. Só faz sentido cancelar o que ainda não começou.
+    if (schedule.status === VacationScheduleStatus.CANCELLED) {
+      throw new ConflictException(`Agendamento de férias ${id} já está cancelado`);
+    }
+    if (schedule.status !== VacationScheduleStatus.SCHEDULED && schedule.status !== VacationScheduleStatus.APPROVED) {
+      throw new ConflictException(
+        `Não é possível cancelar o agendamento de férias ${id}: período já está ${schedule.status} ` +
+          '(só é possível cancelar períodos SCHEDULED ou APPROVED)',
+      );
+    }
+
     return this.prisma.vacationSchedule.update({ where: { id }, data: { status: 'CANCELLED' } });
   }
 }
