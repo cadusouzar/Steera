@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ReceivableStatus, Subscription } from '@prisma/client';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, ReceivableStatus, Subscription } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
@@ -54,15 +54,31 @@ export class SubscriptionsService {
     // (src/pages/app/ClientsList.tsx, handleGenerateSubscriptionCharge) — a dueDay
     // of 29-31 can roll `dueDate` into the next month, which must not change the label.
     const monthLabel = now.toLocaleString('pt-BR', { month: 'long' });
+    const referenceYear = now.getFullYear();
+    const referenceMonth = now.getMonth() + 1; // 1-12, matches getMonth()'s use above
 
-    return this.prisma.receivable.create({
-      data: {
-        clientId: subscription.clientId,
-        description: `${subscription.description} (${monthLabel})`,
-        amount: subscription.amount,
-        dueDate,
-        status: ReceivableStatus.PENDING,
-      },
-    });
+    try {
+      return await this.prisma.receivable.create({
+        data: {
+          clientId: subscription.clientId,
+          subscriptionId: subscription.id,
+          referenceYear,
+          referenceMonth,
+          description: `${subscription.description} (${monthLabel})`,
+          amount: subscription.amount,
+          dueDate,
+          status: ReceivableStatus.PENDING,
+        },
+      });
+    } catch (err) {
+      // P2002 = unique constraint violation on (subscriptionId, referenceYear, referenceMonth).
+      // Caught here (not pre-checked with a SELECT) so a race between two concurrent
+      // requests for the same subscription/month is still rejected by the database
+      // itself, not just by an application-level check that could lose the race.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Já existe uma fatura gerada para esta assinatura neste mês.');
+      }
+      throw err;
+    }
   }
 }

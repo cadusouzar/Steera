@@ -1,6 +1,6 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { SubscriptionStatus } from '@prisma/client';
+import { Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from './subscriptions.service';
 
@@ -39,7 +39,7 @@ describe('SubscriptionsService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('generates a receivable charge from an active subscription', async () => {
+  it('generates a receivable charge from an active subscription, linked to it via subscriptionId + reference period', async () => {
     prisma.subscription.findUnique.mockResolvedValue({
       id: 'sub-1',
       clientId: 'client-1',
@@ -55,11 +55,49 @@ describe('SubscriptionsService', () => {
     expect(prisma.receivable.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         clientId: 'client-1',
+        subscriptionId: 'sub-1',
+        referenceYear: expect.any(Number),
+        referenceMonth: expect.any(Number),
         amount: 850,
         status: 'PENDING',
         description: expect.stringContaining('Mensalidade Escolar'),
       }),
     });
+  });
+
+  it('rejects generating a second charge for the same subscription in the same month', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({
+      id: 'sub-1',
+      clientId: 'client-1',
+      description: 'Mensalidade Escolar',
+      amount: 850,
+      dueDay: 5,
+      status: SubscriptionStatus.ACTIVE,
+    });
+    prisma.receivable.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`subscriptionId`,`referenceYear`,`referenceMonth`)', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+        meta: { target: ['subscriptionId', 'referenceYear', 'referenceMonth'] },
+      }),
+    );
+
+    await expect(service.generateCharge('sub-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('re-throws non-unique-constraint database errors unchanged', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({
+      id: 'sub-1',
+      clientId: 'client-1',
+      description: 'Mensalidade Escolar',
+      amount: 850,
+      dueDay: 5,
+      status: SubscriptionStatus.ACTIVE,
+    });
+    const dbError = new Error('connection lost');
+    prisma.receivable.create.mockRejectedValue(dbError);
+
+    await expect(service.generateCharge('sub-1')).rejects.toBe(dbError);
   });
 
   describe('generateCharge date handling', () => {

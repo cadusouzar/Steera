@@ -42,6 +42,19 @@ model Receivable {
   clientId    String
   // Cascade is currently unreachable via the API (Client is never hard-deleted, only inactivated) — reconsider if a hard-delete-client endpoint is ever added.
   client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  // Null for manually-created receivables. Set only for charges generated via
+  // Subscription.generateCharge — SetNull (not Cascade) so deleting a subscription
+  // never deletes the historical financial records it already generated.
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  // Which calendar month a subscription-generated charge covers. Set only when
+  // subscriptionId is set. Enforced unique below so the database — not just
+  // application code — rejects a second charge for the same subscription in the
+  // same month, closing the race a double-click on "Gerar Fatura do Mês" could
+  // otherwise hit (Postgres treats NULL as distinct, so plain receivables with no
+  // subscriptionId never collide with each other here).
+  referenceYear  Int?
+  referenceMonth Int?
   description String
   amount      Decimal          @db.Decimal(10, 2)
   dueDate     DateTime         @db.Date
@@ -50,6 +63,7 @@ model Receivable {
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
+  @@unique([subscriptionId, referenceYear, referenceMonth])
   @@index([clientId])
   @@index([dueDate])
   @@index([status])
@@ -66,6 +80,7 @@ model Subscription {
   status      SubscriptionStatus @default(ACTIVE)
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
+  receivables Receivable[]
 
   @@index([clientId])
 }
