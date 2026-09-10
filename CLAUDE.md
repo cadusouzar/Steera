@@ -79,11 +79,13 @@ npm run test:e2e          # teste de integração (precisa de PostgreSQL local r
 `[[DECISOES-TECNICAS]]` no vault (`B:\Quickflow\Quickflow`) para detalhes.
 
 **Exclusão de cliente é sempre lógica, nunca física:** `PATCH /clients/:id/deactivate` marca o
-cliente como `INACTIVE` (some da listagem padrão) mas nunca apaga o registro nem seus lançamentos.
-O flag `Client.includeInRevenueReport` (independente de `status`) decide se os lançamentos desse
-cliente continuam somando no relatório financeiro (`GET /reports/financial-summary`) — é obrigatório
-no body da desativação. Detalhes completos em `[[DECISOES-TECNICAS]]`, `[[BANCO-DE-DADOS]]` e
-`[[API]]` no vault.
+cliente como `INACTIVE` mas nunca apaga o registro nem seus lançamentos. O flag
+`Client.includeInRevenueReport` (independente de `status`) decide se os lançamentos desse cliente
+continuam somando no relatório financeiro (`GET /reports/financial-summary`) — é obrigatório no
+body da desativação. Um cliente inativo mantido no relatório (`includeInRevenueReport=true`)
+continua aparecendo na listagem padrão do frontend (`GET /clients?excludeTrashed=true`), com selo
+"Inativo" e botão "Reativar Cliente" — só quem vai pra lixeira some da listagem. Detalhes
+completos em `[[DECISOES-TECNICAS]]`, `[[BANCO-DE-DADOS]]` e `[[API]]` no vault.
 
 **Lixeira de clientes:** clientes desativados com `includeInRevenueReport=false` entram numa
 lixeira e são purgados fisicamente após 30 dias (`PATCH /clients/:id/restore`,

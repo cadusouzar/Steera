@@ -160,21 +160,41 @@ const ClientsList = () => {
 
   // "Excluir Cliente" na UI — exclusão lógica (inativa o cliente; não existe
   // hard delete no backend de propósito, pra preservar o histórico financeiro).
-  // A listagem padrão só traz clientes ativos, então um cliente inativado some
-  // da tabela local também — não fica só "atualizado", é removido da view.
+  // Só some da tabela local quando vai pra lixeira (includeInRevenueReport=
+  // false) — quem é mantido no relatório continua na lista, só com o selo
+  // "Inativo", já que precisa ficar alcançável pra ser reativado.
   const handleDeactivateClient = async (clientId: string, includeInRevenueReport: boolean): Promise<boolean> => {
     try {
-      await api.deactivateClient(clientId, includeInRevenueReport);
-      setClients(prev => prev.filter(c => c.id !== clientId));
-      setTotalsByClientId(prev => {
-        const next = { ...prev };
-        delete next[clientId];
-        return next;
-      });
+      const updated = await api.deactivateClient(clientId, includeInRevenueReport);
+      if (includeInRevenueReport) {
+        setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
+      } else {
+        setClients(prev => prev.filter(c => c.id !== clientId));
+        setTotalsByClientId(prev => {
+          const next = { ...prev };
+          delete next[clientId];
+          return next;
+        });
+      }
       setSelectedClient(null);
       return true;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível excluir o cliente.');
+      return false;
+    }
+  };
+
+  // "Reativar Cliente" — desfaz a inativação (só aparece pra cliente
+  // inativo mantido no relatório; o grupo removido do relatório vai pra
+  // lixeira e reativa por lá).
+  const handleRestoreClient = async (clientId: string): Promise<boolean> => {
+    try {
+      const updated = await api.restoreClient(clientId);
+      setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
+      setSelectedClient(prev => (prev && prev.id === clientId ? { ...prev, ...updated } : prev));
+      return true;
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível reativar o cliente.');
       return false;
     }
   };
@@ -389,9 +409,16 @@ const ClientsList = () => {
                                   {client.name.charAt(0)}
                                 </div>
                                 <div>
-                                  <span className="text-base font-heading font-bold text-foreground group-hover:text-primary transition-colors block">
-                                    {client.name}
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base font-heading font-bold text-foreground group-hover:text-primary transition-colors">
+                                      {client.name}
+                                    </span>
+                                    {client.status === 'inactive' && (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-secondary text-muted border border-border/60">
+                                        Inativo
+                                      </span>
+                                    )}
+                                  </div>
                                   {client.email && <span className="text-xs text-muted font-medium">{client.email}</span>}
                                 </div>
                               </div>
@@ -512,6 +539,7 @@ const ClientsList = () => {
           onDismissError={() => setActionError(null)}
           onUpdateClient={handleUpdateClient}
           onDeactivateClient={handleDeactivateClient}
+          onRestoreClient={handleRestoreClient}
         />,
         document.body
       )}

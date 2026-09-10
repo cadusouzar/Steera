@@ -97,7 +97,7 @@ describe('ClientsService', () => {
   });
 
   describe('findAll', () => {
-    it('filters by status when provided, for the "listagem padrão" (active-only) use case', async () => {
+    it('filters by status when explicitly provided (e.g. status=ACTIVE for a strictly-active-only view)', async () => {
       prisma.client.findMany.mockResolvedValue([{ id: '1', status: 'ACTIVE' }]);
       prisma.client.count.mockResolvedValue(1);
 
@@ -109,6 +109,19 @@ describe('ClientsService', () => {
       expect(prisma.client.count).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ status: 'ACTIVE' }) }),
       );
+    });
+
+    it('excludeTrashed excludes only status=INACTIVE+includeInRevenueReport=false — active AND inactive-but-kept clients both stay', async () => {
+      prisma.client.findMany.mockResolvedValue([]);
+      prisma.client.count.mockResolvedValue(0);
+
+      await service.findAll({ excludeTrashed: true, page: 1, pageSize: 20 } as any);
+
+      const expectedWhere = { NOT: { status: 'INACTIVE', includeInRevenueReport: false } };
+      expect(prisma.client.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expectedWhere }),
+      );
+      expect(prisma.client.count).toHaveBeenCalledWith({ where: expectedWhere });
     });
   });
 

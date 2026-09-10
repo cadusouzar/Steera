@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, AlertCircle, CheckCircle2, Clock, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2, Edit2, Save } from 'lucide-react';
+import { X, DollarSign, Calendar, AlertCircle, CheckCircle2, Clock, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2, Edit2, Save, RotateCcw } from 'lucide-react';
 import type { Client, Receivable, Subscription } from '../pages/app/ClientsList';
 
 // Parses a date-only "YYYY-MM-DD" string as local midnight instead of
@@ -29,12 +29,17 @@ interface ClientFinanceDrawerProps {
     dto: Partial<{ name: string; category: string; contact: string; email: string }>,
   ) => Promise<boolean>;
   onDeactivateClient: (clientId: string, includeInRevenueReport: boolean) => Promise<boolean>;
+  // Only ever offered for a client kept in the report (includeInRevenueReport
+  // =true) — those stay reachable/inactive forever with no other UI path back
+  // to active. A client removed from the report goes through the Lixeira's
+  // own restore flow instead.
+  onRestoreClient: (clientId: string) => Promise<boolean>;
 }
 
 const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   client, onClose, onMarkAsPaid, onUnmarkAsPaid, onDeleteReceivable,
   onAddReceivable, onAddSubscription, onDeleteSubscription, onGenerateCharge, isLoading,
-  actionError, onDismissError, onUpdateClient, onDeactivateClient
+  actionError, onDismissError, onUpdateClient, onDeactivateClient, onRestoreClient
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [addType, setAddType] = useState<'single' | 'recurring'>('single');
@@ -64,6 +69,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   // (keep vs. remove from the revenue report), not just confirm/cancel.
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeactivating, setIsDeactivating] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const handleEditClick = () => {
     setEditForm({ name: client.name, category: client.category, contact: client.contact, email: client.email ?? '' });
@@ -91,6 +97,13 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
     // selectedClient); on failure the drawer's actionError banner explains
     // what happened, so a dangling modal isn't needed either way.
     setIsDeactivateModalOpen(false);
+  };
+
+  const handleRestore = async () => {
+    if (isRestoring) return; // avoid duplicate submits from a double-click
+    setIsRestoring(true);
+    await onRestoreClient(client.id);
+    setIsRestoring(false);
   };
 
   const getStatusStyle = (status: string) => {
@@ -608,6 +621,27 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                   </button>
                 </motion.div>
               )
+            )}
+            {!isEditing && !isLoading && client.status === 'inactive' && (
+              <motion.div
+                key="restore-footer"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="p-6 md:p-8 border-t border-border/40 bg-secondary/10 shrink-0 flex items-center justify-between gap-4"
+              >
+                <span className="text-xs text-muted">
+                  Cliente inativo — os dados de faturamento continuam nos relatórios.
+                </span>
+                <button
+                  onClick={handleRestore}
+                  disabled={isRestoring}
+                  className="px-5 py-3.5 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 disabled:opacity-60 transition-colors text-sm flex items-center gap-2 shadow-lg shadow-primary/20"
+                >
+                  <RotateCcw size={16} />
+                  {isRestoring ? 'Reativando...' : 'Reativar Cliente'}
+                </button>
+              </motion.div>
             )}
           </AnimatePresence>
         </motion.div>

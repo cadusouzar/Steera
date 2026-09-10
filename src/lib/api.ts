@@ -169,11 +169,12 @@ function mapClientTotals(c: ApiClient): ClientTotals {
 }
 
 // ---- Clients ----
-// Default ("listagem padrão") listing — deactivated clients never show up
-// here. Deliberately not configurable: viewing inactive clients isn't
-// something the UI offers yet.
+// Default ("listagem padrão") listing — só exclui quem está na lixeira
+// (inativo E includeInRevenueReport=false). Um cliente inativo mantido no
+// relatório continua aparecendo aqui (a UI mostra um selo "Inativo" e
+// permite reativá-lo) — só some quando vai pra lixeira.
 export async function listClients(): Promise<ClientRecord[]> {
-  const res = await request<Paginated<ApiClient>>(`/clients?status=ACTIVE&pageSize=100`);
+  const res = await request<Paginated<ApiClient>>(`/clients?excludeTrashed=true&pageSize=100`);
   return res.items.map(mapClient);
 }
 

@@ -38,6 +38,9 @@ export class ClientsService {
 
     const where = {
       ...(query.status ? { status: query.status } : {}),
+      ...(query.excludeTrashed
+        ? { NOT: { status: ClientStatus.INACTIVE, includeInRevenueReport: false } }
+        : {}),
       ...(query.search
         ? {
             OR: [

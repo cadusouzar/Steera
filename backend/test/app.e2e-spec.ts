@@ -126,11 +126,20 @@ describe('QuickFlow backend (e2e)', () => {
       await request(server).patch(`/clients/${clientA.id}/deactivate`).send({ includeInRevenueReport: true }).expect(200);
       await request(server).patch(`/clients/${clientB.id}/deactivate`).send({ includeInRevenueReport: false }).expect(200);
 
-      // Rule: the default (active-only) listing excludes both now.
+      // Rule: an explicit status=ACTIVE filter excludes both (strictly active-only).
       const activeListing = await request(server).get('/clients?status=ACTIVE&pageSize=100').expect(200);
       const activeIds = activeListing.body.items.map((c: { id: string }) => c.id);
       expect(activeIds).not.toContain(clientA.id);
       expect(activeIds).not.toContain(clientB.id);
+
+      // Rule: the "listagem padrão" (excludeTrashed=true, what the frontend's
+      // Clientes & Recebimentos screen actually calls) keeps A — inactive but
+      // kept in the report, so it must stay reachable/reactivatable — and only
+      // excludes B, which is in the trash.
+      const operationalListing = await request(server).get('/clients?excludeTrashed=true&pageSize=100').expect(200);
+      const operationalIds = operationalListing.body.items.map((c: { id: string }) => c.id);
+      expect(operationalIds).toContain(clientA.id);
+      expect(operationalIds).not.toContain(clientB.id);
 
       // Rule: historical receivables are untouched — still there, still paid.
       const recAAfter = await request(server).get(`/clients/${clientA.id}/receivables`).expect(200);
