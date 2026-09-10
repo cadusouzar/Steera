@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, AlertCircle, CheckCircle2, Clock, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2 } from 'lucide-react';
+import { X, DollarSign, Calendar, AlertCircle, CheckCircle2, Clock, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2 } from 'lucide-react';
 import type { Client, Receivable, Subscription } from '../pages/app/ClientsList';
+
+// Parses a date-only "YYYY-MM-DD" string as local midnight instead of
+// letting `new Date(str)` parse it as UTC midnight (which displays as the
+// previous day in any timezone behind UTC, e.g. Brazil).
+function parseDateOnly(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
 
 interface ClientFinanceDrawerProps {
   client: Client;
@@ -13,11 +21,12 @@ interface ClientFinanceDrawerProps {
   onAddSubscription: (clientId: string, sub: Omit<Subscription, 'id'>) => void;
   onDeleteSubscription: (clientId: string, subId: string) => void;
   onGenerateCharge: (clientId: string, subId: string) => void;
+  isLoading?: boolean;
 }
 
-const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({ 
-  client, onClose, onMarkAsPaid, onUnmarkAsPaid, onDeleteReceivable, 
-  onAddReceivable, onAddSubscription, onDeleteSubscription, onGenerateCharge 
+const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
+  client, onClose, onMarkAsPaid, onUnmarkAsPaid, onDeleteReceivable,
+  onAddReceivable, onAddSubscription, onDeleteSubscription, onGenerateCharge, isLoading
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [addType, setAddType] = useState<'single' | 'recurring'>('single');
@@ -148,9 +157,16 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-8">
-            
+
+            {isLoading && (
+              <div className="flex flex-col items-center justify-center py-10 text-muted">
+                <Loader2 size={28} className="animate-spin mb-3 opacity-60" />
+                <p className="text-sm font-medium">Carregando lançamentos e assinaturas...</p>
+              </div>
+            )}
+
             {/* Action Bar */}
-            {!isAdding && (
+            {!isLoading && !isAdding && (
               <div className="flex justify-end">
                 <button 
                   onClick={() => setIsAdding(true)}
@@ -238,7 +254,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
             </AnimatePresence>
 
             {/* Subscriptions Section */}
-            {client.subscriptions && client.subscriptions.length > 0 && (
+            {!isLoading && client.subscriptions && client.subscriptions.length > 0 && (
               <div>
                 <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2 mb-4">
                   <Repeat size={18} className="text-accent" /> Assinaturas Ativas
@@ -312,11 +328,12 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
             )}
 
             {/* Receivables History */}
+            {!isLoading && (
             <div>
               <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2 mb-4 mt-6">
                 <Receipt size={18} className="text-primary/70" /> Histórico de Lançamentos
               </h3>
-              
+
               <div className="space-y-3">
                 {client.receivables.length > 0 ? (
                   client.receivables.sort((a,b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime()).map((rec) => (
@@ -330,7 +347,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                             <p className="font-bold text-foreground">{rec.description}</p>
                             <div className="flex items-center gap-3 mt-1">
                               <span className="text-sm font-bold text-foreground/80">{formatCurrency(rec.amount)}</span>
-                              <span className="text-xs text-muted flex items-center gap-1"><Calendar size={12}/> Vence: {new Date(rec.dueDate).toLocaleDateString('pt-BR')}</span>
+                              <span className="text-xs text-muted flex items-center gap-1"><Calendar size={12}/> Vence: {parseDateOnly(rec.dueDate).toLocaleDateString('pt-BR')}</span>
                             </div>
                           </div>
                         </div>
@@ -420,6 +437,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                 )}
               </div>
             </div>
+            )}
 
           </div>
         </motion.div>
