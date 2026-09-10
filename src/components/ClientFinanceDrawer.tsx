@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, AlertCircle, CheckCircle2, Clock, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2 } from 'lucide-react';
+import { X, DollarSign, Calendar, AlertCircle, CheckCircle2, Clock, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2, Edit2, Save } from 'lucide-react';
 import type { Client, Receivable, Subscription } from '../pages/app/ClientsList';
 
 // Parses a date-only "YYYY-MM-DD" string as local midnight instead of
@@ -24,22 +24,27 @@ interface ClientFinanceDrawerProps {
   isLoading?: boolean;
   actionError?: string | null;
   onDismissError?: () => void;
+  onUpdateClient: (
+    clientId: string,
+    dto: Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>,
+  ) => Promise<boolean>;
+  onDeactivateClient: (clientId: string) => Promise<boolean>;
 }
 
 const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   client, onClose, onMarkAsPaid, onUnmarkAsPaid, onDeleteReceivable,
   onAddReceivable, onAddSubscription, onDeleteSubscription, onGenerateCharge, isLoading,
-  actionError, onDismissError
+  actionError, onDismissError, onUpdateClient, onDeactivateClient
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [addType, setAddType] = useState<'single' | 'recurring'>('single');
-  
+
   // Single Charge State
   const [newRec, setNewRec] = useState({ description: '', amount: '', dueDate: '', status: 'pending' as const });
-  
+
   // Subscription State
   const [newSub, setNewSub] = useState({ description: '', amount: '', dueDay: '' });
-  
+
   // Simulation states
   const [boletoSimulated, setBoletoSimulated] = useState<string | null>(null);
   const [chargeGenerated, setChargeGenerated] = useState<string | null>(null);
@@ -48,6 +53,39 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   const [confirmingDeleteSub, setConfirmingDeleteSub] = useState<string | null>(null);
   const [confirmingDeleteRec, setConfirmingDeleteRec] = useState<string | null>(null);
   const [confirmingUnmark, setConfirmingUnmark] = useState<string | null>(null);
+
+  // Client edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>>({});
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Client "delete" (inactivate) state
+  const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
+  const [isDeactivating, setIsDeactivating] = useState(false);
+
+  const handleEditClick = () => {
+    setEditForm({ name: client.name, category: client.category, contact: client.contact, email: client.email ?? '', status: client.status });
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm.name || !editForm.contact) return;
+    setIsSaving(true);
+    const ok = await onUpdateClient(client.id, editForm);
+    setIsSaving(false);
+    if (ok) setIsEditing(false);
+  };
+
+  const handleDeactivate = async () => {
+    setIsDeactivating(true);
+    await onDeactivateClient(client.id);
+    setIsDeactivating(false);
+    setConfirmingDeactivate(false);
+  };
 
   const getStatusStyle = (status: string) => {
     switch (status) {
@@ -148,26 +186,92 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
           {/* Header */}
           <div className="p-6 md:p-8 border-b border-border/40 shrink-0 bg-secondary/10">
             <div className="flex justify-between items-start mb-6">
+              {!isEditing && !isLoading ? (
+                <button onClick={handleEditClick} className="p-2 text-primary hover:text-primary bg-primary/10 hover:bg-primary/20 rounded-full transition-colors" title="Editar Cliente">
+                  <Edit2 size={18} />
+                </button>
+              ) : <div />}
               <button onClick={onClose} className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors">
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-bold text-2xl shadow-sm shrink-0">
-                {client.name.charAt(0)}
+                {(isEditing ? editForm.name : client.name)?.charAt(0)}
               </div>
-              <div>
-                <h2 className="text-2xl font-heading font-bold text-foreground">
-                  {client.name}
-                </h2>
-                <div className="text-muted text-sm font-medium flex items-center gap-2 mt-1">
-                  <span className="uppercase text-xs font-bold tracking-wider">{client.category || 'Sem Categoria'}</span>
-                  <span>•</span>
-                  <span>{client.contact}</span>
-                </div>
+              <div className="flex-1 min-w-0">
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={editForm.name ?? ''}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full bg-background border border-border/80 rounded-lg px-3 py-1.5 text-2xl font-heading font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
+                    placeholder="Nome Completo"
+                  />
+                ) : (
+                  <h2 className="text-2xl font-heading font-bold text-foreground truncate flex items-center gap-2">
+                    {client.name}
+                    {client.status === 'inactive' && (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-secondary text-muted border border-border/60">Inativo</span>
+                    )}
+                  </h2>
+                )}
+
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={editForm.category ?? ''}
+                    onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                    className="mt-2 w-full bg-background border border-border/80 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
+                    placeholder="Categoria / Observação"
+                  />
+                ) : (
+                  <div className="text-muted text-sm font-medium flex items-center gap-2 mt-1">
+                    <span className="uppercase text-xs font-bold tracking-wider">{client.category || 'Sem Categoria'}</span>
+                    <span>•</span>
+                    <span>{client.contact}</span>
+                  </div>
+                )}
               </div>
             </div>
+
+            {isEditing && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
+                <div>
+                  <label className="block text-xs font-medium text-foreground/80 mb-1.5">Telefone/Contato</label>
+                  <input
+                    type="text"
+                    value={editForm.contact ?? ''}
+                    onChange={(e) => setEditForm({ ...editForm, contact: e.target.value })}
+                    className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground/80 mb-1.5">E-mail</label>
+                  <input
+                    type="email"
+                    value={editForm.email ?? ''}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+                <div className="sm:col-span-2 flex items-center justify-between p-3.5 bg-background rounded-xl border border-border/60">
+                  <div>
+                    <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-0.5">Status</p>
+                    <p className="text-sm font-medium text-foreground">Condição do cliente</p>
+                  </div>
+                  <select
+                    value={editForm.status ?? client.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value as 'active' | 'inactive' })}
+                    className="bg-secondary/30 border border-border rounded-xl px-3 py-2 text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  >
+                    <option value="active">ATIVO</option>
+                    <option value="inactive">INATIVO</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Body */}
@@ -467,7 +571,72 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
             </div>
             )}
 
+            {!isEditing && !isLoading && client.status === 'active' && (
+              <div className="border-t border-border/40 pt-6">
+                <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3">Zona de Risco</h4>
+                <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  {confirmingDeactivate ? (
+                    <>
+                      <span className="text-xs font-bold text-red-500 flex-1">
+                        Tem certeza? O cliente é inativado (não removido) — o histórico financeiro fica preservado e dá pra reativar depois.
+                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => setConfirmingDeactivate(false)} className="text-xs font-bold px-3 py-1.5 text-foreground/80 hover:text-foreground bg-secondary rounded-lg transition-colors">
+                          Cancelar
+                        </button>
+                        <motion.button
+                          initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+                          onClick={handleDeactivate}
+                          disabled={isDeactivating}
+                          className="flex items-center gap-1 text-xs font-bold text-white bg-red-500 hover:bg-red-600 disabled:opacity-60 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+                        >
+                          <Trash2 size={14} /> {isDeactivating ? 'Excluindo...' : 'Confirmar Exclusão'}
+                        </motion.button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xs text-muted flex-1">Remove o cliente da lista de ativos, preservando todo o histórico.</span>
+                      <button
+                        onClick={() => setConfirmingDeactivate(true)}
+                        className="flex items-center gap-1 text-xs font-bold text-red-500 hover:text-white hover:bg-red-500 px-3 py-1.5 rounded-lg transition-colors border border-red-500/30 shrink-0"
+                      >
+                        <Trash2 size={14} /> Excluir Cliente
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
           </div>
+
+          {/* Edit Actions Footer */}
+          <AnimatePresence>
+            {isEditing && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="p-6 md:p-8 border-t border-border/40 bg-background/80 backdrop-blur-md shrink-0 flex gap-3"
+              >
+                <button
+                  onClick={handleCancelEdit}
+                  className="flex-1 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={isSaving}
+                  className="flex-1 py-3.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                >
+                  <Save size={18} />
+                  {isSaving ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </motion.div>
     </AnimatePresence>

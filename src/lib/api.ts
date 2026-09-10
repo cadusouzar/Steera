@@ -175,6 +175,23 @@ export async function createClient(dto: {
   return mapClient(c);
 }
 
+export async function updateClient(
+  id: string,
+  dto: Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>,
+): Promise<ClientRecord> {
+  const { status, ...rest } = dto;
+  const body: Record<string, unknown> = { ...rest };
+  if (status) body.status = status.toUpperCase();
+  const c = await request<ApiClient>(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return mapClient(c);
+}
+
+// "Excluir" in the UI — there is no hard-delete endpoint for clients by design
+// (financial history must survive). This just inactivates the client.
+export async function deactivateClient(id: string): Promise<ClientRecord> {
+  return updateClient(id, { status: 'inactive' });
+}
+
 // ---- Receivables ----
 export async function listReceivables(clientId: string): Promise<Receivable[]> {
   const res = await request<Paginated<ApiReceivable>>(`/clients/${clientId}/receivables?pageSize=100`);

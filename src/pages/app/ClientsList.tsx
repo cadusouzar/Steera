@@ -140,6 +140,35 @@ const ClientsList = () => {
     }
   };
 
+  const handleUpdateClient = async (
+    clientId: string,
+    dto: Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>,
+  ): Promise<boolean> => {
+    try {
+      const updated = await api.updateClient(clientId, dto);
+      setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
+      setSelectedClient(prev => (prev && prev.id === clientId ? { ...prev, ...updated } : prev));
+      return true;
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível salvar as alterações do cliente.');
+      return false;
+    }
+  };
+
+  // "Excluir Cliente" na UI — inativa o cliente (não existe hard delete no backend
+  // de propósito, pra preservar o histórico financeiro).
+  const handleDeactivateClient = async (clientId: string): Promise<boolean> => {
+    try {
+      const updated = await api.deactivateClient(clientId);
+      setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
+      setSelectedClient(null);
+      return true;
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível excluir o cliente.');
+      return false;
+    }
+  };
+
   const handleMarkAsPaid = async (_clientId: string, receivableId: string) => {
     try {
       await api.payReceivable(receivableId);
@@ -454,6 +483,8 @@ const ClientsList = () => {
           isLoading={isDrawerLoading}
           actionError={actionError}
           onDismissError={() => setActionError(null)}
+          onUpdateClient={handleUpdateClient}
+          onDeactivateClient={handleDeactivateClient}
         />,
         document.body
       )}
