@@ -78,7 +78,7 @@ export class EmployeesService {
     return { items, total, page, pageSize };
   }
 
-  private async assertExists(id: string): Promise<Employee> {
+  async assertExists(id: string): Promise<Employee> {
     const companyId = await this.companyContext.getCurrentCompanyId();
     const employee = await this.prisma.employee.findFirst({ where: { id, companyId } });
     if (!employee) throw new NotFoundException(`Funcionário ${id} não encontrado`);
