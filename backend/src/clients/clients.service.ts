@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ReceivableStatus } from '@prisma/client';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ClientStatus, ReceivableStatus, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { startOfToday } from '../receivables/receivables.service';
 import { CreateClientDto } from './dto/create-client.dto';
+import { DeactivateClientDto } from './dto/deactivate-client.dto';
 import { QueryClientsDto } from './dto/query-clients.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 
@@ -80,5 +81,39 @@ export class ClientsService {
   async update(id: string, dto: UpdateClientDto) {
     await this.assertExists(id);
     return this.prisma.client.update({ where: { id }, data: dto });
+  }
+
+  // "Excluir Cliente" in the UI — logical deletion only. The client row and
+  // every Receivable/Subscription it owns are preserved untouched; this only
+  // flips status to INACTIVE and records the caller's explicit decision on
+  // whether the client's historical numbers should still count toward the
+  // company-wide financial report (includeInRevenueReport is independent of
+  // status — never inferred from it).
+  async deactivate(id: string, dto: DeactivateClientDto) {
+    const client = await this.assertExists(id);
+    if (client.status === ClientStatus.INACTIVE) {
+      throw new ConflictException(`Cliente ${id} já está inativo`);
+    }
+
+    // Two records change together (the client itself, plus pausing its active
+    // subscriptions so they stop generating new receivables for a client that
+    // should no longer receive lançamentos) — done in one transaction so
+    // neither can happen without the other.
+    const [updatedClient] = await this.prisma.$transaction([
+      this.prisma.client.update({
+        where: { id },
+        data: {
+          status: ClientStatus.INACTIVE,
+          includeInRevenueReport: dto.includeInRevenueReport,
+          deactivatedAt: new Date(),
+        },
+      }),
+      this.prisma.subscription.updateMany({
+        where: { clientId: id, status: SubscriptionStatus.ACTIVE },
+        data: { status: SubscriptionStatus.INACTIVE },
+      }),
+    ]);
+
+    return updatedClient;
   }
 }
