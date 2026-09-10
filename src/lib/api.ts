@@ -23,6 +23,8 @@ interface ApiClient {
   contact: string;
   email: string | null;
   status: 'ACTIVE' | 'INACTIVE';
+  includeInRevenueReport: boolean;
+  deactivatedAt: string | null;
   totalPaid?: number | string;
   totalPending?: number | string;
   totalOverdue?: number | string;
@@ -91,6 +93,16 @@ export interface ClientRecord {
   contact: string;
   email?: string;
   status: 'active' | 'inactive';
+  // Independent of status — whether this client's numbers count toward the
+  // company-wide report (GET /reports/financial-summary). Only ever set via
+  // deactivateClient(); not exposed on the edit form.
+  includeInRevenueReport: boolean;
+  // Null unless the client is in the trash (status=inactive AND
+  // includeInRevenueReport=false) — only that group has a purge countdown.
+  // Clients deactivated with includeInRevenueReport=true stay inactive
+  // forever and this stays null-ish for UI purposes (ClientTrashDrawer never
+  // shows them, since listTrashedClients() already filters server-side).
+  deactivatedAt: string | null;
 }
 export interface ClientTotals {
   totalPaid: number;
@@ -143,6 +155,8 @@ function mapClient(c: ApiClient): ClientRecord {
     contact: c.contact,
     email: c.email ?? undefined,
     status: c.status.toLowerCase() as 'active' | 'inactive',
+    includeInRevenueReport: c.includeInRevenueReport,
+    deactivatedAt: c.deactivatedAt ?? null,
   };
 }
 
@@ -155,8 +169,11 @@ function mapClientTotals(c: ApiClient): ClientTotals {
 }
 
 // ---- Clients ----
+// Default ("listagem padrão") listing — deactivated clients never show up
+// here. Deliberately not configurable: viewing inactive clients isn't
+// something the UI offers yet.
 export async function listClients(): Promise<ClientRecord[]> {
-  const res = await request<Paginated<ApiClient>>(`/clients?pageSize=100`);
+  const res = await request<Paginated<ApiClient>>(`/clients?status=ACTIVE&pageSize=100`);
   return res.items.map(mapClient);
 }
 
@@ -177,19 +194,32 @@ export async function createClient(dto: {
 
 export async function updateClient(
   id: string,
-  dto: Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>,
+  dto: Partial<{ name: string; category: string; contact: string; email: string }>,
 ): Promise<ClientRecord> {
-  const { status, ...rest } = dto;
-  const body: Record<string, unknown> = { ...rest };
-  if (status) body.status = status.toUpperCase();
-  const c = await request<ApiClient>(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  const c = await request<ApiClient>(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
   return mapClient(c);
 }
 
 // "Excluir" in the UI — there is no hard-delete endpoint for clients by design
 // (financial history must survive). This just inactivates the client.
-export async function deactivateClient(id: string): Promise<ClientRecord> {
-  return updateClient(id, { status: 'inactive' });
+export async function deactivateClient(id: string, includeInRevenueReport: boolean): Promise<ClientRecord> {
+  const c = await request<ApiClient>(`/clients/${id}/deactivate`, {
+    method: 'PATCH',
+    body: JSON.stringify({ includeInRevenueReport }),
+  });
+  return mapClient(c);
+}
+
+// "Lixeira" — só clientes desativados com includeInRevenueReport=false
+// aparecem aqui (o backend já filtra isso em GET /clients/trash).
+export async function listTrashedClients(): Promise<ClientRecord[]> {
+  const items = await request<ApiClient[]>(`/clients/trash`);
+  return items.map(mapClient);
+}
+
+export async function restoreClient(id: string): Promise<ClientRecord> {
+  const c = await request<ApiClient>(`/clients/${id}/restore`, { method: 'PATCH' });
+  return mapClient(c);
 }
 
 // ---- Receivables ----
