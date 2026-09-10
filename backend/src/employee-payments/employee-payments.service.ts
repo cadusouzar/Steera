@@ -27,6 +27,9 @@ export class EmployeePaymentsService {
     private readonly companyContext: CompanyContextService,
   ) {}
 
+  // Pagamentos avulsos continuam permitidos mesmo com funcionário inativo — pode representar
+  // rescisão/pagamento final; ao contrário de recorrência (create/generateCharge) e férias,
+  // não há razão de negócio para bloquear aqui.
   async create(employeeId: string, dto: CreateEmployeePaymentDto) {
     const employee = await this.employeesService.assertExists(employeeId);
     const created = await this.prisma.employeePayment.create({
@@ -36,7 +39,7 @@ export class EmployeePaymentsService {
   }
 
   async findAllForEmployee(employeeId: string, query: QueryEmployeePaymentsDto) {
-    await this.employeesService.assertExists(employeeId);
+    const employee = await this.employeesService.assertExists(employeeId);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const today = startOfToday();
@@ -50,7 +53,7 @@ export class EmployeePaymentsService {
             ? { status: 'PENDING' as const, dueDate: { lt: today } }
             : {};
 
-    const where = { employeeId, ...statusWhere };
+    const where = { employeeId, companyId: employee.companyId, ...statusWhere };
 
     const [rows, total] = await Promise.all([
       this.prisma.employeePayment.findMany({ where, orderBy: { dueDate: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),

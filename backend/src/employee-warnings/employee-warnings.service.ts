@@ -25,8 +25,11 @@ export class EmployeeWarningsService {
   }
 
   async findAllForEmployee(employeeId: string) {
-    await this.employeesService.assertExists(employeeId);
-    return this.prisma.employeeWarning.findMany({ where: { employeeId }, orderBy: { occurredAt: 'desc' } });
+    const employee = await this.employeesService.assertExists(employeeId);
+    return this.prisma.employeeWarning.findMany({
+      where: { employeeId, companyId: employee.companyId },
+      orderBy: { occurredAt: 'desc' },
+    });
   }
 
   private async assertExists(id: string, companyId: string, employeeId: string) {

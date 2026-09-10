@@ -40,12 +40,12 @@ describe('EmployeeWarningsService', () => {
     });
   });
 
-  it('lists warnings only for the given employee', async () => {
+  it('lists warnings only for the given employee, filtered by companyId too', async () => {
     employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1' });
     prisma.employeeWarning.findMany.mockResolvedValue([]);
     await service.findAllForEmployee('employee-1');
     expect(prisma.employeeWarning.findMany).toHaveBeenCalledWith({
-      where: { employeeId: 'employee-1' },
+      where: { employeeId: 'employee-1', companyId: 'company-1' },
       orderBy: { occurredAt: 'desc' },
     });
   });

@@ -16,14 +16,22 @@ export class EmployeeRecurringPaymentsService {
 
   async create(employeeId: string, dto: CreateEmployeeRecurringPaymentDto) {
     const employee = await this.employeesService.assertExists(employeeId);
+    // Mesma razão do bloqueio em generateCharge: não faz sentido criar uma nova
+    // obrigação recorrente para quem já foi desligado.
+    if (employee.status === 'INACTIVE') {
+      throw new BadRequestException(`Não é possível criar recorrência: funcionário ${employeeId} está inativo`);
+    }
     return this.prisma.employeeRecurringPayment.create({
       data: { ...dto, companyId: employee.companyId, employeeId },
     });
   }
 
   async findAllForEmployee(employeeId: string) {
-    await this.employeesService.assertExists(employeeId);
-    return this.prisma.employeeRecurringPayment.findMany({ where: { employeeId }, orderBy: { createdAt: 'asc' } });
+    const employee = await this.employeesService.assertExists(employeeId);
+    return this.prisma.employeeRecurringPayment.findMany({
+      where: { employeeId, companyId: employee.companyId },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
   // Rota top-level (employee-recurring-payments/:id, sem employeeId na URL) —

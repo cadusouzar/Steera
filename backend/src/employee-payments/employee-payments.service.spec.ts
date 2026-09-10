@@ -59,6 +59,30 @@ describe('EmployeePaymentsService', () => {
     expect(result.items[0].derivedStatus).toBe('overdue');
   });
 
+  it('filters nested payment listings by companyId too, not just employeeId', async () => {
+    employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1' });
+    prisma.employeePayment.findMany.mockResolvedValue([]);
+    prisma.employeePayment.count.mockResolvedValue(0);
+
+    await service.findAllForEmployee('employee-1', {});
+
+    expect(prisma.employeePayment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { employeeId: 'employee-1', companyId: 'company-1' } }),
+    );
+    expect(prisma.employeePayment.count).toHaveBeenCalledWith({
+      where: { employeeId: 'employee-1', companyId: 'company-1' },
+    });
+  });
+
+  it('allows a one-off payment for an inactive employee (rescisão/pagamento final)', async () => {
+    employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'INACTIVE' });
+    prisma.employeePayment.create.mockResolvedValue({ id: 'payment-1', status: 'PENDING', dueDate: new Date('2999-01-01') });
+
+    await service.create('employee-1', { description: 'Rescisão', amount: 8000, dueDate: '2026-10-05' });
+
+    expect(prisma.employeePayment.create).toHaveBeenCalled();
+  });
+
   it('scopes the lookup to the current company (missing id or another company both 404)', async () => {
     prisma.employeePayment.findFirst.mockResolvedValue(null);
     await expect(service.findOne('missing')).rejects.toBeInstanceOf(NotFoundException);

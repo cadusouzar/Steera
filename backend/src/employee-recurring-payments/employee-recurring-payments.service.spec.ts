@@ -28,6 +28,27 @@ describe('EmployeeRecurringPaymentsService', () => {
     service = module.get(EmployeeRecurringPaymentsService);
   });
 
+  it('rejects creating a recurring payment for an inactive employee', async () => {
+    employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'INACTIVE' });
+
+    await expect(
+      service.create('employee-1', { description: 'Salário', amount: 5000, dueDay: 5 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.employeeRecurringPayment.create).not.toHaveBeenCalled();
+  });
+
+  it('filters nested recurring-payment listings by companyId too, not just employeeId', async () => {
+    employeesService.assertExists.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' });
+    prisma.employeeRecurringPayment.findMany.mockResolvedValue([]);
+
+    await service.findAllForEmployee('employee-1');
+
+    expect(prisma.employeeRecurringPayment.findMany).toHaveBeenCalledWith({
+      where: { employeeId: 'employee-1', companyId: 'company-1' },
+      orderBy: { createdAt: 'asc' },
+    });
+  });
+
   it('rejects generating a charge when the employee is inactive', async () => {
     prisma.employeeRecurringPayment.findFirst.mockResolvedValue({
       id: 'rec-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE',
