@@ -20,6 +20,7 @@ describe('ClientsService', () => {
         count: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        deleteMany: jest.fn(),
       },
       receivable: {
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
@@ -197,6 +198,34 @@ describe('ClientsService', () => {
         data: { status: 'ACTIVE', deactivatedAt: null },
       });
       expect(result).toEqual({ id: '1', status: 'ACTIVE', includeInRevenueReport: false, deactivatedAt: null });
+    });
+  });
+
+  describe('purgeExpiredTrash', () => {
+    it('deletes only clients inactive for more than 30 days with includeInRevenueReport=false', async () => {
+      prisma.client.deleteMany.mockResolvedValue({ count: 2 });
+
+      const count = await service.purgeExpiredTrash();
+
+      expect(prisma.client.deleteMany).toHaveBeenCalledWith({
+        where: {
+          status: 'INACTIVE',
+          includeInRevenueReport: false,
+          deactivatedAt: { lt: expect.any(Date) },
+        },
+      });
+      expect(count).toBe(2);
+    });
+
+    it('the cutoff passed to Prisma is approximately 30 days in the past', async () => {
+      prisma.client.deleteMany.mockResolvedValue({ count: 0 });
+      const before = Date.now();
+
+      await service.purgeExpiredTrash();
+
+      const cutoff: Date = prisma.client.deleteMany.mock.calls[0][0].where.deactivatedAt.lt;
+      const expectedCutoff = before - 30 * 24 * 60 * 60 * 1000;
+      expect(Math.abs(cutoff.getTime() - expectedCutoff)).toBeLessThan(5000);
     });
   });
 });

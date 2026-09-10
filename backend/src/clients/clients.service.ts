@@ -131,4 +131,22 @@ export class ClientsService {
       data: { status: ClientStatus.ACTIVE, deactivatedAt: null },
     });
   }
+
+  // Only the "not kept in reports" group is ever auto-purged — clients
+  // deactivated with includeInRevenueReport=true stay inactive forever
+  // (purging them would destroy the history the user explicitly asked to
+  // keep in the financial report). The FK cascade on Receivable/Subscription
+  // (onDelete: Cascade) takes care of deleting their historical data too.
+  async purgeExpiredTrash(): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    const result = await this.prisma.client.deleteMany({
+      where: {
+        status: ClientStatus.INACTIVE,
+        includeInRevenueReport: false,
+        deactivatedAt: { lt: cutoff },
+      },
+    });
+    return result.count;
+  }
 }
