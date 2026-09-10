@@ -17,7 +17,7 @@ export class VacationSchedulesService {
 
   private daysAlreadyTaken(employeeId: string) {
     return this.prisma.vacationSchedule
-      .findMany({ where: { employeeId, status: { in: ['COMPLETED', 'IN_PROGRESS'] } } })
+      .findMany({ where: { employeeId, status: { in: ['SCHEDULED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED'] } } })
       .then((rows) => rows.reduce((sum, row) => sum + row.daysCount, 0));
   }
 
