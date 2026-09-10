@@ -20,13 +20,16 @@ interface ClientFinanceDrawerProps {
   onAddReceivable: (clientId: string, newRec: Omit<Receivable, 'id'>) => void;
   onAddSubscription: (clientId: string, sub: Omit<Subscription, 'id'>) => void;
   onDeleteSubscription: (clientId: string, subId: string) => void;
-  onGenerateCharge: (clientId: string, subId: string) => void;
+  onGenerateCharge: (clientId: string, subId: string) => Promise<boolean> | void;
   isLoading?: boolean;
+  actionError?: string | null;
+  onDismissError?: () => void;
 }
 
 const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   client, onClose, onMarkAsPaid, onUnmarkAsPaid, onDeleteReceivable,
-  onAddReceivable, onAddSubscription, onDeleteSubscription, onGenerateCharge, isLoading
+  onAddReceivable, onAddSubscription, onDeleteSubscription, onGenerateCharge, isLoading,
+  actionError, onDismissError
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [addType, setAddType] = useState<'single' | 'recurring'>('single');
@@ -105,13 +108,25 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
     }, 3000);
   };
 
-  const triggerGenerateCharge = (subId: string) => {
-    onGenerateCharge(client.id, subId);
+  const triggerGenerateCharge = async (subId: string) => {
+    const succeeded = await onGenerateCharge(client.id, subId);
+    if (succeeded === false) return; // e.g. "already generated this month" — error shown above, don't flash success
     setChargeGenerated(subId);
     setTimeout(() => {
       setChargeGenerated(null);
     }, 3000);
   };
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  // Best-effort UI hint only — the backend is still the source of truth (a 409
+  // from onGenerateCharge is handled above regardless of this check).
+  const hasChargeThisMonth = (subscriptionId: string) =>
+    client.receivables.some(
+      (r) => r.subscriptionId === subscriptionId && r.referenceYear === currentYear && r.referenceMonth === currentMonth,
+    );
 
   return (
     <AnimatePresence>
@@ -157,6 +172,15 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-8">
+
+            {actionError && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 text-sm font-medium">
+                <span>{actionError}</span>
+                <button onClick={onDismissError} className="text-red-600 hover:text-red-700 shrink-0">
+                  <X size={16} />
+                </button>
+              </div>
+            )}
 
             {isLoading && (
               <div className="flex flex-col items-center justify-center py-10 text-muted">
@@ -281,8 +305,12 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                             <span className="text-xs font-bold text-green-500 flex items-center gap-1">
                               <CheckCircle2 size={14} /> Mensalidade Gerada!
                             </span>
+                          ) : hasChargeThisMonth(sub.id) ? (
+                            <span className="flex items-center gap-1.5 text-xs font-bold text-muted bg-secondary/50 px-3 py-2 rounded-xl border border-border/40">
+                              <CheckCircle2 size={14} /> Fatura deste mês já gerada
+                            </span>
                           ) : (
-                            <button 
+                            <button
                               onClick={() => triggerGenerateCharge(sub.id)}
                               className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-white bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm"
                             >

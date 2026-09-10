@@ -33,6 +33,9 @@ interface ApiReceivable {
   amount: number | string;
   dueDate: string;
   derivedStatus: 'pending' | 'paid' | 'overdue';
+  subscriptionId?: string | null;
+  referenceYear?: number | null;
+  referenceMonth?: number | null;
 }
 interface ApiSubscription {
   id: string;
@@ -68,6 +71,11 @@ export interface Receivable {
   amount: number;
   dueDate: string;
   status: 'paid' | 'pending' | 'overdue';
+  // Only set for receivables generated from a subscription's "Gerar Fatura do Mês" —
+  // lets the UI know a given month is already covered without waiting for a 409.
+  subscriptionId?: string | null;
+  referenceYear?: number | null;
+  referenceMonth?: number | null;
 }
 export interface Subscription {
   id: string;
@@ -111,6 +119,9 @@ function mapReceivable(r: ApiReceivable): Receivable {
     amount: Number(r.amount),
     dueDate: r.dueDate.slice(0, 10),
     status: r.derivedStatus,
+    subscriptionId: r.subscriptionId ?? null,
+    referenceYear: r.referenceYear ?? null,
+    referenceMonth: r.referenceMonth ?? null,
   };
 }
 

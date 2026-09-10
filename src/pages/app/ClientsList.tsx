@@ -123,6 +123,7 @@ const ClientsList = () => {
 
   const handleSelectClient = async (client: Client) => {
     setSelectedClient(client);
+    setActionError(null);
     setIsDrawerLoading(true);
     try {
       const [receivables, subscriptions] = await Promise.all([
@@ -199,12 +200,14 @@ const ClientsList = () => {
     }
   };
 
-  const handleGenerateSubscriptionCharge = async (clientId: string, subId: string) => {
+  const handleGenerateSubscriptionCharge = async (clientId: string, subId: string): Promise<boolean> => {
     try {
       await api.generateCharge(subId);
       await refreshClientDetails(clientId);
+      return true;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível gerar a fatura do mês.');
+      return false;
     }
   };
 
@@ -436,6 +439,8 @@ const ClientsList = () => {
           onDeleteSubscription={handleDeleteSubscription}
           onGenerateCharge={handleGenerateSubscriptionCharge}
           isLoading={isDrawerLoading}
+          actionError={actionError}
+          onDismissError={() => setActionError(null)}
         />,
         document.body
       )}
