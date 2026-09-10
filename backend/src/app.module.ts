@@ -1,6 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { CompanyModule } from './company/company.module';
+import { RolesModule } from './roles/roles.module';
+import { EmployeesModule } from './employees/employees.module';
+import { EmployeeWarningsModule } from './employee-warnings/employee-warnings.module';
+import { EmployeeRecurringPaymentsModule } from './employee-recurring-payments/employee-recurring-payments.module';
+import { EmployeePaymentsModule } from './employee-payments/employee-payments.module';
+import { VacationsModule } from './vacations/vacations.module';
 import { ClientsModule } from './clients/clients.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReceivablesModule } from './receivables/receivables.module';
@@ -14,6 +21,13 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    CompanyModule,
+    RolesModule,
+    EmployeesModule,
+    EmployeeWarningsModule,
+    EmployeeRecurringPaymentsModule,
+    EmployeePaymentsModule,
+    VacationsModule,
     ClientsModule,
     ReceivablesModule,
     SubscriptionsModule,

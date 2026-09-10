@@ -102,3 +102,164 @@ model Subscription {
 
   @@index([clientId])
 }
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Role {
+  id          String     @id @default(cuid())
+  companyId   String
+  name        String
+  department  String
+  colorHex    String     @default("#2563EB")
+  description String?
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  employees   Employee[]
+
+  @@index([companyId])
+  @@index([active])
+}
+
+enum ContractType {
+  CLT
+  PJ
+  ESTAGIO
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Employee {
+  id                      String         @id @default(cuid())
+  companyId               String
+  roleId                  String
+  role                    Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  fullName                String
+  cpf                     String
+  email                   String?
+  phone                   String?
+  address                 String?
+  contractType            ContractType
+  admissionDate           DateTime       @db.Date
+  terminationDate         DateTime?      @db.Date
+  status                  EmployeeStatus @default(ACTIVE)
+  department              String
+  baseValue               Decimal        @db.Decimal(10, 2)
+  paymentDueDay           Int
+  payOnLastBusinessDay    Boolean        @default(false)
+  bankDetails             String?
+  salaryRecurrenceEnabled Boolean        @default(true)
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  warnings                EmployeeWarning[]
+  recurringPayments       EmployeeRecurringPayment[]
+  payments                EmployeePayment[]
+  vacationSchedules       VacationSchedule[]
+
+  @@unique([companyId, cpf])
+  @@index([companyId])
+  @@index([roleId])
+  @@index([status])
+}
+
+model EmployeeWarning {
+  id         String   @id @default(cuid())
+  companyId  String
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  occurredAt DateTime @db.Date
+  reason     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([employeeId])
+}
+
+enum EmployeeRecurringPaymentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum EmployeePaymentStatus {
+  PENDING
+  PAID
+}
+
+model EmployeeRecurringPayment {
+  id          String                         @id @default(cuid())
+  companyId   String
+  employeeId  String
+  employee    Employee                       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  description String
+  amount      Decimal                        @db.Decimal(10, 2)
+  dueDay      Int
+  status      EmployeeRecurringPaymentStatus @default(ACTIVE)
+  createdAt   DateTime                       @default(now())
+  updatedAt   DateTime                       @updatedAt
+
+  payments EmployeePayment[]
+
+  @@index([companyId])
+  @@index([employeeId])
+}
+
+model EmployeePayment {
+  id                 String                   @id @default(cuid())
+  companyId          String
+  employeeId         String
+  employee           Employee                 @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  recurringPaymentId String?
+  recurringPayment   EmployeeRecurringPayment? @relation(fields: [recurringPaymentId], references: [id], onDelete: SetNull)
+  referenceYear      Int?
+  referenceMonth     Int?
+  description        String
+  amount             Decimal                  @db.Decimal(10, 2)
+  dueDate            DateTime                 @db.Date
+  status             EmployeePaymentStatus    @default(PENDING)
+  paidAt             DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@unique([recurringPaymentId, referenceYear, referenceMonth])
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+enum VacationScheduleStatus {
+  SCHEDULED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model VacationSchedule {
+  id                     String                 @id @default(cuid())
+  companyId              String
+  employeeId             String
+  employee               Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  acquisitivePeriodStart DateTime               @db.Date
+  acquisitivePeriodEnd   DateTime               @db.Date
+  startDate              DateTime               @db.Date
+  endDate                DateTime               @db.Date
+  daysCount              Int
+  status                 VacationScheduleStatus @default(SCHEDULED)
+  notes                  String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([status])
+}

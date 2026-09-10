@@ -1,25 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ClientStatus, Receivable, ReceivableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { parseDateOnly, startOfToday } from '../common/date.util';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
 import { QueryReceivablesDto } from './dto/query-receivables.dto';
 import { UpdateReceivableDto } from './dto/update-receivable.dto';
 
 export type DerivedReceivableStatus = 'pending' | 'paid' | 'overdue';
-
-// `dueDate` is `@db.Date` in Postgres and Prisma always reads those back as UTC
-// midnight, so every date-only value handled here is normalized to UTC midnight
-// too. Using local midnight would make a receivable due "today" compare as
-// overdue in any timezone west of UTC (e.g. UTC-3).
-export function startOfToday(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-}
-
-function parseDateOnly(value: string): Date {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
-}
 
 export function deriveReceivableStatus(
   receivable: Pick<Receivable, 'status' | 'dueDate'>,

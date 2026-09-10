@@ -73,10 +73,40 @@ npm run test:e2e          # teste de integração (precisa de PostgreSQL local r
 - `DATABASE_URL` — string de conexão do PostgreSQL local (`postgresql://USUARIO:SENHA@localhost:5432/quickflow?schema=public`)
 - `PORT` — porta HTTP do backend (padrão 3001)
 
-**Arquitetura:** 4 módulos (`ClientsModule`, `ReceivablesModule`, `SubscriptionsModule`,
-`ReportsModule`) + `PrismaModule` global. "Overdue" em lançamentos é sempre derivado em runtime
-(nunca persistido). Ver `[[ARQUITETURA]]`, `[[BANCO-DE-DADOS]]`, `[[API]]`, `[[AMBIENTE-LOCAL]]` e
-`[[DECISOES-TECNICAS]]` no vault (`B:\Quickflow\Quickflow`) para detalhes.
+**Arquitetura:** 4 módulos financeiros (`ClientsModule`, `ReceivablesModule`, `SubscriptionsModule`,
+`ReportsModule`) + `PrismaModule` global + 7 módulos de Recursos Humanos (`CompanyModule`,
+`RolesModule`, `EmployeesModule`, `EmployeeWarningsModule`, `EmployeePaymentsModule`,
+`EmployeeRecurringPaymentsModule`, `VacationsModule`). "Overdue" em lançamentos/pagamentos é sempre
+derivado em runtime (nunca persistido). Ver `[[ARQUITETURA]]`, `[[BANCO-DE-DADOS]]`, `[[API]]`,
+`[[AMBIENTE-LOCAL]]` e `[[DECISOES-TECNICAS]]` no vault (`B:\Quickflow\Quickflow`) para detalhes.
+
+**Módulo de RH (`RolesModule`, `EmployeesModule`, `EmployeeWarningsModule`, `EmployeePaymentsModule`,
+`EmployeeRecurringPaymentsModule`, `VacationsModule`, `CompanyModule`):** cobre Cargos, Funcionários
+(CPF único **por empresa**, mascarado/omitido de dados bancários na listagem por LGPD — completo só
+em `GET /employees/:id`), Advertências (sempre aninhadas sob `/employees/:employeeId/warnings`),
+Pagamentos avulsos e recorrentes (espelha o par `Receivable`/`Subscription`, mesma regra de overdue
+derivado) e Férias.
+
+- **Stub de empresa única, não é autenticação real:** nenhuma rota de RH aceita `companyId` do
+  cliente — todo service resolve a "empresa atual" via `CompanyContextService
+  .getCurrentCompanyId()`, um stub documentado que sempre aponta para a única linha `Company` do
+  banco (criada sob demanda). **Autenticação/multi-tenant real não está implementada em lugar
+  nenhum do projeto** (frontend nem backend) — decisão explícita e pendência conhecida, não uma
+  omissão. Ver `[[DECISOES-TECNICAS]]` seção 8.
+- **Férias:** `VacationCalculationService` é uma calculadora pura (zero acesso a banco) que
+  implementa só a regra básica CLT — 30 dias por período aquisitivo completo de 12 meses + dias
+  proporcionais do período incompleto + adicional constitucional de 1/3 (CF/88 art. 7º XVII).
+  **Fora de escopo, de propósito** (não aproximado): faltas injustificadas, abono pecuniário,
+  adiantamento de 13º, INSS/IRRF, férias em dobro/vencidas, fracionamento em períodos. Disponível
+  só para `contractType = CLT` — outros vínculos recebem `422` explícito.
+- **Frontend de RH continua 100% mockado:** `src/pages/app/Roles.tsx`, `EmployeesList.tsx`,
+  `EmployeeForm.tsx` e `src/components/FinanceAndVacationModal.tsx` **não foram tocados nem
+  integrados** a este backend nesta etapa — só o backend foi construído. Essa integração é
+  trabalho futuro.
+- Outras pendências conhecidas (ver `[[DECISOES-TECNICAS]]` seção 8): sem histórico de mudança de
+  cargo (só o `roleId` atual é rastreado); checagem de CPF único é TOCTOU (não captura violação de
+  constraint); `EmployeeRecurringPaymentsService.generateCharge` só verifica o status do
+  funcionário, não o da própria recorrência.
 
 **Exclusão de cliente é sempre lógica, nunca física:** `PATCH /clients/:id/deactivate` marca o
 cliente como `INACTIVE` mas nunca apaga o registro nem seus lançamentos. O flag

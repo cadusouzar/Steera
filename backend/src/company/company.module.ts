@@ -1,0 +1,8 @@
+import { Module } from '@nestjs/common';
+import { CompanyContextService } from './company-context.service';
+
+@Module({
+  providers: [CompanyContextService],
+  exports: [CompanyContextService],
+})
+export class CompanyModule {}
