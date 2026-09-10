@@ -18,6 +18,8 @@ export interface Client extends ClientRecord {
 
 const EMPTY_TOTALS: ClientTotals = { totalPaid: 0, totalPending: 0, totalOverdue: 0 };
 
+const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+
 const ClientsList = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [totalsByClientId, setTotalsByClientId] = useState<Record<string, ClientTotals>>({});
@@ -279,19 +281,23 @@ const ClientsList = () => {
         <div className="flex-1 overflow-hidden relative">
           <div className="absolute inset-0 overflow-auto custom-scrollbar">
             <div className="overflow-x-auto min-h-full">
-              <table className="w-full text-left border-collapse min-w-[800px]">
+              <table className="w-full text-left border-collapse min-w-[1400px]">
                 <thead>
                   <tr className="border-b-2 border-border/60 bg-secondary/10 sticky top-0 z-10 backdrop-blur-md">
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Nome</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Categoria / Obs</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Contato</th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Gerado</th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Pago</th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Pendente</th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Faltante</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Saúde Financeira</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
                   {isLoading && (
                     <tr>
-                      <td colSpan={4} className="px-8 py-16 text-center text-muted">
+                      <td colSpan={8} className="px-8 py-16 text-center text-muted">
                         <Loader2 size={28} className="mx-auto animate-spin mb-3 opacity-60" />
                         <p className="text-sm font-medium">Carregando clientes...</p>
                       </td>
@@ -300,7 +306,7 @@ const ClientsList = () => {
 
                   {!isLoading && loadError && (
                     <tr>
-                      <td colSpan={4} className="px-8 py-16 text-center text-red-500">
+                      <td colSpan={8} className="px-8 py-16 text-center text-red-500">
                         <AlertCircle size={32} className="mx-auto mb-3" />
                         <p className="text-sm font-bold">{loadError}</p>
                         <button
@@ -316,7 +322,10 @@ const ClientsList = () => {
                   {!isLoading && !loadError && (
                     <AnimatePresence>
                       {filteredClients.map((client, index) => {
-                        const summary = getHealthBadge(totalsByClientId[client.id] ?? EMPTY_TOTALS);
+                        const totals = totalsByClientId[client.id] ?? EMPTY_TOTALS;
+                        const summary = getHealthBadge(totals);
+                        const totalGenerated = totals.totalPaid + totals.totalPending + totals.totalOverdue;
+                        const totalOutstanding = totals.totalPending + totals.totalOverdue;
                         return (
                           <motion.tr
                             key={client.id}
@@ -342,6 +351,10 @@ const ClientsList = () => {
                             </td>
                             <td className="px-8 py-5 text-muted font-medium">{client.category || '-'}</td>
                             <td className="px-8 py-5 text-muted font-medium">{client.contact}</td>
+                            <td className="px-8 py-5 text-right font-medium text-foreground">{formatCurrency(totalGenerated)}</td>
+                            <td className="px-8 py-5 text-right font-medium text-green-600 dark:text-green-400">{formatCurrency(totals.totalPaid)}</td>
+                            <td className="px-8 py-5 text-right font-medium text-orange-500">{formatCurrency(totals.totalPending)}</td>
+                            <td className="px-8 py-5 text-right font-medium text-red-500">{formatCurrency(totalOutstanding)}</td>
                             <td className="px-8 py-5 text-right">
                               <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border shadow-sm ${summary.bg} ${summary.color} border-${summary.color.split('-')[1]}-500/20`}>
                                 {summary.label === 'Em Dia' && <CheckCircle2 size={14} />}
@@ -358,7 +371,7 @@ const ClientsList = () => {
 
                   {!isLoading && !loadError && filteredClients.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-8 py-16 text-center text-muted">
+                      <td colSpan={8} className="px-8 py-16 text-center text-muted">
                         <div className="flex flex-col items-center justify-center">
                           <HeartHandshake size={48} className="opacity-20 mb-4" />
                           <p className="text-lg font-medium">Nenhum cliente encontrado.</p>
