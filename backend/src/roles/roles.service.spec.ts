@@ -33,7 +33,7 @@ describe('RolesService', () => {
     });
   });
 
-  it('rejects an invalid colorHex before hitting the database', async () => {
+  it('passes a valid colorHex through to the database unchanged', async () => {
     // Validação real acontece no DTO via ValidationPipe (e2e); aqui garantimos
     // que o service aceita o valor já validado sem reformatá-lo.
     prisma.role.findFirst.mockResolvedValue(null);
