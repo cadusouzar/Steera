@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
+import { DeactivateClientDto } from './dto/deactivate-client.dto';
 import { QueryClientsDto } from './dto/query-clients.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 
@@ -26,5 +27,15 @@ export class ClientsController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateClientDto) {
     return this.clientsService.update(id, dto);
+  }
+
+  @Patch(':id/deactivate')
+  deactivate(@Param('id') id: string, @Body() dto: DeactivateClientDto) {
+    return this.clientsService.deactivate(id, dto);
+  }
+
+  @Patch(':id/restore')
+  restore(@Param('id') id: string) {
+    return this.clientsService.restore(id);
   }
 }

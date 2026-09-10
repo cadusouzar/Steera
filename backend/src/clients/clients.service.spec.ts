@@ -173,4 +173,30 @@ describe('ClientsService', () => {
       expect(passedAt.getTime()).toBeLessThanOrEqual(after);
     });
   });
+
+  describe('restore', () => {
+    it('throws NotFoundException when the client does not exist', async () => {
+      prisma.client.findUnique.mockResolvedValue(null);
+      await expect(service.restore('missing')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws ConflictException when the client is already active', async () => {
+      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE' });
+      await expect(service.restore('1')).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.client.update).not.toHaveBeenCalled();
+    });
+
+    it('reactivates the client and clears deactivatedAt, without touching includeInRevenueReport', async () => {
+      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'INACTIVE', includeInRevenueReport: false });
+      prisma.client.update.mockResolvedValue({ id: '1', status: 'ACTIVE', includeInRevenueReport: false, deactivatedAt: null });
+
+      const result = await service.restore('1');
+
+      expect(prisma.client.update).toHaveBeenCalledWith({
+        where: { id: '1' },
+        data: { status: 'ACTIVE', deactivatedAt: null },
+      });
+      expect(result).toEqual({ id: '1', status: 'ACTIVE', includeInRevenueReport: false, deactivatedAt: null });
+    });
+  });
 });

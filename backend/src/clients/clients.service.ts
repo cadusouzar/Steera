@@ -116,4 +116,19 @@ export class ClientsService {
 
     return updatedClient;
   }
+
+  // Reverses a deactivation — works for either group (kept in reports or
+  // not). Never touches includeInRevenueReport: that decision stays
+  // whatever it was set to at the last /deactivate call, independent of
+  // status.
+  async restore(id: string) {
+    const client = await this.assertExists(id);
+    if (client.status === ClientStatus.ACTIVE) {
+      throw new ConflictException(`Cliente ${id} já está ativo`);
+    }
+    return this.prisma.client.update({
+      where: { id },
+      data: { status: ClientStatus.ACTIVE, deactivatedAt: null },
+    });
+  }
 }
