@@ -127,6 +127,8 @@ model Employee {
   createdAt               DateTime       @default(now())
   updatedAt               DateTime       @updatedAt
   warnings                EmployeeWarning[]
+  recurringPayments       EmployeeRecurringPayment[]
+  payments                EmployeePayment[]
 
   @@unique([companyId, cpf])
   @@index([companyId])
@@ -146,4 +148,56 @@ model EmployeeWarning {
 
   @@index([companyId])
   @@index([employeeId])
+}
+
+enum EmployeeRecurringPaymentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum EmployeePaymentStatus {
+  PENDING
+  PAID
+}
+
+model EmployeeRecurringPayment {
+  id          String                         @id @default(cuid())
+  companyId   String
+  employeeId  String
+  employee    Employee                       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  description String
+  amount      Decimal                        @db.Decimal(10, 2)
+  dueDay      Int
+  status      EmployeeRecurringPaymentStatus @default(ACTIVE)
+  createdAt   DateTime                       @default(now())
+  updatedAt   DateTime                       @updatedAt
+
+  payments EmployeePayment[]
+
+  @@index([companyId])
+  @@index([employeeId])
+}
+
+model EmployeePayment {
+  id                 String                   @id @default(cuid())
+  companyId          String
+  employeeId         String
+  employee           Employee                 @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  recurringPaymentId String?
+  recurringPayment   EmployeeRecurringPayment? @relation(fields: [recurringPaymentId], references: [id], onDelete: SetNull)
+  referenceYear      Int?
+  referenceMonth     Int?
+  description        String
+  amount             Decimal                  @db.Decimal(10, 2)
+  dueDate            DateTime                 @db.Date
+  status             EmployeePaymentStatus    @default(PENDING)
+  paidAt             DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@unique([recurringPaymentId, referenceYear, referenceMonth])
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([dueDate])
+  @@index([status])
 }

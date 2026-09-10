@@ -115,19 +115,28 @@ export class EmployeesService {
     });
   }
 
-  // Nunca apaga o funcionário — só marca INACTIVE. A partir da Task 5, o
-  // mesmo fluxo passa a também pausar as recorrências ativas do funcionário
-  // (mesmo padrão de ClientsService.deactivate, que pausa Subscriptions
-  // ativas do cliente) — EmployeeRecurringPayment ainda não existe nesta task.
+  // Nunca apaga o funcionário — só marca INACTIVE e, na mesma transação,
+  // pausa as recorrências ativas dele (mesmo padrão de
+  // ClientsService.deactivate, que pausa Subscriptions ativas do cliente —
+  // impede novas recorrências futuras sem apagar o histórico já gerado).
   async deactivate(id: string) {
     const employee = await this.assertExists(id);
     if (employee.status === EmployeeStatus.INACTIVE) {
       throw new ConflictException(`Funcionário ${id} já está inativo`);
     }
-    return this.prisma.employee.update({
-      where: { id },
-      data: { status: EmployeeStatus.INACTIVE, terminationDate: new Date() },
-    });
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.employee.update({
+        where: { id },
+        data: { status: EmployeeStatus.INACTIVE, terminationDate: new Date() },
+      }),
+      this.prisma.employeeRecurringPayment.updateMany({
+        where: { employeeId: id, status: 'ACTIVE' },
+        data: { status: 'INACTIVE' },
+      }),
+    ]);
+
+    return updated;
   }
 
   async reactivate(id: string) {

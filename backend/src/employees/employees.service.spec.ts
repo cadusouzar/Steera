@@ -6,12 +6,19 @@ import { EmployeesService } from './employees.service';
 
 describe('EmployeesService', () => {
   let service: EmployeesService;
-  let prisma: { employee: Record<string, jest.Mock>; role: Record<string, jest.Mock> };
+  let prisma: {
+    employee: Record<string, jest.Mock>;
+    role: Record<string, jest.Mock>;
+    employeeRecurringPayment: Record<string, jest.Mock>;
+    $transaction: jest.Mock;
+  };
 
   beforeEach(async () => {
     prisma = {
       employee: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn(), update: jest.fn() },
       role: { findFirst: jest.fn() },
+      employeeRecurringPayment: { updateMany: jest.fn() },
+      $transaction: jest.fn(),
     };
     const module = await Test.createTestingModule({
       providers: [
@@ -78,13 +85,21 @@ describe('EmployeesService', () => {
     await expect(service.findOne('employee-other-company')).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('deactivating an employee flips status but never deletes the row', async () => {
+  it('deactivating an employee flips status, sets terminationDate, and pauses active recurring payments in one transaction', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' });
-    prisma.employee.update.mockResolvedValue({ id: 'employee-1', status: 'INACTIVE' });
+    // Mimics real Prisma: calling `.update()`/`.updateMany()` without awaiting
+    // returns a (thenable) operation object synchronously, never `undefined` —
+    // needed so the array built inline for `$transaction([...])` has non-nullish
+    // elements for `expect.anything()` to match below.
+    prisma.employee.update.mockReturnValue({});
+    prisma.employeeRecurringPayment.updateMany.mockReturnValue({});
+    prisma.$transaction.mockResolvedValue([{ id: 'employee-1', status: 'INACTIVE' }, { count: 2 }]);
+
     await service.deactivate('employee-1');
-    expect(prisma.employee.update).toHaveBeenCalledWith({
-      where: { id: 'employee-1' },
-      data: { status: 'INACTIVE', terminationDate: expect.any(Date) },
-    });
+
+    expect(prisma.$transaction).toHaveBeenCalledWith([
+      expect.anything(),
+      expect.anything(),
+    ]);
   });
 });
