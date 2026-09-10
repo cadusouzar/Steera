@@ -26,9 +26,9 @@ interface ClientFinanceDrawerProps {
   onDismissError?: () => void;
   onUpdateClient: (
     clientId: string,
-    dto: Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>,
+    dto: Partial<{ name: string; category: string; contact: string; email: string }>,
   ) => Promise<boolean>;
-  onDeactivateClient: (clientId: string) => Promise<boolean>;
+  onDeactivateClient: (clientId: string, includeInRevenueReport: boolean) => Promise<boolean>;
 }
 
 const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
@@ -56,15 +56,17 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
 
   // Client edit state
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState<Partial<{ name: string; category: string; contact: string; email: string; status: 'active' | 'inactive' }>>({});
+  const [editForm, setEditForm] = useState<Partial<{ name: string; category: string; contact: string; email: string }>>({});
   const [isSaving, setIsSaving] = useState(false);
 
-  // Client "delete" (inactivate) state
-  const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
+  // Client "delete" (inactivate) state — a confirmation modal, not an inline
+  // toggle, because the user must pick one of two mutually exclusive options
+  // (keep vs. remove from the revenue report), not just confirm/cancel.
+  const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeactivating, setIsDeactivating] = useState(false);
 
   const handleEditClick = () => {
-    setEditForm({ name: client.name, category: client.category, contact: client.contact, email: client.email ?? '', status: client.status });
+    setEditForm({ name: client.name, category: client.category, contact: client.contact, email: client.email ?? '' });
     setIsEditing(true);
   };
 
@@ -80,11 +82,15 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
     if (ok) setIsEditing(false);
   };
 
-  const handleDeactivate = async () => {
+  const handleConfirmDeactivate = async (includeInRevenueReport: boolean) => {
+    if (isDeactivating) return; // avoid duplicate submits from a double-click
     setIsDeactivating(true);
-    await onDeactivateClient(client.id);
+    await onDeactivateClient(client.id, includeInRevenueReport);
     setIsDeactivating(false);
-    setConfirmingDeactivate(false);
+    // Always close: on success the drawer itself closes (parent clears
+    // selectedClient); on failure the drawer's actionError banner explains
+    // what happened, so a dangling modal isn't needed either way.
+    setIsDeactivateModalOpen(false);
   };
 
   const getStatusStyle = (status: string) => {
@@ -255,20 +261,6 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                     onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
                     className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                   />
-                </div>
-                <div className="sm:col-span-2 flex items-center justify-between p-3.5 bg-background rounded-xl border border-border/60">
-                  <div>
-                    <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-0.5">Status</p>
-                    <p className="text-sm font-medium text-foreground">Condição do cliente</p>
-                  </div>
-                  <select
-                    value={editForm.status ?? client.status}
-                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value as 'active' | 'inactive' })}
-                    className="bg-secondary/30 border border-border rounded-xl px-3 py-2 text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  >
-                    <option value="active">ATIVO</option>
-                    <option value="inactive">INATIVO</option>
-                  </select>
                 </div>
               </div>
             )}
@@ -571,50 +563,13 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
             </div>
             )}
 
-            {!isEditing && !isLoading && client.status === 'active' && (
-              <div className="border-t border-border/40 pt-6">
-                <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3">Zona de Risco</h4>
-                <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  {confirmingDeactivate ? (
-                    <>
-                      <span className="text-xs font-bold text-red-500 flex-1">
-                        Tem certeza? O cliente é inativado (não removido) — o histórico financeiro fica preservado e dá pra reativar depois.
-                      </span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button onClick={() => setConfirmingDeactivate(false)} className="text-xs font-bold px-3 py-1.5 text-foreground/80 hover:text-foreground bg-secondary rounded-lg transition-colors">
-                          Cancelar
-                        </button>
-                        <motion.button
-                          initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
-                          onClick={handleDeactivate}
-                          disabled={isDeactivating}
-                          className="flex items-center gap-1 text-xs font-bold text-white bg-red-500 hover:bg-red-600 disabled:opacity-60 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
-                        >
-                          <Trash2 size={14} /> {isDeactivating ? 'Excluindo...' : 'Confirmar Exclusão'}
-                        </motion.button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-xs text-muted flex-1">Remove o cliente da lista de ativos, preservando todo o histórico.</span>
-                      <button
-                        onClick={() => setConfirmingDeactivate(true)}
-                        className="flex items-center gap-1 text-xs font-bold text-red-500 hover:text-white hover:bg-red-500 px-3 py-1.5 rounded-lg transition-colors border border-red-500/30 shrink-0"
-                      >
-                        <Trash2 size={14} /> Excluir Cliente
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
           </div>
 
-          {/* Edit Actions Footer */}
+          {/* Footer: edit actions, or the delete button — mutually exclusive with editing */}
           <AnimatePresence>
-            {isEditing && (
+            {isEditing ? (
               <motion.div
+                key="edit-footer"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 20 }}
@@ -635,10 +590,100 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                   {isSaving ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </motion.div>
+            ) : (
+              !isLoading && client.status === 'active' && (
+                <motion.div
+                  key="delete-footer"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                  className="p-6 md:p-8 border-t border-border/40 bg-secondary/10 shrink-0 flex items-center justify-between gap-4"
+                >
+                  <button
+                    onClick={() => setIsDeactivateModalOpen(true)}
+                    className="px-5 py-3.5 rounded-xl font-medium text-red-500 hover:bg-red-500/10 transition-colors text-sm flex items-center gap-2"
+                  >
+                    <Trash2 size={16} />
+                    Excluir Cliente
+                  </button>
+                </motion.div>
+              )
             )}
           </AnimatePresence>
         </motion.div>
       </motion.div>
+
+      {/* Confirmation modal: two mutually exclusive choices, not a browser confirm() */}
+      {isDeactivateModalOpen && (
+        <motion.div
+          key="deactivate-modal-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={() => !isDeactivating && setIsDeactivateModalOpen(false)}
+          className="fixed inset-0 z-[130] bg-background/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <motion.div
+            onClick={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl relative overflow-hidden"
+          >
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-red-500 to-orange-500 opacity-80" />
+            <div className="flex items-center justify-between mb-6 mt-2">
+              <h2 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+                <Trash2 className="text-red-500" size={22} />
+                Excluir Cliente
+              </h2>
+              <button
+                onClick={() => setIsDeactivateModalOpen(false)}
+                disabled={isDeactivating}
+                className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors disabled:opacity-50"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="text-sm text-foreground/90 mb-4">
+              <strong>{client.name}</strong> será marcado como inativo. Se optar por mantê-lo nos relatórios, o cadastro e todo o histórico de lançamentos continuam salvos — nada é apagado.
+            </p>
+            <p className="text-sm font-semibold text-foreground mb-6">
+              Deseja manter os dados de faturamento deste cliente nos relatórios?
+            </p>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => handleConfirmDeactivate(true)}
+                disabled={isDeactivating}
+                className="w-full py-3.5 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 text-sm"
+              >
+                {isDeactivating ? 'Processando...' : 'Sim, manter nos relatórios'}
+              </button>
+              <div>
+                <button
+                  onClick={() => handleConfirmDeactivate(false)}
+                  disabled={isDeactivating}
+                  className="w-full py-3.5 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20 disabled:opacity-60 text-sm"
+                >
+                  {isDeactivating ? 'Processando...' : 'Não, remover dos relatórios'}
+                </button>
+                <p className="text-xs text-muted mt-1.5 px-1">
+                  Vai para a Lixeira e é excluído permanentemente após 30 dias (é possível restaurar até lá).
+                </p>
+              </div>
+              <button
+                onClick={() => setIsDeactivateModalOpen(false)}
+                disabled={isDeactivating}
+                className="w-full py-3 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </AnimatePresence>
   );
 };
