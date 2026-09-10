@@ -6,6 +6,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { EmployeeWarningsModule } from './employee-warnings/employee-warnings.module';
 import { EmployeeRecurringPaymentsModule } from './employee-recurring-payments/employee-recurring-payments.module';
 import { EmployeePaymentsModule } from './employee-payments/employee-payments.module';
+import { VacationsModule } from './vacations/vacations.module';
 import { ClientsModule } from './clients/clients.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReceivablesModule } from './receivables/receivables.module';
@@ -24,6 +25,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     EmployeeWarningsModule,
     EmployeeRecurringPaymentsModule,
     EmployeePaymentsModule,
+    VacationsModule,
     ClientsModule,
     ReceivablesModule,
     SubscriptionsModule,

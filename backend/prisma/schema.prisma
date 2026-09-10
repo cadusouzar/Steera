@@ -129,6 +129,7 @@ model Employee {
   warnings                EmployeeWarning[]
   recurringPayments       EmployeeRecurringPayment[]
   payments                EmployeePayment[]
+  vacationSchedules       VacationSchedule[]
 
   @@unique([companyId, cpf])
   @@index([companyId])
@@ -199,5 +200,33 @@ model EmployeePayment {
   @@index([companyId])
   @@index([employeeId])
   @@index([dueDate])
+  @@index([status])
+}
+
+enum VacationScheduleStatus {
+  SCHEDULED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model VacationSchedule {
+  id                     String                 @id @default(cuid())
+  companyId              String
+  employeeId             String
+  employee               Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  acquisitivePeriodStart DateTime               @db.Date
+  acquisitivePeriodEnd   DateTime               @db.Date
+  startDate              DateTime               @db.Date
+  endDate                DateTime               @db.Date
+  daysCount              Int
+  status                 VacationScheduleStatus @default(SCHEDULED)
+  notes                  String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  @@index([companyId])
+  @@index([employeeId])
   @@index([status])
 }
