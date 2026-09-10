@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ReceivableStatus, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { startOfToday } from '../receivables/receivables.service';
+import { startOfToday } from '../common/date.util';
 
 export interface Defaulter {
   clientId: string;

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ReceivableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { startOfToday } from '../receivables/receivables.service';
+import { startOfToday } from '../common/date.util';
 import { CreateClientDto } from './dto/create-client.dto';
 import { QueryClientsDto } from './dto/query-clients.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
