@@ -1,11 +1,14 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { ClientStatus, Prisma, ReceivableStatus, Subscription } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ClientStatus, Prisma, ReceivableStatus, Subscription, SubscriptionStatus } from '@prisma/client';
+import { startOfToday } from '../common/date.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 
 @Injectable()
 export class SubscriptionsService {
+  private readonly logger = new Logger(SubscriptionsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   private async ensureClientExists(clientId: string) {
@@ -84,5 +87,42 @@ export class SubscriptionsService {
       }
       throw err;
     }
+  }
+
+  // Só decide QUAIS assinaturas chamar generateCharge() agora — a criação da
+  // cobrança em si (incluindo a proteção contra duplicidade via constraint
+  // única) continua inteiramente em generateCharge(), sem duplicação.
+  async generateDueCharges(): Promise<{ checked: number; generated: number }> {
+    const today = startOfToday();
+    const currentDay = today.getUTCDate();
+    const referenceYear = today.getUTCFullYear();
+    const referenceMonth = today.getUTCMonth() + 1;
+
+    const dueSubscriptions = await this.prisma.subscription.findMany({
+      where: {
+        status: SubscriptionStatus.ACTIVE,
+        dueDay: { lte: currentDay },
+        client: { status: { not: ClientStatus.INACTIVE } },
+        receivables: { none: { referenceYear, referenceMonth } },
+      },
+    });
+
+    let generated = 0;
+    for (const subscription of dueSubscriptions) {
+      try {
+        await this.generateCharge(subscription.id);
+        generated++;
+      } catch (err) {
+        // 409 = outra execução já gerou esta cobrança (corrida entre cron e
+        // bootstrap, ou dois restarts próximos) — esperado, ignorado.
+        if (!(err instanceof ConflictException)) {
+          this.logger.error(
+            `Falha ao gerar cobrança da assinatura ${subscription.id}`,
+            err instanceof Error ? err.stack : String(err),
+          );
+        }
+      }
+    }
+    return { checked: dueSubscriptions.length, generated };
   }
 }

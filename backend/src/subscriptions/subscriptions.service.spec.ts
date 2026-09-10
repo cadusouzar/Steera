@@ -145,4 +145,81 @@ describe('SubscriptionsService', () => {
       expect(data.description).toBe('Mensalidade Escolar (abril)');
     });
   });
+
+  describe('generateDueCharges', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('queries only ACTIVE subscriptions whose dueDay has arrived, whose client is not inactive, and that have no charge for the current reference month', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-15T12:00:00Z'));
+      prisma.subscription.findMany.mockResolvedValue([]);
+
+      await service.generateDueCharges();
+
+      expect(prisma.subscription.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'ACTIVE',
+          dueDay: { lte: 15 },
+          client: { status: { not: 'INACTIVE' } },
+          receivables: { none: { referenceYear: 2026, referenceMonth: 6 } },
+        },
+      });
+    });
+
+    it('calls generateCharge for each subscription returned and counts how many succeeded', async () => {
+      prisma.subscription.findMany.mockResolvedValue([
+        { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
+        { id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      prisma.subscription.findUnique.mockResolvedValue({ id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' });
+      prisma.client.findUnique.mockResolvedValue({ id: 'client-1', status: 'ACTIVE' });
+      prisma.receivable.create.mockResolvedValue({ id: 'rec-1' });
+
+      const result = await service.generateDueCharges();
+
+      expect(prisma.receivable.create).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({ checked: 2, generated: 2 });
+    });
+
+    it('ignores a ConflictException from one subscription and still processes the rest', async () => {
+      prisma.subscription.findMany.mockResolvedValue([
+        { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
+        { id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      prisma.subscription.findUnique
+        .mockResolvedValueOnce({ id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' })
+        .mockResolvedValueOnce({ id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' });
+      prisma.client.findUnique.mockResolvedValue({ id: 'client-1', status: 'ACTIVE' });
+      prisma.receivable.create
+        .mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+            code: 'P2002', clientVersion: '5.22.0', meta: { target: ['subscriptionId', 'referenceYear', 'referenceMonth'] },
+          }),
+        )
+        .mockResolvedValueOnce({ id: 'rec-2' });
+
+      const result = await service.generateDueCharges();
+
+      expect(result).toEqual({ checked: 2, generated: 1 });
+    });
+
+    it('logs but does not throw when a non-conflict error occurs, and still processes the remaining subscriptions', async () => {
+      prisma.subscription.findMany.mockResolvedValue([
+        { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
+        { id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      prisma.subscription.findUnique
+        .mockResolvedValueOnce({ id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' })
+        .mockResolvedValueOnce({ id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' });
+      prisma.client.findUnique.mockResolvedValue({ id: 'client-1', status: 'ACTIVE' });
+      prisma.receivable.create
+        .mockRejectedValueOnce(new Error('connection lost'))
+        .mockResolvedValueOnce({ id: 'rec-2' });
+
+      const result = await service.generateDueCharges();
+
+      expect(result).toEqual({ checked: 2, generated: 1 });
+    });
+  });
 });
