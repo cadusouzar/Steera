@@ -78,16 +78,57 @@ model Company {
 }
 
 model Role {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   companyId   String
   name        String
   department  String
-  colorHex    String   @default("#2563EB")
+  colorHex    String     @default("#2563EB")
   description String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  employees   Employee[]
 
   @@index([companyId])
   @@index([active])
+}
+
+enum ContractType {
+  CLT
+  PJ
+  ESTAGIO
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Employee {
+  id                      String         @id @default(cuid())
+  companyId               String
+  roleId                  String
+  role                    Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  fullName                String
+  cpf                     String
+  email                   String?
+  phone                   String?
+  address                 String?
+  contractType            ContractType
+  admissionDate           DateTime       @db.Date
+  terminationDate         DateTime?      @db.Date
+  status                  EmployeeStatus @default(ACTIVE)
+  department              String
+  baseValue               Decimal        @db.Decimal(10, 2)
+  paymentDueDay           Int
+  payOnLastBusinessDay    Boolean        @default(false)
+  bankDetails             String?
+  salaryRecurrenceEnabled Boolean        @default(true)
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  @@unique([companyId, cpf])
+  @@index([companyId])
+  @@index([roleId])
+  @@index([status])
 }
