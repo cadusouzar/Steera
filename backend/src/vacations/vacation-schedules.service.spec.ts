@@ -33,6 +33,7 @@ describe('VacationSchedulesService', () => {
     employeesService.assertExists.mockResolvedValue({
       id: 'employee-1', companyId: 'company-1', contractType: 'PJ', admissionDate: new Date('2025-01-01'), baseValue: 3000,
     });
+    prisma.vacationSchedule.findMany.mockResolvedValue([]);
     await expect(service.status('employee-1')).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 

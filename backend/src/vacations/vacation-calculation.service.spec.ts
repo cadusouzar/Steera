@@ -15,7 +15,7 @@ describe('VacationCalculationService', () => {
 
     expect(result.acquisitionComplete).toBe(false);
     expect(result.totalAcquiredDays).toBe(0);
-    expect(result.proportionalDays).toBe(10); // 5/12 * 30 arredondado pra baixo
+    expect(result.proportionalDays).toBe(12); // 5/12 * 30 = 12.5, arredondado pra baixo
   });
 
   it('grants 30 full days after exactly one completed 12-month period, plus the constitutional one-third', () => {
