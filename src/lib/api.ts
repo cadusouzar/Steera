@@ -297,108 +297,210 @@ function fromPaymentDay(paymentDay: string): { paymentDueDay: number; payOnLastB
 
 // ---- Shapes returned by the backend (RH) ----
 interface ApiRole {
-  id: string; name: string; department: string; colorHex: string;
-  description: string | null; active: boolean;
+  id: string;
+  name: string;
+  department: string;
+  colorHex: string;
+  description: string | null;
+  active: boolean;
 }
 interface ApiEmployeeListItem {
-  id: string; fullName: string; roleId: string; department: string;
-  contractType: 'CLT' | 'PJ' | 'ESTAGIO'; status: 'ACTIVE' | 'INACTIVE';
-  cpfMasked: string; baseValue: number | string;
+  id: string;
+  fullName: string;
+  roleId: string;
+  department: string;
+  contractType: 'CLT' | 'PJ' | 'ESTAGIO';
+  status: 'ACTIVE' | 'INACTIVE';
+  cpfMasked: string;
+  baseValue: number | string;
 }
 interface ApiEmployeeDetail {
-  id: string; fullName: string; cpf: string; roleId: string;
-  email: string | null; phone: string | null; address: string | null;
-  contractType: 'CLT' | 'PJ' | 'ESTAGIO'; admissionDate: string; terminationDate: string | null;
-  status: 'ACTIVE' | 'INACTIVE'; department: string; baseValue: number | string;
-  paymentDueDay: number; payOnLastBusinessDay: boolean; bankDetails: string | null;
+  id: string;
+  fullName: string;
+  cpf: string;
+  roleId: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  contractType: 'CLT' | 'PJ' | 'ESTAGIO';
+  admissionDate: string;
+  terminationDate: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  department: string;
+  baseValue: number | string;
+  paymentDueDay: number;
+  payOnLastBusinessDay: boolean;
+  bankDetails: string | null;
   salaryRecurrenceEnabled: boolean;
 }
-interface ApiWarning { id: string; occurredAt: string; reason: string; }
+interface ApiWarning {
+  id: string;
+  occurredAt: string;
+  reason: string;
+}
 interface ApiEmployeePayment {
-  id: string; description: string; amount: number | string; dueDate: string;
+  id: string;
+  description: string;
+  amount: number | string;
+  dueDate: string;
   derivedStatus: 'pending' | 'paid' | 'overdue';
-  recurringPaymentId?: string | null; referenceYear?: number | null; referenceMonth?: number | null;
+  recurringPaymentId?: string | null;
+  referenceYear?: number | null;
+  referenceMonth?: number | null;
 }
 interface ApiEmployeeRecurringPayment {
-  id: string; description: string; amount: number | string; dueDay: number; status: 'ACTIVE' | 'INACTIVE';
+  id: string;
+  description: string;
+  amount: number | string;
+  dueDay: number;
+  status: 'ACTIVE' | 'INACTIVE';
 }
 interface ApiVacationStatus {
-  monthsWorked: number; acquisitionComplete: boolean; totalAcquiredDays: number;
-  proportionalDays: number; balanceDays: number; oneThirdBonus: number | string;
+  monthsWorked: number;
+  acquisitionComplete: boolean;
+  totalAcquiredDays: number;
+  proportionalDays: number;
+  balanceDays: number;
+  oneThirdBonus: number | string;
 }
 interface ApiVacationSchedule {
-  id: string; startDate: string; endDate: string; daysCount: number;
+  id: string;
+  startDate: string;
+  endDate: string;
+  daysCount: number;
   status: 'SCHEDULED' | 'APPROVED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 }
 
 // ---- Shapes the UI works with (RH) ----
 export interface Role {
-  id: string; name: string; department: string; colorHex: string;
-  description?: string; active: boolean;
+  id: string;
+  name: string;
+  department: string;
+  colorHex: string;
+  description?: string;
+  active: boolean;
 }
 export interface EmployeeListItem {
-  id: string; fullName: string; roleId: string; department: string;
-  contractType: 'clt' | 'pj' | 'estagio'; status: 'active' | 'inactive';
-  cpfMasked: string; baseValue: number;
+  id: string;
+  fullName: string;
+  roleId: string;
+  department: string;
+  contractType: 'clt' | 'pj' | 'estagio';
+  status: 'active' | 'inactive';
+  cpfMasked: string;
+  baseValue: number;
 }
 export interface EmployeeDetail {
-  id: string; fullName: string; cpf: string; roleId: string;
-  email?: string; phone?: string; address?: string;
-  contractType: 'clt' | 'pj' | 'estagio'; admissionDate: string;
-  terminationDate?: string | null; status: 'active' | 'inactive'; department: string;
-  baseValue: number; paymentDay: '5' | '15' | '20' | 'last'; bankDetails?: string;
+  id: string;
+  fullName: string;
+  cpf: string;
+  roleId: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  contractType: 'clt' | 'pj' | 'estagio';
+  admissionDate: string;
+  terminationDate?: string | null;
+  status: 'active' | 'inactive';
+  department: string;
+  baseValue: number;
+  paymentDay: '5' | '15' | '20' | 'last';
+  bankDetails?: string;
   salaryRecurrenceEnabled: boolean;
 }
-export interface EmployeeWarning { id: string; occurredAt: string; reason: string; }
+export interface EmployeeWarning {
+  id: string;
+  occurredAt: string;
+  reason: string;
+}
 export interface EmployeePaymentRecord {
-  id: string; description: string; amount: number; dueDate: string;
+  id: string;
+  description: string;
+  amount: number;
+  dueDate: string;
   status: 'pending' | 'paid' | 'overdue';
-  recurringPaymentId?: string | null; referenceYear?: number | null; referenceMonth?: number | null;
+  recurringPaymentId?: string | null;
+  referenceYear?: number | null;
+  referenceMonth?: number | null;
 }
 export interface EmployeeRecurringPaymentRecord {
-  id: string; description: string; amount: number; dueDay: number; status: 'active' | 'inactive';
+  id: string;
+  description: string;
+  amount: number;
+  dueDay: number;
+  status: 'active' | 'inactive';
 }
 export interface VacationStatus {
-  monthsWorked: number; acquisitionComplete: boolean; totalAcquiredDays: number;
-  proportionalDays: number; balanceDays: number; oneThirdBonus: number;
+  monthsWorked: number;
+  acquisitionComplete: boolean;
+  totalAcquiredDays: number;
+  proportionalDays: number;
+  balanceDays: number;
+  oneThirdBonus: number;
 }
 export interface VacationScheduleRecord {
-  id: string; startDate: string; endDate: string; daysCount: number;
+  id: string;
+  startDate: string;
+  endDate: string;
+  daysCount: number;
   status: 'scheduled' | 'approved' | 'in_progress' | 'completed' | 'cancelled';
 }
 
 export interface EmployeeFormInput {
-  fullName: string; cpf: string; roleId: string; email?: string; phone?: string; address?: string;
-  contractType: 'clt' | 'pj' | 'estagio'; admissionDate: string; department: string;
-  baseValue: number; paymentDay: '5' | '15' | '20' | 'last'; bankDetails?: string;
+  fullName: string;
+  cpf: string;
+  roleId: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  contractType: 'clt' | 'pj' | 'estagio';
+  admissionDate: string;
+  department: string;
+  baseValue: number;
+  paymentDay: '5' | '15' | '20' | 'last';
+  bankDetails?: string;
   salaryRecurrenceEnabled?: boolean;
 }
 
 function mapRole(r: ApiRole): Role {
   return {
-    id: r.id, name: r.name, department: r.department, colorHex: r.colorHex,
-    description: r.description ?? undefined, active: r.active,
+    id: r.id,
+    name: r.name,
+    department: r.department,
+    colorHex: r.colorHex,
+    description: r.description ?? undefined,
+    active: r.active,
   };
 }
 
 function mapEmployeeListItem(e: ApiEmployeeListItem): EmployeeListItem {
   return {
-    id: e.id, fullName: e.fullName, roleId: e.roleId, department: e.department,
+    id: e.id,
+    fullName: e.fullName,
+    roleId: e.roleId,
+    department: e.department,
     contractType: e.contractType.toLowerCase() as EmployeeListItem['contractType'],
     status: e.status.toLowerCase() as EmployeeListItem['status'],
-    cpfMasked: e.cpfMasked, baseValue: Number(e.baseValue),
+    cpfMasked: e.cpfMasked,
+    baseValue: Number(e.baseValue),
   };
 }
 
 function mapEmployeeDetail(e: ApiEmployeeDetail): EmployeeDetail {
   return {
-    id: e.id, fullName: e.fullName, cpf: formatCpf(e.cpf), roleId: e.roleId,
-    email: e.email ?? undefined, phone: e.phone ?? undefined, address: e.address ?? undefined,
+    id: e.id,
+    fullName: e.fullName,
+    cpf: formatCpf(e.cpf),
+    roleId: e.roleId,
+    email: e.email ?? undefined,
+    phone: e.phone ?? undefined,
+    address: e.address ?? undefined,
     contractType: e.contractType.toLowerCase() as EmployeeDetail['contractType'],
     admissionDate: e.admissionDate.slice(0, 10),
     terminationDate: e.terminationDate ? e.terminationDate.slice(0, 10) : null,
     status: e.status.toLowerCase() as EmployeeDetail['status'],
-    department: e.department, baseValue: Number(e.baseValue),
+    department: e.department,
+    baseValue: Number(e.baseValue),
     paymentDay: toPaymentDay(e.paymentDueDay, e.payOnLastBusinessDay),
     bankDetails: e.bankDetails ?? undefined,
     salaryRecurrenceEnabled: e.salaryRecurrenceEnabled,
@@ -408,45 +510,72 @@ function mapEmployeeDetail(e: ApiEmployeeDetail): EmployeeDetail {
 function toEmployeeDto(input: EmployeeFormInput) {
   const { paymentDueDay, payOnLastBusinessDay } = fromPaymentDay(input.paymentDay);
   return {
-    fullName: input.fullName, cpf: stripCpf(input.cpf), roleId: input.roleId,
-    email: input.email || undefined, phone: input.phone || undefined, address: input.address || undefined,
-    contractType: input.contractType.toUpperCase(), admissionDate: input.admissionDate,
-    department: input.department, baseValue: input.baseValue, paymentDueDay, payOnLastBusinessDay,
-    bankDetails: input.bankDetails || undefined, salaryRecurrenceEnabled: input.salaryRecurrenceEnabled,
+    fullName: input.fullName,
+    cpf: stripCpf(input.cpf),
+    roleId: input.roleId,
+    email: input.email || undefined,
+    phone: input.phone || undefined,
+    address: input.address || undefined,
+    contractType: input.contractType.toUpperCase(),
+    admissionDate: input.admissionDate,
+    department: input.department,
+    baseValue: input.baseValue,
+    paymentDueDay,
+    payOnLastBusinessDay,
+    bankDetails: input.bankDetails || undefined,
+    salaryRecurrenceEnabled: input.salaryRecurrenceEnabled,
   };
 }
 
 function mapWarning(w: ApiWarning): EmployeeWarning {
-  return { id: w.id, occurredAt: w.occurredAt.slice(0, 10), reason: w.reason };
+  return {
+    id: w.id,
+    occurredAt: w.occurredAt.slice(0, 10),
+    reason: w.reason,
+  };
 }
 
 function mapEmployeePayment(p: ApiEmployeePayment): EmployeePaymentRecord {
   return {
-    id: p.id, description: p.description, amount: Number(p.amount), dueDate: p.dueDate.slice(0, 10),
-    status: p.derivedStatus, recurringPaymentId: p.recurringPaymentId ?? null,
-    referenceYear: p.referenceYear ?? null, referenceMonth: p.referenceMonth ?? null,
+    id: p.id,
+    description: p.description,
+    amount: Number(p.amount),
+    dueDate: p.dueDate.slice(0, 10),
+    status: p.derivedStatus,
+    recurringPaymentId: p.recurringPaymentId ?? null,
+    referenceYear: p.referenceYear ?? null,
+    referenceMonth: p.referenceMonth ?? null,
   };
 }
 
 function mapEmployeeRecurringPayment(r: ApiEmployeeRecurringPayment): EmployeeRecurringPaymentRecord {
   return {
-    id: r.id, description: r.description, amount: Number(r.amount), dueDay: r.dueDay,
+    id: r.id,
+    description: r.description,
+    amount: Number(r.amount),
+    dueDay: r.dueDay,
     status: r.status.toLowerCase() as EmployeeRecurringPaymentRecord['status'],
   };
 }
 
 function mapVacationStatus(v: ApiVacationStatus): VacationStatus {
   return {
-    monthsWorked: v.monthsWorked, acquisitionComplete: v.acquisitionComplete,
-    totalAcquiredDays: v.totalAcquiredDays, proportionalDays: v.proportionalDays,
-    balanceDays: v.balanceDays, oneThirdBonus: Number(v.oneThirdBonus),
+    monthsWorked: v.monthsWorked,
+    acquisitionComplete: v.acquisitionComplete,
+    totalAcquiredDays: v.totalAcquiredDays,
+    proportionalDays: v.proportionalDays,
+    balanceDays: v.balanceDays,
+    oneThirdBonus: Number(v.oneThirdBonus),
   };
 }
 
 function mapVacationSchedule(s: ApiVacationSchedule): VacationScheduleRecord {
   return {
-    id: s.id, startDate: s.startDate.slice(0, 10), endDate: s.endDate.slice(0, 10),
-    daysCount: s.daysCount, status: s.status.toLowerCase() as VacationScheduleRecord['status'],
+    id: s.id,
+    startDate: s.startDate.slice(0, 10),
+    endDate: s.endDate.slice(0, 10),
+    daysCount: s.daysCount,
+    status: s.status.toLowerCase() as VacationScheduleRecord['status'],
   };
 }
 
