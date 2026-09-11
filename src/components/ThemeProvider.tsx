@@ -37,6 +37,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Standard React context co-location (Provider + hook in one file); only affects Fast Refresh
+// granularity, not correctness — narrowly suppressed rather than splitting the file.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useTheme() {
   const context = useContext(ThemeContext);
   if (context === undefined) {

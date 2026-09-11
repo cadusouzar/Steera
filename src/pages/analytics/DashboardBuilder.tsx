@@ -35,6 +35,8 @@ const DashboardBuilder = () => {
     });
   };
 
+  // react-grid-layout's onLayoutChange callback ships an untyped layout array — see WidgetCanvas.tsx.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleLayoutChange = (layout: readonly any[]) => {
     layout.forEach(l => {
       updateWidgetPosition(l.i, { x: l.x, y: l.y, w: l.w, h: l.h });

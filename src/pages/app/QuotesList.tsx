@@ -152,7 +152,7 @@ const QuotesList = () => {
     setFormState({ ...formState, items: [...(formState.items || []), newItem] });
   };
 
-  const handleUpdateItem = (itemId: string, field: keyof QuoteItem, value: any, formState: Partial<Quote>, setFormState: React.Dispatch<React.SetStateAction<Partial<Quote>>>) => {
+  const handleUpdateItem = (itemId: string, field: keyof QuoteItem, value: string | number, formState: Partial<Quote>, setFormState: React.Dispatch<React.SetStateAction<Partial<Quote>>>) => {
     const updatedItems = (formState.items || []).map(item => {
       if (item.id === itemId) {
         return { ...item, [field]: value };
@@ -207,7 +207,7 @@ const QuotesList = () => {
               <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Status</label>
               <select 
                 value={formState.status || 'pending'}
-                onChange={(e) => setFormState({...formState, status: e.target.value as any})}
+                onChange={(e) => setFormState({...formState, status: e.target.value as Quote['status']})}
                 className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary text-foreground"
                 disabled={!isEditMode && !!selectedQuote}
               >
@@ -412,7 +412,7 @@ const QuotesList = () => {
                   <div className="flex items-center gap-2">
                     <select
                       value={formState.discountType || 'fixed'}
-                      onChange={(e) => setFormState({...formState, discountType: e.target.value as any})}
+                      onChange={(e) => setFormState({...formState, discountType: e.target.value as Quote['discountType']})}
                       className="bg-background border border-border rounded-lg px-2 py-1 text-xs focus:outline-none text-foreground"
                       disabled={!isEditMode && !!selectedQuote}
                     >

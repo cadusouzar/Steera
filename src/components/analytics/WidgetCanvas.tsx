@@ -40,6 +40,7 @@ export const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
   };
 
   // Convert our WidgetConfig to react-grid-layout format
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const layout: any[] = widgets.map(w => ({
     i: w.id,
     x: w.position.x,

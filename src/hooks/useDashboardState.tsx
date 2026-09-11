@@ -6,6 +6,8 @@ export type WidgetType = 'kpi-card' | 'bar-chart' | 'line-chart' | 'donut-chart'
 export interface WidgetData {
   metric?: string;
   dimension?: string;
+  // Widget-specific config bag: shape varies per WidgetType (chart axes, colors, filters, etc.)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 
