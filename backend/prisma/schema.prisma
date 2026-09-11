@@ -163,6 +163,7 @@ model Employee {
   recurringPayments       EmployeeRecurringPayment[]
   payments                EmployeePayment[]
   vacationSchedules       VacationSchedule[]
+  leaveSchedules          LeaveSchedule[]
 
   @@unique([companyId, cpf])
   @@index([companyId])
@@ -256,6 +257,33 @@ model VacationSchedule {
   notes                  String?
   createdAt              DateTime               @default(now())
   updatedAt              DateTime               @updatedAt
+
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([status])
+}
+
+enum LeaveScheduleStatus {
+  SCHEDULED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model LeaveSchedule {
+  id         String              @id @default(cuid())
+  companyId  String
+  employeeId String
+  employee   Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  startDate  DateTime            @db.Date
+  endDate    DateTime            @db.Date
+  daysCount  Int
+  reason     String?
+  status     LeaveScheduleStatus @default(SCHEDULED)
+  notes      String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
 
   @@index([companyId])
   @@index([employeeId])
