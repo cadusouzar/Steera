@@ -693,6 +693,10 @@ export async function payEmployeePayment(id: string): Promise<void> {
   await request(`/employee-payments/${id}/pay`, { method: 'PATCH' });
 }
 
+export async function unpayEmployeePayment(id: string): Promise<void> {
+  await request(`/employee-payments/${id}/unpay`, { method: 'PATCH' });
+}
+
 // ---- Employee Recurring Payments (Recorrência) ----
 export async function listEmployeeRecurringPayments(employeeId: string): Promise<EmployeeRecurringPaymentRecord[]> {
   const items = await request<ApiEmployeeRecurringPayment[]>(`/employees/${employeeId}/recurring-payments`);
@@ -714,6 +718,10 @@ export async function deactivateEmployeeRecurringPayment(id: string): Promise<vo
   await request(`/employee-recurring-payments/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'INACTIVE' }) });
 }
 
+export async function deleteEmployeeRecurringPayment(id: string): Promise<void> {
+  await request(`/employee-recurring-payments/${id}`, { method: 'DELETE' });
+}
+
 export async function generateEmployeeCharge(recurringPaymentId: string): Promise<void> {
   await request(`/employee-recurring-payments/${recurringPaymentId}/generate-charge`, { method: 'POST' });
 }
@@ -732,6 +740,10 @@ export async function listVacationSchedules(employeeId: string): Promise<Vacatio
   return items.map(mapVacationSchedule);
 }
 
+export async function cancelVacationSchedule(id: string): Promise<void> {
+  await request(`/vacation-schedules/${id}/cancel`, { method: 'PATCH' });
+}
+
 // ---- Afastamento (Leave) ----
 export async function scheduleLeave(
   employeeId: string,
@@ -744,6 +756,10 @@ export async function scheduleLeave(
 export async function listLeaveSchedules(employeeId: string): Promise<LeaveScheduleRecord[]> {
   const items = await request<ApiLeaveSchedule[]>(`/employees/${employeeId}/leave/schedules`);
   return items.map(mapLeaveSchedule);
+}
+
+export async function cancelLeaveSchedule(id: string): Promise<void> {
+  await request(`/leave-schedules/${id}/cancel`, { method: 'PATCH' });
 }
 
 // ---- Reports ----

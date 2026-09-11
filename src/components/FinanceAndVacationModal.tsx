@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase } from 'lucide-react';
+import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase, Undo2, Trash2, Ban } from 'lucide-react';
 import * as api from '../lib/api';
 import type { EmployeeDetail, EmployeePaymentRecord, EmployeeRecurringPaymentRecord } from '../lib/api';
 
@@ -28,6 +28,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [vacationSchedules, setVacationSchedules] = useState<api.VacationScheduleRecord[]>([]);
   const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
   const [scheduleStart, setScheduleStart] = useState('');
@@ -89,6 +90,63 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
       setPayments(await api.listEmployeePayments(employeeId));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível gerar a fatura deste mês.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Diferente de `handleMarkAsPaid`, não dá pra assumir localmente o novo status após desfazer
+  // o pagamento: 'paid' é inequívoco, mas ao voltar pra "não pago" o status derivado pelo backend
+  // pode ser 'pending' OU 'overdue' dependendo se `dueDate` já passou. Por isso recarregamos a
+  // lista inteira do servidor em vez de tentar adivinhar.
+  const handleUnmarkAsPaid = async (paymentId: string) => {
+    setBusyId(paymentId);
+    setActionError(null);
+    try {
+      await api.unpayEmployeePayment(paymentId);
+      setPayments(await api.listEmployeePayments(employeeId));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível desfazer o pagamento.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDeleteRecurringPayment = async (recurringPaymentId: string) => {
+    setBusyId(recurringPaymentId);
+    setActionError(null);
+    try {
+      await api.deleteEmployeeRecurringPayment(recurringPaymentId);
+      setRecurringPayments(await api.listEmployeeRecurringPayments(employeeId));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível excluir o pagamento recorrente.');
+    } finally {
+      setBusyId(null);
+      setConfirmingDeleteId(null);
+    }
+  };
+
+  const handleCancelVacation = async (scheduleId: string) => {
+    setBusyId(scheduleId);
+    setActionError(null);
+    try {
+      await api.cancelVacationSchedule(scheduleId);
+      setVacationSchedules(await api.listVacationSchedules(employeeId));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível cancelar as férias.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleCancelLeave = async (scheduleId: string) => {
+    setBusyId(scheduleId);
+    setActionError(null);
+    try {
+      await api.cancelLeaveSchedule(scheduleId);
+      setLeaveSchedules(await api.listLeaveSchedules(employeeId));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível cancelar o afastamento.');
     } finally {
       setBusyId(null);
     }
@@ -339,13 +397,43 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                 </div>
 
                                 <div className="flex flex-col items-end gap-2">
-                                  <button
-                                    onClick={() => handleGenerateCharge(r.id)}
-                                    disabled={busyId === r.id}
-                                    className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-white bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {busyId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} Gerar Fatura do Mês
-                                  </button>
+                                  {confirmingDeleteId === r.id ? (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-bold text-foreground/80">Confirmar exclusão?</span>
+                                      <button
+                                        onClick={() => setConfirmingDeleteId(null)}
+                                        disabled={busyId === r.id}
+                                        className="text-xs font-bold text-foreground hover:bg-secondary/80 px-2.5 py-1.5 rounded-lg border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        Cancelar
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteRecurringPayment(r.id)}
+                                        disabled={busyId === r.id}
+                                        className="flex items-center gap-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {busyId === r.id && <Loader2 size={12} className="animate-spin" />} Confirmar
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => handleGenerateCharge(r.id)}
+                                        disabled={busyId === r.id}
+                                        className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-white bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {busyId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} Gerar Fatura do Mês
+                                      </button>
+                                      <button
+                                        onClick={() => setConfirmingDeleteId(r.id)}
+                                        disabled={busyId === r.id}
+                                        className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-red-600 bg-secondary/40 hover:bg-red-500/10 px-3 py-2 rounded-xl transition-all border border-border/60 hover:border-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Excluir pagamento recorrente"
+                                      >
+                                        <Trash2 size={14} /> Excluir
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -376,13 +464,22 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                   {getPaymentStatusIcon(payment.status)}
                                   {getPaymentStatusText(payment.status)}
                                 </span>
-                                {payment.status !== 'paid' && (
+                                {payment.status !== 'paid' ? (
                                   <button
                                     onClick={() => handleMarkAsPaid(payment.id)}
                                     disabled={busyId === payment.id}
                                     className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                                   >
                                     {busyId === payment.id && <Loader2 size={12} className="animate-spin" />} Marcar Pago
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleUnmarkAsPaid(payment.id)}
+                                    disabled={busyId === payment.id}
+                                    className="text-xs font-bold text-muted hover:text-foreground bg-secondary/40 hover:bg-secondary/70 px-3 py-1.5 rounded-lg border border-border/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                    title="Desfazer pagamento"
+                                  >
+                                    {busyId === payment.id ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Desfazer
                                   </button>
                                 )}
                               </div>
@@ -493,9 +590,20 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                       <p className="text-xs text-muted mt-0.5">{sched.daysCount} dias</p>
                                     </div>
                                   </div>
-                                  <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
-                                    {getScheduleStatusText(sched.status)}
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
+                                      {getScheduleStatusText(sched.status)}
+                                    </span>
+                                    {(sched.status === 'scheduled' || sched.status === 'approved') && (
+                                      <button
+                                        onClick={() => handleCancelVacation(sched.id)}
+                                        disabled={busyId === sched.id}
+                                        className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-red-600 bg-secondary/40 hover:bg-red-500/10 px-3 py-1.5 rounded-lg border border-border/60 hover:border-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               ))
                             ) : (
@@ -587,9 +695,20 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                   )}
                                 </div>
                               </div>
-                              <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
-                                {getScheduleStatusText(sched.status)}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
+                                  {getScheduleStatusText(sched.status)}
+                                </span>
+                                {(sched.status === 'scheduled' || sched.status === 'approved') && (
+                                  <button
+                                    onClick={() => handleCancelLeave(sched.id)}
+                                    disabled={busyId === sched.id}
+                                    className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-red-600 bg-secondary/40 hover:bg-red-500/10 px-3 py-1.5 rounded-lg border border-border/60 hover:border-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           ))
                         ) : (
