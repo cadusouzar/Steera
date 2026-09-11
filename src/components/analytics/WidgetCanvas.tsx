@@ -6,9 +6,15 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { BarChart3 } from 'lucide-react';
 
+// react-grid-layout's shipped types omit isDraggable/isResizable from ResponsiveGridLayoutProps
+// even though the runtime component honors them — cast narrowly to the component only.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const GridLayout = ResponsiveGridLayout as any;
+
 interface WidgetCanvasProps {
   widgets: WidgetConfig[];
   onDropWidget?: (type: string, position: {x: number, y: number}) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onLayoutChange?: (layout: readonly any[]) => void;
   selectedWidgetId?: string | null;
   onSelectWidget?: (id: string) => void;
@@ -44,6 +50,9 @@ export const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
     minH: 2
   }));
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleLayoutChangeCallback = (newLayout: readonly any[]) => onLayoutChange && onLayoutChange(newLayout);
+
   return (
     <div 
       className="flex-1 bg-secondary/10 overflow-auto relative p-4"
@@ -58,17 +67,16 @@ export const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
           <p className="text-sm">Arraste métricas da barra lateral para começar a construir seu dashboard.</p>
         </div>
       ) : (
-        <ResponsiveGridLayout
+        <GridLayout
           className="layout"
           layouts={{ lg: layout }}
           breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
           cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
           rowHeight={100}
-          onLayoutChange={(newLayout) => onLayoutChange && onLayoutChange(newLayout)}
+          onLayoutChange={handleLayoutChangeCallback}
           isDraggable={true}
           isResizable={true}
           margin={[16, 16]}
-          {...({} as any)} // Type assertion to bypass strict type checking
         >
           {widgets.map((widget) => (
             <div
@@ -87,7 +95,7 @@ export const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
               </div>
             </div>
           ))}
-        </ResponsiveGridLayout>
+        </GridLayout>
       )}
     </div>
   );
