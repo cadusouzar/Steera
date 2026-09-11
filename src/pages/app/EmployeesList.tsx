@@ -73,8 +73,16 @@ const EmployeesList = () => {
     }
   };
 
-  useEscapeKey(() => {
+  // Fecha o drawer de detalhes a partir de qualquer estado (carregando, com erro ou com dados
+  // já carregados) — usado pelo backdrop, pelo botão de fechar e pelo Escape.
+  const closeDrawer = () => {
     setSelectedEmployee(null);
+    setIsDrawerLoading(false);
+    setActionError(null);
+  };
+
+  useEscapeKey(() => {
+    closeDrawer();
     setFinanceEmployeeId(null);
     setWarningModalOpen(false);
   });
@@ -353,14 +361,14 @@ const EmployeesList = () => {
       {/* PORTALS FOR DRAWER AND MODAL */}
 
       {/* 1. Drawer: Detalhes do Funcionário */}
-      {(selectedEmployee || isDrawerLoading) && createPortal(
+      {(selectedEmployee || isDrawerLoading || actionError) && createPortal(
         <AnimatePresence>
           <>
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setSelectedEmployee(null)}
+              onClick={closeDrawer}
               className="fixed inset-0 z-[100] bg-background/60 backdrop-blur-sm"
             />
             <div className="fixed inset-0 z-[101] flex justify-end pointer-events-none">
@@ -372,8 +380,24 @@ const EmployeesList = () => {
                 className="bg-background border-l border-border/60 w-full max-w-lg h-full shadow-2xl pointer-events-auto flex flex-col"
               >
                 {isDrawerLoading || !selectedEmployee ? (
-                  <div className="flex-1 flex items-center justify-center text-muted">
-                    <Loader2 className="animate-spin" size={28} />
+                  <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
+                    {isDrawerLoading ? (
+                      <Loader2 className="animate-spin text-muted" size={28} />
+                    ) : (
+                      <>
+                        {actionError && (
+                          <div className="w-full rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-red-600 dark:text-red-400 text-sm">
+                            {actionError}
+                          </div>
+                        )}
+                        <button
+                          onClick={closeDrawer}
+                          className="px-5 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
+                        >
+                          Fechar
+                        </button>
+                      </>
+                    )}
                   </div>
                 ) : (
                 <>
@@ -419,7 +443,7 @@ const EmployeesList = () => {
                         </button>
                       )}
                       <button
-                        onClick={() => setSelectedEmployee(null)}
+                        onClick={closeDrawer}
                         className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
                       >
                         <X size={20} />
