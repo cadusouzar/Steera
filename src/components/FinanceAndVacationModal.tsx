@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase, Undo2, Trash2, Ban } from 'lucide-react';
+import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase, Undo2, Trash2, Ban, RotateCcw } from 'lucide-react';
 import * as api from '../lib/api';
 import type { EmployeeDetail, EmployeePaymentRecord, EmployeeRecurringPaymentRecord } from '../lib/api';
 
@@ -35,6 +35,8 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   const [scheduleEnd, setScheduleEnd] = useState('');
   const [isScheduling, setIsScheduling] = useState(false);
   const [exceptionAuthorized, setExceptionAuthorized] = useState(false);
+  const [resumeCapErrorId, setResumeCapErrorId] = useState<string | null>(null);
+  const [resumeExceptionAuthorized, setResumeExceptionAuthorized] = useState(false);
   const [leaveSchedules, setLeaveSchedules] = useState<api.LeaveScheduleRecord[]>([]);
   const [isLeaveSchedulingOpen, setIsLeaveSchedulingOpen] = useState(false);
   const [leaveScheduleStart, setLeaveScheduleStart] = useState('');
@@ -152,6 +154,46 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     }
   };
 
+  // Espelha handleCancelVacation, mas com a mesma UX de "reenviar com exceção" já usada em
+  // handleConfirmSchedule: a 1ª tentativa nunca manda exceptionAuthorized; se o backend rejeitar
+  // por causa do teto de 30 dias, lembramos QUAL linha disparou o erro (resumeCapErrorId) pra
+  // mostrar o checkbox só ali. Qualquer outro tipo de erro (ex.: sobreposição) limpa esse estado,
+  // pra nunca deixar um checkbox obsoleto visível numa linha errada.
+  const handleResumeVacation = async (scheduleId: string) => {
+    setBusyId(scheduleId);
+    setActionError(null);
+    try {
+      await api.resumeVacationSchedule(scheduleId, resumeCapErrorId === scheduleId ? resumeExceptionAuthorized : undefined);
+      setVacationSchedules(await api.listVacationSchedules(employeeId));
+      setResumeCapErrorId(null);
+      setResumeExceptionAuthorized(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Não foi possível retomar as férias.';
+      setActionError(message);
+      if (message.includes('Limite de 30 dias')) {
+        setResumeCapErrorId(scheduleId);
+      } else {
+        setResumeCapErrorId(null);
+        setResumeExceptionAuthorized(false);
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleResumeLeave = async (scheduleId: string) => {
+    setBusyId(scheduleId);
+    setActionError(null);
+    try {
+      await api.resumeLeaveSchedule(scheduleId);
+      setLeaveSchedules(await api.listLeaveSchedules(employeeId));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível retomar o afastamento.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const daysBetween = (start: string, end: string) => {
     if (!start || !end) return 0;
     const diff = new Date(`${end}T00:00:00Z`).getTime() - new Date(`${start}T00:00:00Z`).getTime();
@@ -162,6 +204,12 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     if (!scheduleStart || !scheduleEnd || isScheduling) return;
     setIsScheduling(true);
     setActionError(null);
+    // Uma nova tentativa de agendamento não pode herdar o checkbox de exceção de um "Retomar"
+    // de outra linha que tenha ficado pendente — evita o form e uma linha do histórico
+    // mostrando checkbox de exceção ao mesmo tempo por motivos diferentes (ver condição do
+    // checkbox do form logo abaixo, que também depende de `resumeCapErrorId`).
+    setResumeCapErrorId(null);
+    setResumeExceptionAuthorized(false);
     try {
       await api.scheduleVacation(employeeId, {
         startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd), exceptionAuthorized,
@@ -249,9 +297,13 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
   // `actionError` é um estado único compartilhado entre as abas Férias e Afastamento — trocar de
   // aba sem limpá-lo deixaria o banner (e, no caso do teto de 30 dias, o checkbox de exceção)
-  // vazar de uma aba pra outra sem nenhuma submissão nova ter acontecido ali.
+  // vazar de uma aba pra outra sem nenhuma submissão nova ter acontecido ali. `resumeCapErrorId`/
+  // `resumeExceptionAuthorized` seguem a mesma regra: são específicos da linha de "Retomar" que
+  // gerou o erro, então também não devem sobreviver a uma troca de aba.
   const handleTabChange = (tab: 'finance' | 'vacation' | 'leave') => {
     setActionError(null);
+    setResumeCapErrorId(null);
+    setResumeExceptionAuthorized(false);
     setActiveTab(tab);
   };
 
@@ -504,7 +556,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                       </div>
                     )}
 
-                    {isSchedulingOpen && vacationCapExceeded && (
+                    {isSchedulingOpen && vacationCapExceeded && resumeCapErrorId === null && (
                       <label className="flex items-center gap-2.5 px-4 py-3 bg-secondary/20 border border-border/40 rounded-xl text-sm text-foreground cursor-pointer">
                         <input
                           type="checkbox"
@@ -567,7 +619,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                               <History size={18} className="text-primary/70" /> Histórico de Férias
                             </h3>
                             <button
-                              onClick={() => { setIsSchedulingOpen(true); setExceptionAuthorized(false); setActionError(null); }}
+                              onClick={() => { setIsSchedulingOpen(true); setExceptionAuthorized(false); setActionError(null); setResumeCapErrorId(null); setResumeExceptionAuthorized(false); }}
                               disabled={isSchedulingOpen}
                               className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -578,32 +630,55 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                           <div className="space-y-3">
                             {vacationSchedules.length > 0 ? (
                               vacationSchedules.map((sched) => (
-                                <div key={sched.id} className="flex items-center justify-between p-4 bg-background border border-border/60 rounded-xl">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-secondary/50 text-muted flex items-center justify-center shrink-0">
-                                      <Umbrella size={14} />
+                                <div key={sched.id} className="flex flex-col p-4 bg-background border border-border/60 rounded-xl gap-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 rounded-full bg-secondary/50 text-muted flex items-center justify-center shrink-0">
+                                        <Umbrella size={14} />
+                                      </div>
+                                      <div>
+                                        <p className="text-sm font-bold text-foreground">
+                                          {formatDateOnly(sched.startDate)} até {formatDateOnly(sched.endDate)}
+                                        </p>
+                                        <p className="text-xs text-muted mt-0.5">{sched.daysCount} dias</p>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <p className="text-sm font-bold text-foreground">
-                                        {formatDateOnly(sched.startDate)} até {formatDateOnly(sched.endDate)}
-                                      </p>
-                                      <p className="text-xs text-muted mt-0.5">{sched.daysCount} dias</p>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
+                                        {getScheduleStatusText(sched.status)}
+                                      </span>
+                                      {(sched.status === 'scheduled' || sched.status === 'approved') && (
+                                        <button
+                                          onClick={() => handleCancelVacation(sched.id)}
+                                          disabled={busyId === sched.id}
+                                          className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-red-600 bg-secondary/40 hover:bg-red-500/10 px-3 py-1.5 rounded-lg border border-border/60 hover:border-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                          {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
+                                        </button>
+                                      )}
+                                      {sched.status === 'cancelled' && (
+                                        <button
+                                          onClick={() => handleResumeVacation(sched.id)}
+                                          disabled={busyId === sched.id}
+                                          className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg border border-primary/20 hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                          {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Retomar
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
-                                      {getScheduleStatusText(sched.status)}
-                                    </span>
-                                    {(sched.status === 'scheduled' || sched.status === 'approved') && (
-                                      <button
-                                        onClick={() => handleCancelVacation(sched.id)}
-                                        disabled={busyId === sched.id}
-                                        className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-red-600 bg-secondary/40 hover:bg-red-500/10 px-3 py-1.5 rounded-lg border border-border/60 hover:border-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
-                                      </button>
-                                    )}
-                                  </div>
+
+                                  {resumeCapErrorId === sched.id && (
+                                    <label className="flex items-center gap-2.5 px-4 py-3 bg-secondary/20 border border-border/40 rounded-xl text-sm text-foreground cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={resumeExceptionAuthorized}
+                                        onChange={(e) => setResumeExceptionAuthorized(e.target.checked)}
+                                        className="rounded border-border/80"
+                                      />
+                                      Autorizar exceção e retomar mesmo assim, ultrapassando os 30 dias
+                                    </label>
+                                  )}
                                 </div>
                               ))
                             ) : (
@@ -706,6 +781,15 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                     className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-red-600 bg-secondary/40 hover:bg-red-500/10 px-3 py-1.5 rounded-lg border border-border/60 hover:border-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
+                                  </button>
+                                )}
+                                {sched.status === 'cancelled' && (
+                                  <button
+                                    onClick={() => handleResumeLeave(sched.id)}
+                                    disabled={busyId === sched.id}
+                                    className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg border border-primary/20 hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Retomar
                                   </button>
                                 )}
                               </div>

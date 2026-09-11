@@ -744,6 +744,10 @@ export async function cancelVacationSchedule(id: string): Promise<void> {
   await request(`/vacation-schedules/${id}/cancel`, { method: 'PATCH' });
 }
 
+export async function resumeVacationSchedule(id: string, exceptionAuthorized?: boolean): Promise<void> {
+  await request(`/vacation-schedules/${id}/resume`, { method: 'PATCH', body: JSON.stringify({ exceptionAuthorized }) });
+}
+
 // ---- Afastamento (Leave) ----
 export async function scheduleLeave(
   employeeId: string,
@@ -760,6 +764,10 @@ export async function listLeaveSchedules(employeeId: string): Promise<LeaveSched
 
 export async function cancelLeaveSchedule(id: string): Promise<void> {
   await request(`/leave-schedules/${id}/cancel`, { method: 'PATCH' });
+}
+
+export async function resumeLeaveSchedule(id: string): Promise<void> {
+  await request(`/leave-schedules/${id}/resume`, { method: 'PATCH' });
 }
 
 // ---- Reports ----
