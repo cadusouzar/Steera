@@ -126,13 +126,19 @@ por LGPD — completo só em `GET /employees/:id`), Advertências (sempre aninha
   FK real (`roleId`) resolvida contra `GET /roles`/`GET /roles/active`. Ver `[[Roles]]`,
   `[[EmployeesList]]`, `[[EmployeeForm]]` e `[[FinanceAndVacationModal]]` no vault para o detalhe
   de cada tela.
+- **Ações de reversão pela UI (11/09/2026):** "Desfazer" em pagamento marcado como pago
+  (`PATCH .../unpay`, recarrega a lista em vez de adivinhar o novo status — pode voltar como
+  "Atrasado", não só "Pendente"); "Excluir" numa recorrência de pagamento ativa
+  (`DELETE /employee-recurring-payments/:id`, exclusão física real — segura porque
+  `EmployeePayment.recurringPaymentId` é `onDelete: SetNull`, preservando o histórico de cobranças
+  já geradas mesmo depois de excluir a recorrência; confirmação em duas etapas na UI, nunca
+  `window.confirm()`); "Cancelar" num período de férias/afastamento agendado
+  (`PATCH .../vacation-schedules|leave-schedules/:id/cancel`, exibido só quando o status permite —
+  `scheduled`/`approved` — espelhando a própria regra do backend).
 - Outras pendências conhecidas (ver `[[DECISOES-TECNICAS]]` seção 8): sem histórico de mudança de
   cargo (só o `roleId` atual é rastreado); checagem de CPF único é TOCTOU (não captura violação de
   constraint); `EmployeeRecurringPaymentsService.generateCharge` só verifica o status do
-  funcionário, não o da própria recorrência; `updateEmployee` do frontend limpa `email`/`phone`/
-  `address`/`bankDetails` corretamente (envia `null` explícito). Sem cancelamento de férias/
-  afastamento pela UI (o endpoint `PATCH .../cancel` existe nos dois, mas nenhum botão chama ele
-  ainda — mesma lacuna nos dois recursos, de propósito, escopo futuro).
+  funcionário, não o da própria recorrência.
 
 **Exclusão de cliente é sempre lógica, nunca física:** `PATCH /clients/:id/deactivate` marca o
 cliente como `INACTIVE` mas nunca apaga o registro nem seus lançamentos. O flag
