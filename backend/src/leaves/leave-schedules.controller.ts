@@ -20,4 +20,9 @@ export class LeaveSchedulesController {
   cancel(@Param('id') id: string) {
     return this.service.cancel(id);
   }
+
+  @Patch('leave-schedules/:id/resume')
+  resume(@Param('id') id: string) {
+    return this.service.resume(id);
+  }
 }

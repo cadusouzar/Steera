@@ -95,4 +95,28 @@ export class LeaveSchedulesService {
 
     return this.prisma.leaveSchedule.update({ where: { id }, data: { status: 'CANCELLED' } });
   }
+
+  // Rota top-level (leave-schedules/:id/resume), mesmo padrão de escopo por
+  // companyId de cancel() acima. Reagenda um período CANCELLED re-rodando a
+  // MESMA checagem de sobreposição de schedule() (férias + afastamento) contra
+  // as datas já gravadas na linha — sem conceito de teto/exceção aqui (afastamento
+  // nunca teve teto de dias).
+  async resume(id: string) {
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const schedule = await this.prisma.leaveSchedule.findFirst({ where: { id, companyId } });
+    if (!schedule) throw new NotFoundException(`Agendamento de afastamento ${id} não encontrado`);
+
+    if (schedule.status !== LeaveScheduleStatus.CANCELLED) {
+      throw new ConflictException(`Agendamento de afastamento ${id} não está cancelado`);
+    }
+
+    const employee = await this.employeesService.assertExists(schedule.employeeId);
+    if (employee.status === 'INACTIVE') {
+      throw new BadRequestException(`Não é possível agendar afastamento: funcionário ${schedule.employeeId} está inativo`);
+    }
+
+    await this.assertNoOverlap(schedule.employeeId, employee.companyId, schedule.startDate, schedule.endDate);
+
+    return this.prisma.leaveSchedule.update({ where: { id }, data: { status: 'SCHEDULED' } });
+  }
 }

@@ -4,6 +4,7 @@ import { parseDateOnly } from '../common/date.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { EmployeesService } from '../employees/employees.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ResumeVacationDto } from './dto/resume-vacation.dto';
 import { ScheduleVacationDto } from './dto/schedule-vacation.dto';
 
 @Injectable()
@@ -68,6 +69,27 @@ export class VacationSchedulesService {
     }
   }
 
+  // Compartilhado por schedule() e resume(): mesma checagem de sobreposição
+  // (férias + afastamento) e mesmo teto de 30 dias (só férias), parametrizado
+  // pelas datas/dias já resolvidos — quem chama decide se vêm de um DTO com
+  // strings (parseDateOnly) ou de uma linha já existente no banco (Date).
+  private async assertScheduleIsValid(
+    employeeId: string,
+    companyId: string,
+    start: Date,
+    end: Date,
+    daysCount: number,
+    exceptionAuthorized?: boolean,
+  ) {
+    const [existingVacations, existingLeaves] = await Promise.all([
+      this.getActiveSchedules(employeeId, companyId),
+      this.getActiveLeaveSchedules(employeeId, companyId),
+    ]);
+    this.assertNoOverlap([...existingVacations, ...existingLeaves], start, end);
+    // Só férias entram na soma do teto — afastamento não conta (ver getActiveSchedules acima).
+    this.assertWithinCap(existingVacations, daysCount, exceptionAuthorized);
+  }
+
   async schedule(employeeId: string, dto: ScheduleVacationDto) {
     const employee = await this.employeesService.assertExists(employeeId);
     if (employee.status === 'INACTIVE') {
@@ -80,13 +102,7 @@ export class VacationSchedulesService {
     }
     const { start, end } = this.validateRange(dto.startDate, dto.endDate, dto.daysCount);
 
-    const [existingVacations, existingLeaves] = await Promise.all([
-      this.getActiveSchedules(employeeId, employee.companyId),
-      this.getActiveLeaveSchedules(employeeId, employee.companyId),
-    ]);
-    this.assertNoOverlap([...existingVacations, ...existingLeaves], start, end);
-    // Só férias entram na soma do teto — afastamento não conta (ver getActiveSchedules acima).
-    this.assertWithinCap(existingVacations, dto.daysCount, dto.exceptionAuthorized);
+    await this.assertScheduleIsValid(employeeId, employee.companyId, start, end, dto.daysCount, dto.exceptionAuthorized);
 
     return this.prisma.vacationSchedule.create({
       data: {
@@ -127,5 +143,37 @@ export class VacationSchedulesService {
     }
 
     return this.prisma.vacationSchedule.update({ where: { id }, data: { status: 'CANCELLED' } });
+  }
+
+  // Rota top-level (vacation-schedules/:id/resume), mesmo padrão de escopo por
+  // companyId de cancel() acima. Reagenda um período CANCELLED re-rodando as
+  // MESMAS checagens de schedule() (sobreposição + teto de 30 dias) contra as
+  // datas/dias já gravados na linha — como o próprio registro está CANCELLED,
+  // ele já fica naturalmente fora das duas buscas de "ativos" (que filtram
+  // status !== CANCELLED), então não precisa de exclusão especial por id.
+  async resume(id: string, dto: ResumeVacationDto) {
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const schedule = await this.prisma.vacationSchedule.findFirst({ where: { id, companyId } });
+    if (!schedule) throw new NotFoundException(`Agendamento de férias ${id} não encontrado`);
+
+    if (schedule.status !== VacationScheduleStatus.CANCELLED) {
+      throw new ConflictException(`Agendamento de férias ${id} não está cancelado`);
+    }
+
+    const employee = await this.employeesService.assertExists(schedule.employeeId);
+    if (employee.status === 'INACTIVE') {
+      throw new BadRequestException(`Não é possível agendar férias: funcionário ${schedule.employeeId} está inativo`);
+    }
+
+    await this.assertScheduleIsValid(
+      schedule.employeeId,
+      employee.companyId,
+      schedule.startDate,
+      schedule.endDate,
+      schedule.daysCount,
+      dto.exceptionAuthorized,
+    );
+
+    return this.prisma.vacationSchedule.update({ where: { id }, data: { status: 'SCHEDULED' } });
   }
 }

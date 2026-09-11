@@ -152,4 +152,82 @@ describe('LeaveSchedulesService', () => {
     await expect(service.cancel('leave-1')).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.leaveSchedule.update).not.toHaveBeenCalled();
   });
+
+  it('resume() flips a genuinely cancelled, non-overlapping schedule back to SCHEDULED', async () => {
+    prisma.leaveSchedule.findFirst.mockResolvedValue({
+      id: 'leave-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-05'), daysCount: 5,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+    });
+    prisma.leaveSchedule.update.mockResolvedValue({ id: 'leave-1', status: 'SCHEDULED' });
+
+    await service.resume('leave-1');
+
+    expect(prisma.leaveSchedule.update).toHaveBeenCalledWith({
+      where: { id: 'leave-1' },
+      data: { status: 'SCHEDULED' },
+    });
+  });
+
+  it('resume() rejects a schedule that is not CANCELLED', async () => {
+    prisma.leaveSchedule.findFirst.mockResolvedValue({
+      id: 'leave-1', companyId: 'company-1', employeeId: 'employee-1', status: 'SCHEDULED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-05'), daysCount: 5,
+    });
+
+    await expect(service.resume('leave-1')).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.leaveSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('resume() rejects when the employee is now INACTIVE', async () => {
+    prisma.leaveSchedule.findFirst.mockResolvedValue({
+      id: 'leave-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-05'), daysCount: 5,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'INACTIVE',
+    });
+
+    await expect(service.resume('leave-1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.leaveSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('resume() rejects when it would now overlap an active VacationSchedule', async () => {
+    prisma.leaveSchedule.findFirst.mockResolvedValue({
+      id: 'leave-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-05'), daysCount: 5,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([
+      { id: 'vacation-1', startDate: new Date('2026-02-03'), endDate: new Date('2026-02-10'), status: 'APPROVED' },
+    ]);
+
+    await expect(service.resume('leave-1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.leaveSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('resume() rejects when it would now overlap an active LeaveSchedule', async () => {
+    prisma.leaveSchedule.findFirst.mockResolvedValue({
+      id: 'leave-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-05'), daysCount: 5,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+    });
+    prisma.leaveSchedule.findMany.mockResolvedValue([
+      { id: 'other-leave', startDate: new Date('2026-02-03'), endDate: new Date('2026-02-10'), status: 'SCHEDULED' },
+    ]);
+
+    await expect(service.resume('leave-1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.leaveSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('resume() scopes the lookup to the current company, so a schedule from another company 404s', async () => {
+    prisma.leaveSchedule.findFirst.mockResolvedValue(null);
+    await expect(service.resume('leave-other-company')).rejects.toBeInstanceOf(NotFoundException);
+  });
 });

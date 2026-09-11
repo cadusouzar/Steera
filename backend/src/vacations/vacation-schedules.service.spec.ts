@@ -263,4 +263,95 @@ describe('VacationSchedulesService', () => {
     await expect(service.cancel('schedule-1')).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.vacationSchedule.update).not.toHaveBeenCalled();
   });
+
+  it('resume() flips a genuinely cancelled, non-overlapping, under-cap schedule back to SCHEDULED', async () => {
+    prisma.vacationSchedule.findFirst.mockResolvedValue({
+      id: 'schedule-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-10'), daysCount: 10,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([]);
+    prisma.leaveSchedule.findMany.mockResolvedValue([]);
+    prisma.vacationSchedule.update.mockResolvedValue({ id: 'schedule-1', status: 'SCHEDULED' });
+
+    await service.resume('schedule-1', {});
+
+    expect(prisma.vacationSchedule.update).toHaveBeenCalledWith({
+      where: { id: 'schedule-1' },
+      data: { status: 'SCHEDULED' },
+    });
+  });
+
+  it('resume() rejects a schedule that is not CANCELLED (e.g. still SCHEDULED)', async () => {
+    prisma.vacationSchedule.findFirst.mockResolvedValue({
+      id: 'schedule-1', companyId: 'company-1', employeeId: 'employee-1', status: 'SCHEDULED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-10'), daysCount: 10,
+    });
+
+    await expect(service.resume('schedule-1', {})).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.vacationSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('resume() rejects when the employee is now INACTIVE', async () => {
+    prisma.vacationSchedule.findFirst.mockResolvedValue({
+      id: 'schedule-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-10'), daysCount: 10,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'INACTIVE',
+    });
+
+    await expect(service.resume('schedule-1', {})).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.vacationSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('resume() rejects when it would now overlap a different, currently-active schedule', async () => {
+    prisma.vacationSchedule.findFirst.mockResolvedValue({
+      id: 'schedule-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-02-01'), endDate: new Date('2026-02-10'), daysCount: 10,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([
+      { id: 'other', startDate: new Date('2026-02-05'), endDate: new Date('2026-02-15'), daysCount: 11, status: 'SCHEDULED' },
+    ]);
+    prisma.leaveSchedule.findMany.mockResolvedValue([]);
+
+    await expect(service.resume('schedule-1', {})).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.vacationSchedule.update).not.toHaveBeenCalled();
+  });
+
+  it('resume() rejects when it would push the total over 30 days without exceptionAuthorized, and succeeds with it', async () => {
+    prisma.vacationSchedule.findFirst.mockResolvedValue({
+      id: 'schedule-1', companyId: 'company-1', employeeId: 'employee-1', status: 'CANCELLED',
+      startDate: new Date('2026-05-01'), endDate: new Date('2026-05-15'), daysCount: 15,
+    });
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([
+      { id: 'e1', startDate: new Date('2026-01-05'), endDate: new Date('2026-01-14'), daysCount: 10, status: 'SCHEDULED' },
+      { id: 'e2', startDate: new Date('2026-03-01'), endDate: new Date('2026-03-10'), daysCount: 10, status: 'APPROVED' },
+    ]);
+    prisma.leaveSchedule.findMany.mockResolvedValue([]);
+
+    await expect(service.resume('schedule-1', {})).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.vacationSchedule.update).not.toHaveBeenCalled();
+
+    prisma.vacationSchedule.update.mockResolvedValue({ id: 'schedule-1', status: 'SCHEDULED' });
+    await service.resume('schedule-1', { exceptionAuthorized: true });
+
+    expect(prisma.vacationSchedule.update).toHaveBeenCalledWith({
+      where: { id: 'schedule-1' },
+      data: { status: 'SCHEDULED' },
+    });
+  });
+
+  it('resume() scopes the lookup to the current company, so a schedule from another company 404s', async () => {
+    prisma.vacationSchedule.findFirst.mockResolvedValue(null);
+    await expect(service.resume('schedule-other-company', {})).rejects.toBeInstanceOf(NotFoundException);
+  });
 });

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { ResumeVacationDto } from './dto/resume-vacation.dto';
 import { ScheduleVacationDto } from './dto/schedule-vacation.dto';
 import { VacationSchedulesService } from './vacation-schedules.service';
 
@@ -19,5 +20,10 @@ export class VacationSchedulesController {
   @Patch('vacation-schedules/:id/cancel')
   cancel(@Param('id') id: string) {
     return this.service.cancel(id);
+  }
+
+  @Patch('vacation-schedules/:id/resume')
+  resume(@Param('id') id: string, @Body() dto: ResumeVacationDto) {
+    return this.service.resume(id, dto);
   }
 }
