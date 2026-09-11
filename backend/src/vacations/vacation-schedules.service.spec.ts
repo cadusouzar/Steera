@@ -3,7 +3,6 @@ import { Test } from '@nestjs/testing';
 import { CompanyContextService } from '../company/company-context.service';
 import { EmployeesService } from '../employees/employees.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { VacationCalculationService } from './vacation-calculation.service';
 import { VacationSchedulesService } from './vacation-schedules.service';
 
 describe('VacationSchedulesService', () => {
@@ -20,7 +19,6 @@ describe('VacationSchedulesService', () => {
     const module = await Test.createTestingModule({
       providers: [
         VacationSchedulesService,
-        VacationCalculationService,
         { provide: PrismaService, useValue: prisma },
         { provide: EmployeesService, useValue: employeesService },
         { provide: CompanyContextService, useValue: { getCurrentCompanyId: jest.fn().mockResolvedValue('company-1') } },
@@ -29,23 +27,16 @@ describe('VacationSchedulesService', () => {
     service = module.get(VacationSchedulesService);
   });
 
-  it('rejects vacation status/simulation for a non-CLT employee with a clear message', async () => {
+  it('rejects scheduling vacation for a non-CLT employee with a clear message', async () => {
     employeesService.assertExists.mockResolvedValue({
-      id: 'employee-1', companyId: 'company-1', contractType: 'PJ', admissionDate: new Date('2025-01-01'), baseValue: 3000,
-    });
-    prisma.vacationSchedule.findMany.mockResolvedValue([]);
-    await expect(service.status('employee-1')).rejects.toBeInstanceOf(UnprocessableEntityException);
-  });
-
-  it('simulate() never persists a VacationSchedule row', async () => {
-    employeesService.assertExists.mockResolvedValue({
-      id: 'employee-1', companyId: 'company-1', contractType: 'CLT',
-      admissionDate: new Date('2025-01-01T00:00:00Z'), baseValue: 3000,
+      id: 'employee-1', companyId: 'company-1', contractType: 'PJ', status: 'ACTIVE',
+      admissionDate: new Date('2025-01-01'), baseValue: 3000,
     });
     prisma.vacationSchedule.findMany.mockResolvedValue([]);
 
-    await service.simulate('employee-1', { startDate: '2026-02-01', endDate: '2026-03-02', daysCount: 30 });
-
+    await expect(
+      service.schedule('employee-1', { startDate: '2026-02-01', endDate: '2026-03-02', daysCount: 30 }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(prisma.vacationSchedule.create).not.toHaveBeenCalled();
   });
 
@@ -64,7 +55,7 @@ describe('VacationSchedulesService', () => {
     expect(prisma.vacationSchedule.create).not.toHaveBeenCalled();
   });
 
-  it('creates a schedule with status SCHEDULED when the range does not overlap and balance is sufficient', async () => {
+  it('creates a schedule with status SCHEDULED when the range does not overlap', async () => {
     employeesService.assertExists.mockResolvedValue({
       id: 'employee-1', companyId: 'company-1', contractType: 'CLT',
       admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
@@ -79,44 +70,20 @@ describe('VacationSchedulesService', () => {
     });
   });
 
-  it('counts existing SCHEDULED (not just COMPLETED) days against the balance, preventing double-booking', async () => {
-    employeesService.assertExists.mockResolvedValue({
-      id: 'employee-1', companyId: 'company-1', contractType: 'CLT',
-      admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
-    });
-    // A prior SCHEDULED (not COMPLETED) period alone already exceeds any possible accrued
-    // balance, so — regardless of today's date — the balance check must reject a second,
-    // non-overlapping booking.
-    prisma.vacationSchedule.findMany.mockResolvedValueOnce([{ id: 'existing', daysCount: 9999, status: 'SCHEDULED' }]);
-
-    await expect(
-      service.schedule('employee-1', { startDate: '2026-06-01', endDate: '2026-06-28', daysCount: 28 }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.vacationSchedule.create).not.toHaveBeenCalled();
-  });
-
-  it('queries daysAlreadyTaken() including SCHEDULED and APPROVED statuses, not just COMPLETED/IN_PROGRESS', async () => {
-    // The two tests above stub the whole findMany() call, so they can't actually tell a
-    // correct status filter apart from a stale one (the mock returns whatever we configure
-    // regardless of the `where` clause the production code sends it) — only a real Postgres
-    // query would filter rows differently. This test instead asserts on the exact `where`
-    // argument passed to findMany(), which is the only way this mock-based suite can guard
-    // against someone reverting the status list and silently reintroducing the double-booking
-    // bug fixed in this round.
+  it('allows scheduling a large daysCount with no existing schedules — there is no balance ceiling anymore', async () => {
     employeesService.assertExists.mockResolvedValue({
       id: 'employee-1', companyId: 'company-1', contractType: 'CLT',
       admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
     });
     prisma.vacationSchedule.findMany.mockResolvedValue([]);
+    prisma.vacationSchedule.create.mockResolvedValue({ id: 'schedule-1', status: 'SCHEDULED' });
 
-    await service.status('employee-1');
+    // 200 days would have far exceeded any possible accrued balance under the old
+    // calculation service — this now succeeds because there's nothing left to check.
+    await service.schedule('employee-1', { startDate: '2026-01-01', endDate: '2026-07-19', daysCount: 200 });
 
-    expect(prisma.vacationSchedule.findMany).toHaveBeenCalledWith({
-      where: {
-        employeeId: 'employee-1',
-        companyId: 'company-1',
-        status: { in: ['SCHEDULED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED'] },
-      },
+    expect(prisma.vacationSchedule.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ daysCount: 200, status: 'SCHEDULED' }),
     });
   });
 

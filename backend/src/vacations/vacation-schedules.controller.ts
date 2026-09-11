@@ -6,16 +6,6 @@ import { VacationSchedulesService } from './vacation-schedules.service';
 export class VacationSchedulesController {
   constructor(private readonly service: VacationSchedulesService) {}
 
-  @Get('employees/:employeeId/vacation/status')
-  status(@Param('employeeId') employeeId: string) {
-    return this.service.status(employeeId);
-  }
-
-  @Post('employees/:employeeId/vacation/simulate')
-  simulate(@Param('employeeId') employeeId: string, @Body() dto: ScheduleVacationDto) {
-    return this.service.simulate(employeeId, dto);
-  }
-
   @Post('employees/:employeeId/vacation/schedule')
   schedule(@Param('employeeId') employeeId: string, @Body() dto: ScheduleVacationDto) {
     return this.service.schedule(employeeId, dto);
