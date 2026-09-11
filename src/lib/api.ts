@@ -277,6 +277,334 @@ export async function generateCharge(subscriptionId: string): Promise<void> {
   await request(`/subscriptions/${subscriptionId}/generate-charge`, { method: 'POST' });
 }
 
+function formatCpf(digits: string): string {
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
+function stripCpf(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+function toPaymentDay(paymentDueDay: number, payOnLastBusinessDay: boolean): '5' | '15' | '20' | 'last' {
+  if (payOnLastBusinessDay) return 'last';
+  return String(paymentDueDay) as '5' | '15' | '20';
+}
+
+function fromPaymentDay(paymentDay: string): { paymentDueDay: number; payOnLastBusinessDay: boolean } {
+  if (paymentDay === 'last') return { paymentDueDay: 31, payOnLastBusinessDay: true };
+  return { paymentDueDay: Number(paymentDay), payOnLastBusinessDay: false };
+}
+
+// ---- Shapes returned by the backend (RH) ----
+interface ApiRole {
+  id: string; name: string; department: string; colorHex: string;
+  description: string | null; active: boolean;
+}
+interface ApiEmployeeListItem {
+  id: string; fullName: string; roleId: string; department: string;
+  contractType: 'CLT' | 'PJ' | 'ESTAGIO'; status: 'ACTIVE' | 'INACTIVE';
+  cpfMasked: string; baseValue: number | string;
+}
+interface ApiEmployeeDetail {
+  id: string; fullName: string; cpf: string; roleId: string;
+  email: string | null; phone: string | null; address: string | null;
+  contractType: 'CLT' | 'PJ' | 'ESTAGIO'; admissionDate: string; terminationDate: string | null;
+  status: 'ACTIVE' | 'INACTIVE'; department: string; baseValue: number | string;
+  paymentDueDay: number; payOnLastBusinessDay: boolean; bankDetails: string | null;
+  salaryRecurrenceEnabled: boolean;
+}
+interface ApiWarning { id: string; occurredAt: string; reason: string; }
+interface ApiEmployeePayment {
+  id: string; description: string; amount: number | string; dueDate: string;
+  derivedStatus: 'pending' | 'paid' | 'overdue';
+  recurringPaymentId?: string | null; referenceYear?: number | null; referenceMonth?: number | null;
+}
+interface ApiEmployeeRecurringPayment {
+  id: string; description: string; amount: number | string; dueDay: number; status: 'ACTIVE' | 'INACTIVE';
+}
+interface ApiVacationStatus {
+  monthsWorked: number; acquisitionComplete: boolean; totalAcquiredDays: number;
+  proportionalDays: number; balanceDays: number; oneThirdBonus: number | string;
+}
+interface ApiVacationSchedule {
+  id: string; startDate: string; endDate: string; daysCount: number;
+  status: 'SCHEDULED' | 'APPROVED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+}
+
+// ---- Shapes the UI works with (RH) ----
+export interface Role {
+  id: string; name: string; department: string; colorHex: string;
+  description?: string; active: boolean;
+}
+export interface EmployeeListItem {
+  id: string; fullName: string; roleId: string; department: string;
+  contractType: 'clt' | 'pj' | 'estagio'; status: 'active' | 'inactive';
+  cpfMasked: string; baseValue: number;
+}
+export interface EmployeeDetail {
+  id: string; fullName: string; cpf: string; roleId: string;
+  email?: string; phone?: string; address?: string;
+  contractType: 'clt' | 'pj' | 'estagio'; admissionDate: string;
+  terminationDate?: string | null; status: 'active' | 'inactive'; department: string;
+  baseValue: number; paymentDay: '5' | '15' | '20' | 'last'; bankDetails?: string;
+  salaryRecurrenceEnabled: boolean;
+}
+export interface EmployeeWarning { id: string; occurredAt: string; reason: string; }
+export interface EmployeePaymentRecord {
+  id: string; description: string; amount: number; dueDate: string;
+  status: 'pending' | 'paid' | 'overdue';
+  recurringPaymentId?: string | null; referenceYear?: number | null; referenceMonth?: number | null;
+}
+export interface EmployeeRecurringPaymentRecord {
+  id: string; description: string; amount: number; dueDay: number; status: 'active' | 'inactive';
+}
+export interface VacationStatus {
+  monthsWorked: number; acquisitionComplete: boolean; totalAcquiredDays: number;
+  proportionalDays: number; balanceDays: number; oneThirdBonus: number;
+}
+export interface VacationScheduleRecord {
+  id: string; startDate: string; endDate: string; daysCount: number;
+  status: 'scheduled' | 'approved' | 'in_progress' | 'completed' | 'cancelled';
+}
+
+export interface EmployeeFormInput {
+  fullName: string; cpf: string; roleId: string; email?: string; phone?: string; address?: string;
+  contractType: 'clt' | 'pj' | 'estagio'; admissionDate: string; department: string;
+  baseValue: number; paymentDay: '5' | '15' | '20' | 'last'; bankDetails?: string;
+  salaryRecurrenceEnabled?: boolean;
+}
+
+function mapRole(r: ApiRole): Role {
+  return {
+    id: r.id, name: r.name, department: r.department, colorHex: r.colorHex,
+    description: r.description ?? undefined, active: r.active,
+  };
+}
+
+function mapEmployeeListItem(e: ApiEmployeeListItem): EmployeeListItem {
+  return {
+    id: e.id, fullName: e.fullName, roleId: e.roleId, department: e.department,
+    contractType: e.contractType.toLowerCase() as EmployeeListItem['contractType'],
+    status: e.status.toLowerCase() as EmployeeListItem['status'],
+    cpfMasked: e.cpfMasked, baseValue: Number(e.baseValue),
+  };
+}
+
+function mapEmployeeDetail(e: ApiEmployeeDetail): EmployeeDetail {
+  return {
+    id: e.id, fullName: e.fullName, cpf: formatCpf(e.cpf), roleId: e.roleId,
+    email: e.email ?? undefined, phone: e.phone ?? undefined, address: e.address ?? undefined,
+    contractType: e.contractType.toLowerCase() as EmployeeDetail['contractType'],
+    admissionDate: e.admissionDate.slice(0, 10),
+    terminationDate: e.terminationDate ? e.terminationDate.slice(0, 10) : null,
+    status: e.status.toLowerCase() as EmployeeDetail['status'],
+    department: e.department, baseValue: Number(e.baseValue),
+    paymentDay: toPaymentDay(e.paymentDueDay, e.payOnLastBusinessDay),
+    bankDetails: e.bankDetails ?? undefined,
+    salaryRecurrenceEnabled: e.salaryRecurrenceEnabled,
+  };
+}
+
+function toEmployeeDto(input: EmployeeFormInput) {
+  const { paymentDueDay, payOnLastBusinessDay } = fromPaymentDay(input.paymentDay);
+  return {
+    fullName: input.fullName, cpf: stripCpf(input.cpf), roleId: input.roleId,
+    email: input.email || undefined, phone: input.phone || undefined, address: input.address || undefined,
+    contractType: input.contractType.toUpperCase(), admissionDate: input.admissionDate,
+    department: input.department, baseValue: input.baseValue, paymentDueDay, payOnLastBusinessDay,
+    bankDetails: input.bankDetails || undefined, salaryRecurrenceEnabled: input.salaryRecurrenceEnabled,
+  };
+}
+
+function mapWarning(w: ApiWarning): EmployeeWarning {
+  return { id: w.id, occurredAt: w.occurredAt.slice(0, 10), reason: w.reason };
+}
+
+function mapEmployeePayment(p: ApiEmployeePayment): EmployeePaymentRecord {
+  return {
+    id: p.id, description: p.description, amount: Number(p.amount), dueDate: p.dueDate.slice(0, 10),
+    status: p.derivedStatus, recurringPaymentId: p.recurringPaymentId ?? null,
+    referenceYear: p.referenceYear ?? null, referenceMonth: p.referenceMonth ?? null,
+  };
+}
+
+function mapEmployeeRecurringPayment(r: ApiEmployeeRecurringPayment): EmployeeRecurringPaymentRecord {
+  return {
+    id: r.id, description: r.description, amount: Number(r.amount), dueDay: r.dueDay,
+    status: r.status.toLowerCase() as EmployeeRecurringPaymentRecord['status'],
+  };
+}
+
+function mapVacationStatus(v: ApiVacationStatus): VacationStatus {
+  return {
+    monthsWorked: v.monthsWorked, acquisitionComplete: v.acquisitionComplete,
+    totalAcquiredDays: v.totalAcquiredDays, proportionalDays: v.proportionalDays,
+    balanceDays: v.balanceDays, oneThirdBonus: Number(v.oneThirdBonus),
+  };
+}
+
+function mapVacationSchedule(s: ApiVacationSchedule): VacationScheduleRecord {
+  return {
+    id: s.id, startDate: s.startDate.slice(0, 10), endDate: s.endDate.slice(0, 10),
+    daysCount: s.daysCount, status: s.status.toLowerCase() as VacationScheduleRecord['status'],
+  };
+}
+
+// ---- Roles (Cargos) ----
+export async function listRoles(): Promise<Role[]> {
+  const res = await request<Paginated<ApiRole>>(`/roles?pageSize=100`);
+  return res.items.map(mapRole);
+}
+
+export async function listActiveRoles(): Promise<Role[]> {
+  const items = await request<ApiRole[]>(`/roles/active`);
+  return items.map(mapRole);
+}
+
+export async function createRole(dto: {
+  name: string; department: string; colorHex?: string; description?: string;
+}): Promise<Role> {
+  const r = await request<ApiRole>('/roles', { method: 'POST', body: JSON.stringify(dto) });
+  return mapRole(r);
+}
+
+export async function updateRole(
+  id: string,
+  dto: Partial<{ name: string; department: string; colorHex: string; description: string }>,
+): Promise<Role> {
+  const r = await request<ApiRole>(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
+  return mapRole(r);
+}
+
+export async function deactivateRole(id: string): Promise<Role> {
+  const r = await request<ApiRole>(`/roles/${id}/deactivate`, { method: 'PATCH' });
+  return mapRole(r);
+}
+
+export async function reactivateRole(id: string): Promise<Role> {
+  const r = await request<ApiRole>(`/roles/${id}/reactivate`, { method: 'PATCH' });
+  return mapRole(r);
+}
+
+// ---- Employees (Funcionários) ----
+export async function listEmployees(): Promise<EmployeeListItem[]> {
+  const res = await request<Paginated<ApiEmployeeListItem>>(`/employees?pageSize=100`);
+  return res.items.map(mapEmployeeListItem);
+}
+
+export async function getEmployee(id: string): Promise<EmployeeDetail> {
+  const e = await request<ApiEmployeeDetail>(`/employees/${id}`);
+  return mapEmployeeDetail(e);
+}
+
+export async function createEmployee(input: EmployeeFormInput): Promise<EmployeeDetail> {
+  const e = await request<ApiEmployeeDetail>('/employees', { method: 'POST', body: JSON.stringify(toEmployeeDto(input)) });
+  return mapEmployeeDetail(e);
+}
+
+export async function updateEmployee(id: string, input: Partial<EmployeeFormInput>): Promise<EmployeeDetail> {
+  const dto: Record<string, unknown> = { ...input };
+  if (input.cpf !== undefined) dto.cpf = stripCpf(input.cpf);
+  if (input.contractType !== undefined) dto.contractType = input.contractType.toUpperCase();
+  if (input.paymentDay !== undefined) {
+    const { paymentDueDay, payOnLastBusinessDay } = fromPaymentDay(input.paymentDay);
+    dto.paymentDueDay = paymentDueDay;
+    dto.payOnLastBusinessDay = payOnLastBusinessDay;
+    delete dto.paymentDay;
+  }
+  const e = await request<ApiEmployeeDetail>(`/employees/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
+  return mapEmployeeDetail(e);
+}
+
+export async function deactivateEmployee(id: string): Promise<EmployeeDetail> {
+  const e = await request<ApiEmployeeDetail>(`/employees/${id}/deactivate`, { method: 'PATCH' });
+  return mapEmployeeDetail(e);
+}
+
+export async function reactivateEmployee(id: string): Promise<EmployeeDetail> {
+  const e = await request<ApiEmployeeDetail>(`/employees/${id}/reactivate`, { method: 'PATCH' });
+  return mapEmployeeDetail(e);
+}
+
+// ---- Employee Warnings (Advertências) ----
+export async function listWarnings(employeeId: string): Promise<EmployeeWarning[]> {
+  const items = await request<ApiWarning[]>(`/employees/${employeeId}/warnings`);
+  return items.map(mapWarning);
+}
+
+export async function createWarning(
+  employeeId: string,
+  dto: { occurredAt: string; reason: string },
+): Promise<EmployeeWarning> {
+  const w = await request<ApiWarning>(`/employees/${employeeId}/warnings`, { method: 'POST', body: JSON.stringify(dto) });
+  return mapWarning(w);
+}
+
+// ---- Employee Payments (Pagamentos avulsos) ----
+export async function listEmployeePayments(employeeId: string): Promise<EmployeePaymentRecord[]> {
+  const res = await request<Paginated<ApiEmployeePayment>>(`/employees/${employeeId}/payments?pageSize=100`);
+  return res.items.map(mapEmployeePayment);
+}
+
+export async function payEmployeePayment(id: string): Promise<void> {
+  await request(`/employee-payments/${id}/pay`, { method: 'PATCH' });
+}
+
+// ---- Employee Recurring Payments (Recorrência) ----
+export async function listEmployeeRecurringPayments(employeeId: string): Promise<EmployeeRecurringPaymentRecord[]> {
+  const items = await request<ApiEmployeeRecurringPayment[]>(`/employees/${employeeId}/recurring-payments`);
+  return items.map(mapEmployeeRecurringPayment);
+}
+
+export async function createEmployeeRecurringPayment(
+  employeeId: string,
+  dto: { description: string; amount: number; dueDay: number },
+): Promise<EmployeeRecurringPaymentRecord> {
+  const r = await request<ApiEmployeeRecurringPayment>(
+    `/employees/${employeeId}/recurring-payments`,
+    { method: 'POST', body: JSON.stringify(dto) },
+  );
+  return mapEmployeeRecurringPayment(r);
+}
+
+export async function deactivateEmployeeRecurringPayment(id: string): Promise<void> {
+  await request(`/employee-recurring-payments/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'INACTIVE' }) });
+}
+
+export async function generateEmployeeCharge(recurringPaymentId: string): Promise<void> {
+  await request(`/employee-recurring-payments/${recurringPaymentId}/generate-charge`, { method: 'POST' });
+}
+
+// ---- Vacations (Férias) ----
+export async function getVacationStatus(employeeId: string): Promise<VacationStatus> {
+  const v = await request<ApiVacationStatus>(`/employees/${employeeId}/vacation/status`);
+  return mapVacationStatus(v);
+}
+
+export async function simulateVacation(
+  employeeId: string,
+  dto: { startDate: string; endDate: string; daysCount: number },
+): Promise<VacationStatus & { sufficientBalance: boolean }> {
+  const v = await request<ApiVacationStatus & { sufficientBalance: boolean }>(
+    `/employees/${employeeId}/vacation/simulate`,
+    { method: 'POST', body: JSON.stringify(dto) },
+  );
+  return { ...mapVacationStatus(v), sufficientBalance: v.sufficientBalance };
+}
+
+export async function scheduleVacation(
+  employeeId: string,
+  dto: { startDate: string; endDate: string; daysCount: number },
+): Promise<VacationScheduleRecord> {
+  const s = await request<ApiVacationSchedule>(`/employees/${employeeId}/vacation/schedule`, { method: 'POST', body: JSON.stringify(dto) });
+  return mapVacationSchedule(s);
+}
+
+export async function listVacationSchedules(employeeId: string): Promise<VacationScheduleRecord[]> {
+  const items = await request<ApiVacationSchedule[]>(`/employees/${employeeId}/vacation/schedules`);
+  return items.map(mapVacationSchedule);
+}
+
 // ---- Reports ----
 export async function getFinancialSummary(): Promise<FinancialSummary> {
   const res = await request<ApiFinancialSummary>(`/reports/financial-summary`);
