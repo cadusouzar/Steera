@@ -121,6 +121,49 @@ completos em `[[DECISOES-TECNICAS]]`, `[[BANCO-DE-DADOS]]` e `[[API]]` no vault.
 lixeira e são purgados fisicamente após 30 dias (`PATCH /clients/:id/restore`,
 `GET /clients/trash`); detalhes completos em `[[DECISOES-TECNICAS]]` no vault.
 
+**Cobrança automática recorrente (`BillingModule`):** assinaturas de clientes (`Subscription`,
+status `ACTIVE`) e recorrências de pagamento de funcionário (`EmployeeRecurringPayment`, status
+`ACTIVE`) agora geram sua cobrança do mês sozinhas, sem precisar de nenhum clique manual —
+`SubscriptionsService.generateDueCharges()` e
+`EmployeeRecurringPaymentsService.generateDueCharges()` buscam quem já venceu no mês corrente e
+ainda não tem `Receivable`/`EmployeePayment` daquele `referenceYear`/`referenceMonth`, e chamam o
+`generateCharge()` já existente (nenhuma lógica de criação de cobrança é duplicada).
+`BillingSchedulerService` (`backend/src/billing/`) dispara as duas checagens via
+`@Cron(CronExpression.EVERY_DAY_AT_3AM)` (mesmo horário do cron de purga da lixeira) **e** uma vez
+via `OnApplicationBootstrap`, pra auto-curar uma janela de cron perdida assim que o processo sobe;
+cada chamada é isolada em try/catch próprio (falha em uma nunca derruba a outra nem o processo). O
+botão manual "Gerar Fatura do Mês" **continua existindo** como ação complementar (gera na hora, sem
+esperar o cron/boot). Pendências conhecidas, a resolver antes/quando os itens abaixo se tornarem
+relevantes:
+- `Employee.salaryRecurrenceEnabled` **não é lido** por essa automação — o campo existe (usado pela
+  integração futura do frontend de RH) mas `generateDueCharges()` do lado de funcionário decide
+  puramente pelo `status: 'ACTIVE'` da própria `EmployeeRecurringPayment`; precisa ser resolvido
+  (confirmar com o usuário) antes da integração de RH no frontend, já que o usuário vai esperar que
+  esse toggle controle a cobrança.
+- O scheduler cobra **só uma empresa por execução** — `CompanyContextService.getCurrentCompanyId()`
+  é um stub de empresa única (ver seção de RH acima) e `BillingSchedulerService` não itera múltiplas
+  empresas; sem problema hoje, mas precisa ser endereçado quando multi-tenant/autenticação real
+  chegar.
+- A checagem de bootstrap roda **de forma síncrona antes do app aceitar tráfego HTTP** (é
+  `await`ada, não fire-and-forget); com uma base muito grande de recorrências isso pode atrasar o
+  boot — tradeoff aceito por ora (mantém os testes simples), fica como otimização futura.
+- **Não há catch-up retroativo de múltiplos meses**: se o backend ficar fora do ar tempo suficiente
+  pra um mês inteiro passar sem checagem, aquela cobrança daquele mês nunca é gerada
+  automaticamente (mesma situação de um humano esquecer de clicar no botão manual, antes desta
+  feature existir) — só o mês corrente é checado em cada execução.
+- O fix de `dueDay` 29-31 (tratar o último dia do mês como se fosse dia 31) é um **alargamento
+  deliberado**, não só correção de bug: no último dia de fevereiro sem dia 29, uma recorrência com
+  `dueDay: 29` é cobrada um dia "adiantada" em relação ao dia configurado, porque não existe
+  catch-up retroativo pra compensar depois — tradeoff correto dado o design sem catch-up, mas vale
+  registrar como decisão, não acidente.
+- Nenhum teste de ponta a ponta exercita os novos formatos de query Prisma contra um PostgreSQL
+  real — todos os testes usam mocks; os nomes de relação/campo foram conferidos manualmente contra
+  `schema.prisma`, mas um teste de integração real é uma boa adição futura.
+
+Detalhes completos (decisão de duas camadas cron+bootstrap, motivo de não ter catch-up retroativo,
+raciocínio de "uma empresa por execução") em `[[DECISOES-TECNICAS]]`; mapa de módulos em
+`[[ARQUITETURA]]`; nota sobre o comportamento (sem endpoint novo) em `[[API]]`.
+
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
 integralmente suas instruções. Skills não relacionadas à tarefa não devem ser utilizadas.
