@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2 } from 'lucide-react';
+import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase } from 'lucide-react';
 import * as api from '../lib/api';
 import type { EmployeeDetail, EmployeePaymentRecord, EmployeeRecurringPaymentRecord } from '../lib/api';
 
@@ -20,7 +20,7 @@ const formatDateOnly = (dateStr: string) => {
 };
 
 const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ employeeId, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'finance' | 'vacation'>('finance');
+  const [activeTab, setActiveTab] = useState<'finance' | 'vacation' | 'leave'>('finance');
   const [employee, setEmployee] = useState<EmployeeDetail | null>(null);
   const [payments, setPayments] = useState<EmployeePaymentRecord[]>([]);
   const [recurringPayments, setRecurringPayments] = useState<EmployeeRecurringPaymentRecord[]>([]);
@@ -33,21 +33,30 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   const [scheduleStart, setScheduleStart] = useState('');
   const [scheduleEnd, setScheduleEnd] = useState('');
   const [isScheduling, setIsScheduling] = useState(false);
+  const [exceptionAuthorized, setExceptionAuthorized] = useState(false);
+  const [leaveSchedules, setLeaveSchedules] = useState<api.LeaveScheduleRecord[]>([]);
+  const [isLeaveSchedulingOpen, setIsLeaveSchedulingOpen] = useState(false);
+  const [leaveScheduleStart, setLeaveScheduleStart] = useState('');
+  const [leaveScheduleEnd, setLeaveScheduleEnd] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [isSchedulingLeave, setIsSchedulingLeave] = useState(false);
 
   const loadFinance = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [detail, paymentList, recurringList, schedules] = await Promise.all([
+      const [detail, paymentList, recurringList, schedules, leaveList] = await Promise.all([
         api.getEmployee(employeeId),
         api.listEmployeePayments(employeeId),
         api.listEmployeeRecurringPayments(employeeId),
         api.listVacationSchedules(employeeId),
+        api.listLeaveSchedules(employeeId),
       ]);
       setEmployee(detail);
       setPayments(paymentList);
       setRecurringPayments(recurringList);
       setVacationSchedules(schedules);
+      setLeaveSchedules(leaveList);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os dados financeiros.');
     } finally {
@@ -97,16 +106,40 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     setActionError(null);
     try {
       await api.scheduleVacation(employeeId, {
-        startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd),
+        startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd), exceptionAuthorized,
       });
       setVacationSchedules(await api.listVacationSchedules(employeeId));
       setIsSchedulingOpen(false);
       setScheduleStart('');
       setScheduleEnd('');
+      setExceptionAuthorized(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível agendar as férias.');
     } finally {
       setIsScheduling(false);
+    }
+  };
+
+  const handleScheduleLeave = async () => {
+    if (!leaveScheduleStart || !leaveScheduleEnd || isSchedulingLeave) return;
+    setIsSchedulingLeave(true);
+    setActionError(null);
+    try {
+      await api.scheduleLeave(employeeId, {
+        startDate: leaveScheduleStart,
+        endDate: leaveScheduleEnd,
+        daysCount: daysBetween(leaveScheduleStart, leaveScheduleEnd),
+        reason: leaveReason || undefined,
+      });
+      setLeaveSchedules(await api.listLeaveSchedules(employeeId));
+      setIsLeaveSchedulingOpen(false);
+      setLeaveScheduleStart('');
+      setLeaveScheduleEnd('');
+      setLeaveReason('');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível agendar o afastamento.');
+    } finally {
+      setIsSchedulingLeave(false);
     }
   };
 
@@ -154,6 +187,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   };
 
   const vacationUnavailable = employee?.contractType !== 'clt';
+  const vacationCapExceeded = !!actionError && actionError.includes('Limite de 30 dias');
 
   return (
     <AnimatePresence>
@@ -238,6 +272,15 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                     }`}
                 >
                   <Umbrella size={16} /> Férias
+                </button>
+                <button
+                  onClick={() => setActiveTab('leave')}
+                  className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'leave'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted hover:text-foreground'
+                    }`}
+                >
+                  <Briefcase size={16} /> Afastamento
                 </button>
               </div>
 
@@ -356,6 +399,18 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                       </div>
                     )}
 
+                    {vacationCapExceeded && (
+                      <label className="flex items-center gap-2.5 px-4 py-3 bg-secondary/20 border border-border/40 rounded-xl text-sm text-foreground cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={exceptionAuthorized}
+                          onChange={(e) => setExceptionAuthorized(e.target.checked)}
+                          className="rounded border-border/80"
+                        />
+                        Autorizar exceção e agendar mesmo assim, ultrapassando os 30 dias
+                      </label>
+                    )}
+
                     {vacationUnavailable ? (
                       <div className="text-center py-16 bg-secondary/10 border border-border/40 border-dashed rounded-2xl px-6">
                         <div className="w-16 h-16 rounded-full bg-orange-500/10 text-orange-500 flex items-center justify-center mx-auto mb-4">
@@ -385,7 +440,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
                             <div className="flex gap-3 pt-2">
                               <button
-                                onClick={() => { setIsSchedulingOpen(false); setScheduleStart(''); setScheduleEnd(''); }}
+                                onClick={() => { setIsSchedulingOpen(false); setScheduleStart(''); setScheduleEnd(''); setExceptionAuthorized(false); }}
                                 className="flex-1 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
                               >
                                 Cancelar
@@ -407,7 +462,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                               <History size={18} className="text-primary/70" /> Histórico de Férias
                             </h3>
                             <button
-                              onClick={() => setIsSchedulingOpen(true)}
+                              onClick={() => { setIsSchedulingOpen(true); setExceptionAuthorized(false); }}
                               disabled={isSchedulingOpen}
                               className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -445,6 +500,98 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                         </div>
                       </>
                     )}
+                  </motion.div>
+                )}
+
+                {activeTab === 'leave' && (
+                  <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                    {actionError && (
+                      <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-600 rounded-xl text-sm font-medium flex items-center gap-2">
+                        <AlertCircle size={16} className="shrink-0" /> {actionError}
+                      </div>
+                    )}
+
+                    {isLeaveSchedulingOpen && (
+                      <div className="bg-secondary/10 border border-border/40 rounded-2xl p-5 space-y-4">
+                        <h4 className="text-sm font-bold text-foreground">Agendar Afastamento</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Início</label>
+                            <input type="date" value={leaveScheduleStart} onChange={(e) => setLeaveScheduleStart(e.target.value)} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Fim</label>
+                            <input type="date" value={leaveScheduleEnd} onChange={(e) => setLeaveScheduleEnd(e.target.value)} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-foreground/80 mb-1.5">Motivo (opcional)</label>
+                          <input type="text" value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} placeholder="Ex.: Licença médica" className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                          <button
+                            onClick={() => { setIsLeaveSchedulingOpen(false); setLeaveScheduleStart(''); setLeaveScheduleEnd(''); setLeaveReason(''); }}
+                            className="flex-1 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={handleScheduleLeave}
+                            disabled={!leaveScheduleStart || !leaveScheduleEnd || isSchedulingLeave}
+                            className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+                          >
+                            {isSchedulingLeave ? 'Agendando...' : 'Confirmar Agendamento'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <div className="flex items-center justify-between mb-4 mt-8">
+                        <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2">
+                          <History size={18} className="text-primary/70" /> Histórico de Afastamentos
+                        </h3>
+                        <button
+                          onClick={() => setIsLeaveSchedulingOpen(true)}
+                          disabled={isLeaveSchedulingOpen}
+                          className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Agendar Afastamento
+                        </button>
+                      </div>
+
+                      <div className="space-y-3">
+                        {leaveSchedules.length > 0 ? (
+                          leaveSchedules.map((sched) => (
+                            <div key={sched.id} className="flex items-center justify-between p-4 bg-background border border-border/60 rounded-xl">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-secondary/50 text-muted flex items-center justify-center shrink-0">
+                                  <Briefcase size={14} />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-foreground">
+                                    {formatDateOnly(sched.startDate)} até {formatDateOnly(sched.endDate)}
+                                  </p>
+                                  <p className="text-xs text-muted mt-0.5">{sched.daysCount} dias</p>
+                                  {sched.reason && (
+                                    <p className="text-xs text-muted mt-0.5">{sched.reason}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
+                                {getScheduleStatusText(sched.status)}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-8 bg-secondary/10 border border-border/40 border-dashed rounded-2xl">
+                            <p className="text-sm font-bold text-foreground">Nenhum afastamento registrado</p>
+                            <p className="text-xs text-muted mt-1">Este funcionário ainda não possui histórico de afastamentos.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </motion.div>
                 )}
               </div>

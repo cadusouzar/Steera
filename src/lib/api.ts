@@ -362,6 +362,14 @@ interface ApiVacationSchedule {
   daysCount: number;
   status: 'SCHEDULED' | 'APPROVED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 }
+interface ApiLeaveSchedule {
+  id: string;
+  startDate: string;
+  endDate: string;
+  daysCount: number;
+  reason: string | null;
+  status: 'SCHEDULED' | 'APPROVED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+}
 
 // ---- Shapes the UI works with (RH) ----
 export interface Role {
@@ -427,6 +435,14 @@ export interface VacationScheduleRecord {
   startDate: string;
   endDate: string;
   daysCount: number;
+  status: 'scheduled' | 'approved' | 'in_progress' | 'completed' | 'cancelled';
+}
+export interface LeaveScheduleRecord {
+  id: string;
+  startDate: string;
+  endDate: string;
+  daysCount: number;
+  reason: string | null;
   status: 'scheduled' | 'approved' | 'in_progress' | 'completed' | 'cancelled';
 }
 
@@ -549,6 +565,17 @@ function mapVacationSchedule(s: ApiVacationSchedule): VacationScheduleRecord {
     endDate: s.endDate.slice(0, 10),
     daysCount: s.daysCount,
     status: s.status.toLowerCase() as VacationScheduleRecord['status'],
+  };
+}
+
+function mapLeaveSchedule(s: ApiLeaveSchedule): LeaveScheduleRecord {
+  return {
+    id: s.id,
+    startDate: s.startDate.slice(0, 10),
+    endDate: s.endDate.slice(0, 10),
+    daysCount: s.daysCount,
+    reason: s.reason ?? null,
+    status: s.status.toLowerCase() as LeaveScheduleRecord['status'],
   };
 }
 
@@ -694,7 +721,7 @@ export async function generateEmployeeCharge(recurringPaymentId: string): Promis
 // ---- Vacations (Férias) ----
 export async function scheduleVacation(
   employeeId: string,
-  dto: { startDate: string; endDate: string; daysCount: number },
+  dto: { startDate: string; endDate: string; daysCount: number; exceptionAuthorized?: boolean },
 ): Promise<VacationScheduleRecord> {
   const s = await request<ApiVacationSchedule>(`/employees/${employeeId}/vacation/schedule`, { method: 'POST', body: JSON.stringify(dto) });
   return mapVacationSchedule(s);
@@ -703,6 +730,20 @@ export async function scheduleVacation(
 export async function listVacationSchedules(employeeId: string): Promise<VacationScheduleRecord[]> {
   const items = await request<ApiVacationSchedule[]>(`/employees/${employeeId}/vacation/schedules`);
   return items.map(mapVacationSchedule);
+}
+
+// ---- Afastamento (Leave) ----
+export async function scheduleLeave(
+  employeeId: string,
+  dto: { startDate: string; endDate: string; daysCount: number; reason?: string; notes?: string },
+): Promise<LeaveScheduleRecord> {
+  const s = await request<ApiLeaveSchedule>(`/employees/${employeeId}/leave/schedule`, { method: 'POST', body: JSON.stringify(dto) });
+  return mapLeaveSchedule(s);
+}
+
+export async function listLeaveSchedules(employeeId: string): Promise<LeaveScheduleRecord[]> {
+  const items = await request<ApiLeaveSchedule[]>(`/employees/${employeeId}/leave/schedules`);
+  return items.map(mapLeaveSchedule);
 }
 
 // ---- Reports ----
