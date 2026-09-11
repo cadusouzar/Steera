@@ -115,10 +115,23 @@ describe('EmployeeRecurringPaymentsService', () => {
           companyId: 'company-1',
           status: 'ACTIVE',
           dueDay: { lte: 15 },
-          employee: { status: { not: 'INACTIVE' } },
+          employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true },
           payments: { none: { referenceYear: 2026, referenceMonth: 6 } },
         },
       });
+    });
+
+    it('does not select a recurring payment whose employee has salaryRecurrenceEnabled=false, even if the recurrence itself is ACTIVE', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-15T12:00:00Z'));
+      prisma.employeeRecurringPayment.findMany.mockResolvedValue([]);
+
+      await service.generateDueCharges();
+
+      expect(prisma.employeeRecurringPayment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true } }),
+        }),
+      );
     });
 
     it('scopes the due-charge sweep to the current company', async () => {
@@ -149,7 +162,7 @@ describe('EmployeeRecurringPaymentsService', () => {
             companyId: 'company-1',
             status: 'ACTIVE',
             dueDay: { lte: 31 },
-            employee: { status: { not: 'INACTIVE' } },
+            employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true },
             payments: { none: { referenceYear, referenceMonth } },
           },
         });
@@ -168,7 +181,7 @@ describe('EmployeeRecurringPaymentsService', () => {
           companyId: 'company-1',
           status: 'ACTIVE',
           dueDay: { lte: 27 },
-          employee: { status: { not: 'INACTIVE' } },
+          employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true },
           payments: { none: { referenceYear: 2026, referenceMonth: 2 } },
         },
       });

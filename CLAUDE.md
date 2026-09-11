@@ -135,11 +135,9 @@ cada chamada é isolada em try/catch próprio (falha em uma nunca derruba a outr
 botão manual "Gerar Fatura do Mês" **continua existindo** como ação complementar (gera na hora, sem
 esperar o cron/boot). Pendências conhecidas, a resolver antes/quando os itens abaixo se tornarem
 relevantes:
-- `Employee.salaryRecurrenceEnabled` **não é lido** por essa automação — o campo existe (usado pela
-  integração futura do frontend de RH) mas `generateDueCharges()` do lado de funcionário decide
-  puramente pelo `status: 'ACTIVE'` da própria `EmployeeRecurringPayment`; precisa ser resolvido
-  (confirmar com o usuário) antes da integração de RH no frontend, já que o usuário vai esperar que
-  esse toggle controle a cobrança.
+- ~~`Employee.salaryRecurrenceEnabled` não era lido por essa automação~~ — **resolvido**:
+  `generateDueCharges()` do lado de funcionário agora exige `salaryRecurrenceEnabled: true` além do
+  `status: 'ACTIVE'` da recorrência.
 - O scheduler cobra **só uma empresa por execução** — `CompanyContextService.getCurrentCompanyId()`
   é um stub de empresa única (ver seção de RH acima) e `BillingSchedulerService` não itera múltiplas
   empresas; sem problema hoje, mas precisa ser endereçado quando multi-tenant/autenticação real
@@ -156,9 +154,22 @@ relevantes:
   `dueDay: 29` é cobrada um dia "adiantada" em relação ao dia configurado, porque não existe
   catch-up retroativo pra compensar depois — tradeoff correto dado o design sem catch-up, mas vale
   registrar como decisão, não acidente.
-- Nenhum teste de ponta a ponta exercita os novos formatos de query Prisma contra um PostgreSQL
-  real — todos os testes usam mocks; os nomes de relação/campo foram conferidos manualmente contra
-  `schema.prisma`, mas um teste de integração real é uma boa adição futura.
+- Nenhum teste **automatizado** de ponta a ponta exercita os novos formatos de query Prisma contra
+  um PostgreSQL real (todos os testes usam mocks) — mas uma verificação manual pontual foi feita em
+  11/09/2026 (reiniciar o backend de verdade com uma assinatura vencida gerou a fatura corretamente,
+  sem duplicar num segundo restart); ver o incidente abaixo.
+
+**Incidente descoberto durante essa verificação manual (11/09/2026):** o banco real estava com
+`Client.includeInRevenueReport`/`deactivatedAt` e `Receivable.subscriptionId`/`referenceYear`/
+`referenceMonth` apagados silenciosamente por um `db push --accept-data-loss` do início do módulo
+de RH (só a tabela `Company` daquele incidente tinha sido corrigida na hora — o resto ficou
+invisível pra `prisma migrate status`, que só confere a tabela de controle de migrations, não a
+estrutura real). Sem perda de dado real (verificado, não presumido); corrigido com duas migrations
+novas. Também foi encontrado e corrigido um bug pré-existente em `common/date.util.ts`
+(`startOfToday()` usava hora local em vez de UTC). **Pendência que ficou de propósito sem mexer:**
+`generateCharge()` (em `SubscriptionsService`/`EmployeeRecurringPaymentsService`) tem o mesmo padrão
+de bug de hora local — não foi tocado por estar fora do escopo desta etapa e já ser código
+financeiro em uso; precisa de revisão dedicada. Detalhes completos em `[[DECISOES-TECNICAS]]`.
 
 Detalhes completos (decisão de duas camadas cron+bootstrap, motivo de não ter catch-up retroativo,
 raciocínio de "uma empresa por execução") em `[[DECISOES-TECNICAS]]`; mapa de módulos em

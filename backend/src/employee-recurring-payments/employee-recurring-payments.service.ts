@@ -120,7 +120,11 @@ export class EmployeeRecurringPaymentsService {
         companyId,
         status: 'ACTIVE',
         dueDay: { lte: effectiveDay },
-        employee: { status: { not: 'INACTIVE' } },
+        // salaryRecurrenceEnabled é a preferência do funcionário sobre a
+        // recorrência de salário (controlada no frontend de RH) — desligar o
+        // toggle pausa a cobrança automática sem precisar inativar a
+        // EmployeeRecurringPayment em si.
+        employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true },
         payments: { none: { referenceYear, referenceMonth } },
       },
     });
