@@ -20,19 +20,37 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [vacationStatus, setVacationStatus] = useState<api.VacationStatus | null>(null);
+  const [vacationSchedules, setVacationSchedules] = useState<api.VacationScheduleRecord[]>([]);
+  const [vacationUnavailable, setVacationUnavailable] = useState(false);
+  const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
+  const [scheduleStart, setScheduleStart] = useState('');
+  const [scheduleEnd, setScheduleEnd] = useState('');
+  const [simulation, setSimulation] = useState<(api.VacationStatus & { sufficientBalance: boolean }) | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [isScheduling, setIsScheduling] = useState(false);
 
   const loadFinance = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    setVacationUnavailable(false);
     try {
-      const [detail, paymentList, recurringList] = await Promise.all([
+      const [detail, paymentList, recurringList, schedules] = await Promise.all([
         api.getEmployee(employeeId),
         api.listEmployeePayments(employeeId),
         api.listEmployeeRecurringPayments(employeeId),
+        api.listVacationSchedules(employeeId),
       ]);
       setEmployee(detail);
       setPayments(paymentList);
       setRecurringPayments(recurringList);
+      setVacationSchedules(schedules);
+
+      try {
+        setVacationStatus(await api.getVacationStatus(employeeId));
+      } catch {
+        setVacationUnavailable(true); // vínculo não-CLT (422)
+      }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os dados financeiros.');
     } finally {
@@ -70,6 +88,50 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     }
   };
 
+  const daysBetween = (start: string, end: string) => {
+    if (!start || !end) return 0;
+    const diff = new Date(`${end}T00:00:00Z`).getTime() - new Date(`${start}T00:00:00Z`).getTime();
+    return Math.round(diff / 86_400_000) + 1;
+  };
+
+  const handleSimulate = async () => {
+    if (!scheduleStart || !scheduleEnd) return;
+    setIsSimulating(true);
+    setActionError(null);
+    setSimulation(null);
+    try {
+      const result = await api.simulateVacation(employeeId, {
+        startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd),
+      });
+      setSimulation(result);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível simular o período.');
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleConfirmSchedule = async () => {
+    if (!scheduleStart || !scheduleEnd || isScheduling) return;
+    setIsScheduling(true);
+    setActionError(null);
+    try {
+      await api.scheduleVacation(employeeId, {
+        startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd),
+      });
+      setVacationSchedules(await api.listVacationSchedules(employeeId));
+      setVacationStatus(await api.getVacationStatus(employeeId));
+      setIsSchedulingOpen(false);
+      setScheduleStart('');
+      setScheduleEnd('');
+      setSimulation(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível agendar as férias.');
+    } finally {
+      setIsScheduling(false);
+    }
+  };
+
   const getPaymentStatusIcon = (status: string) => {
     switch (status) {
       case 'paid': return <CheckCircle2 size={16} className="text-green-500" />;
@@ -91,6 +153,25 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
       case 'paid': return 'bg-green-500/10 text-green-600 border-green-500/20';
       case 'overdue': return 'bg-red-500/10 text-red-600 border-red-500/20';
       default: return 'bg-orange-500/10 text-orange-600 border-orange-500/20';
+    }
+  };
+
+  const getScheduleStatusText = (status: api.VacationScheduleRecord['status']) => {
+    switch (status) {
+      case 'completed': return 'Concluído';
+      case 'in_progress': return 'Em andamento';
+      case 'approved': return 'Aprovado';
+      case 'cancelled': return 'Cancelado';
+      default: return 'Agendado';
+    }
+  };
+
+  const getScheduleStatusStyle = (status: api.VacationScheduleRecord['status']) => {
+    switch (status) {
+      case 'completed': return 'bg-green-500/10 text-green-600 border-green-500/20';
+      case 'cancelled': return 'bg-red-500/10 text-red-600 border-red-500/20';
+      case 'in_progress': return 'bg-accent/10 text-accent border-accent/20';
+      default: return 'bg-primary/10 text-primary border-primary/20';
     }
   };
 
@@ -275,15 +356,160 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
                 {activeTab === 'vacation' && (
                   <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-                    <div className="text-center py-16 bg-secondary/10 border border-border/40 border-dashed rounded-2xl px-6">
-                      <div className="w-16 h-16 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
-                        <Umbrella size={28} />
+                    {actionError && (
+                      <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-600 rounded-xl text-sm font-medium flex items-center gap-2">
+                        <AlertCircle size={16} className="shrink-0" /> {actionError}
                       </div>
-                      <h3 className="text-lg font-bold text-foreground mb-2">Férias</h3>
-                      <p className="text-sm text-muted max-w-md mx-auto leading-relaxed">
-                        A gestão de férias integrada ao backend chega em breve.
-                      </p>
-                    </div>
+                    )}
+
+                    {vacationUnavailable ? (
+                      <div className="text-center py-16 bg-secondary/10 border border-border/40 border-dashed rounded-2xl px-6">
+                        <div className="w-16 h-16 rounded-full bg-orange-500/10 text-orange-500 flex items-center justify-center mx-auto mb-4">
+                          <Umbrella size={28} />
+                        </div>
+                        <h3 className="text-lg font-bold text-foreground mb-2">Férias Indisponíveis</h3>
+                        <p className="text-sm text-muted max-w-md mx-auto leading-relaxed">
+                          Este funcionário possui um contrato do tipo <strong className="uppercase text-foreground">{employee.contractType}</strong>.
+                          A gestão de férias de 30 dias está disponível apenas para funcionários <strong>CLT</strong>, de acordo com as leis trabalhistas.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="bg-primary/10 border border-primary/20 p-5 rounded-2xl">
+                            <p className="text-xs text-primary/80 uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
+                              <Calendar size={14} /> Admissão
+                            </p>
+                            <p className="text-xl font-bold text-primary">
+                              {new Date(employee.admissionDate).toLocaleDateString('pt-BR')}
+                            </p>
+                            <p className="text-xs text-primary/70 mt-1">
+                              {vacationStatus ? Math.floor(vacationStatus.monthsWorked / 12) : 0} anos e {vacationStatus ? vacationStatus.monthsWorked % 12 : 0} meses
+                            </p>
+                          </div>
+
+                          <div className="bg-background border border-border/60 p-5 rounded-2xl shadow-sm">
+                            <p className="text-xs text-muted uppercase font-bold tracking-wider mb-1">Saldo Disponível</p>
+                            <p className="text-3xl font-bold text-foreground">{vacationStatus?.balanceDays ?? 0} <span className="text-lg text-muted font-medium">dias</span></p>
+                            <p className="text-xs text-muted mt-1">
+                              Para gozo imediato
+                            </p>
+                          </div>
+
+                          <div className="bg-background border border-border/60 p-5 rounded-2xl shadow-sm">
+                            <p className="text-xs text-muted uppercase font-bold tracking-wider mb-1">Em Aquisição</p>
+                            <p className="text-3xl font-bold text-foreground">{vacationStatus?.proportionalDays ?? 0} <span className="text-lg text-muted font-medium">dias</span></p>
+                            <p className="text-xs text-muted mt-1">
+                              Proporcionais (ano vigente)
+                            </p>
+                          </div>
+                        </div>
+
+                        {vacationStatus && !vacationStatus.acquisitionComplete && (
+                          <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-xl flex items-start gap-3">
+                            <AlertCircle size={18} className="text-orange-500 shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-bold text-orange-600 dark:text-orange-400">Período Aquisitivo Incompleto</p>
+                              <p className="text-xs text-orange-600/80 dark:text-orange-400/80 mt-1">
+                                O funcionário ainda não completou 1 ano de empresa. O direito a 30 dias de férias é concedido após o primeiro ano completo.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {isSchedulingOpen && (
+                          <div className="bg-secondary/10 border border-border/40 rounded-2xl p-5 space-y-4">
+                            <h4 className="text-sm font-bold text-foreground">Agendar novo período</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Início</label>
+                                <input type="date" value={scheduleStart} onChange={(e) => { setScheduleStart(e.target.value); setSimulation(null); }} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Fim</label>
+                                <input type="date" value={scheduleEnd} onChange={(e) => { setScheduleEnd(e.target.value); setSimulation(null); }} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                              </div>
+                            </div>
+
+                            {!simulation ? (
+                              <button
+                                onClick={handleSimulate}
+                                disabled={!scheduleStart || !scheduleEnd || isSimulating}
+                                className="text-sm font-bold text-primary hover:bg-primary/10 px-4 py-2.5 rounded-xl transition-colors disabled:opacity-50"
+                              >
+                                {isSimulating ? 'Simulando...' : 'Simular'}
+                              </button>
+                            ) : (
+                              <div className="bg-background border border-border/60 rounded-xl p-4 space-y-2">
+                                <p className="text-sm">
+                                  {daysBetween(scheduleStart, scheduleEnd)} dias · Adicional de 1/3: <strong>{formatCurrency(simulation.oneThirdBonus)}</strong>
+                                </p>
+                                {!simulation.sufficientBalance && (
+                                  <p className="text-sm text-red-500 font-medium flex items-center gap-1.5">
+                                    <AlertCircle size={14} /> Saldo insuficiente para este período.
+                                  </p>
+                                )}
+                                <div className="flex gap-3 pt-2">
+                                  <button onClick={() => setIsSchedulingOpen(false)} className="flex-1 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    onClick={handleConfirmSchedule}
+                                    disabled={!simulation.sufficientBalance || isScheduling}
+                                    className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+                                  >
+                                    {isScheduling ? 'Agendando...' : 'Confirmar Agendamento'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div>
+                          <div className="flex items-center justify-between mb-4 mt-8">
+                            <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2">
+                              <History size={18} className="text-primary/70" /> Histórico de Férias
+                            </h3>
+                            <button
+                              onClick={() => setIsSchedulingOpen(true)}
+                              disabled={!vacationStatus?.balanceDays}
+                              className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Agendar Férias
+                            </button>
+                          </div>
+
+                          <div className="space-y-3">
+                            {vacationSchedules.length > 0 ? (
+                              vacationSchedules.map((sched) => (
+                                <div key={sched.id} className="flex items-center justify-between p-4 bg-background border border-border/60 rounded-xl">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-secondary/50 text-muted flex items-center justify-center shrink-0">
+                                      <Umbrella size={14} />
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-bold text-foreground">
+                                        {new Date(sched.startDate).toLocaleDateString('pt-BR')} até {new Date(sched.endDate).toLocaleDateString('pt-BR')}
+                                      </p>
+                                      <p className="text-xs text-muted mt-0.5">{sched.daysCount} dias</p>
+                                    </div>
+                                  </div>
+                                  <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
+                                    {getScheduleStatusText(sched.status)}
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-center py-8 bg-secondary/10 border border-border/40 border-dashed rounded-2xl">
+                                <p className="text-sm font-bold text-foreground">Nenhuma férias tirada</p>
+                                <p className="text-xs text-muted mt-1">Este funcionário ainda não utilizou seu saldo de férias.</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </motion.div>
                 )}
               </div>
