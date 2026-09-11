@@ -97,11 +97,18 @@ export class SubscriptionsService {
     const currentDay = today.getUTCDate();
     const referenceYear = today.getUTCFullYear();
     const referenceMonth = today.getUTCMonth() + 1;
+    // Meses mais curtos que 31 dias nunca satisfariam dueDay=29/30/31 via
+    // `lte: currentDay` — sem isso, um vencimento no dia 31 nunca seria
+    // selecionado em fevereiro/abril/junho/setembro/novembro, e como não há
+    // catch-up retroativo, aquele mês nunca seria cobrado. No último dia do
+    // mês, tratamos como se fosse o dia 31 pra cobrir qualquer dueDay 29-31.
+    const lastDayOfMonth = new Date(Date.UTC(referenceYear, referenceMonth, 0)).getUTCDate();
+    const effectiveDay = currentDay === lastDayOfMonth ? 31 : currentDay;
 
     const dueSubscriptions = await this.prisma.subscription.findMany({
       where: {
         status: SubscriptionStatus.ACTIVE,
-        dueDay: { lte: currentDay },
+        dueDay: { lte: effectiveDay },
         client: { status: { not: ClientStatus.INACTIVE } },
         receivables: { none: { referenceYear, referenceMonth } },
       },
@@ -115,7 +122,16 @@ export class SubscriptionsService {
       } catch (err) {
         // 409 = outra execução já gerou esta cobrança (corrida entre cron e
         // bootstrap, ou dois restarts próximos) — esperado, ignorado.
-        if (!(err instanceof ConflictException)) {
+        // 400/404 = entre o findMany e o generateCharge o cliente foi
+        // desativado ou a assinatura foi removida — corridas benignas também,
+        // não são falhas: logar como erro só geraria alarme falso.
+        if (
+          !(
+            err instanceof ConflictException ||
+            err instanceof BadRequestException ||
+            err instanceof NotFoundException
+          )
+        ) {
           this.logger.error(
             `Falha ao gerar cobrança da assinatura ${subscription.id}`,
             err instanceof Error ? err.stack : String(err),

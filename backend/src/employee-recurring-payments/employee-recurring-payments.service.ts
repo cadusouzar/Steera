@@ -98,16 +98,28 @@ export class EmployeeRecurringPaymentsService {
     }
   }
 
+  // Só decide QUAIS recorrências chamar generateCharge() agora — a criação do
+  // pagamento em si (incluindo a proteção contra duplicidade via constraint
+  // única) continua inteiramente em generateCharge(), sem duplicação.
   async generateDueCharges(): Promise<{ checked: number; generated: number }> {
+    const companyId = await this.companyContext.getCurrentCompanyId();
     const today = startOfToday();
     const currentDay = today.getUTCDate();
     const referenceYear = today.getUTCFullYear();
     const referenceMonth = today.getUTCMonth() + 1;
+    // Meses mais curtos que 31 dias nunca satisfariam dueDay=29/30/31 via
+    // `lte: currentDay` — sem isso, um vencimento no dia 31 nunca seria
+    // selecionado em fevereiro/abril/junho/setembro/novembro, e como não há
+    // catch-up retroativo, aquele mês nunca seria cobrado. No último dia do
+    // mês, tratamos como se fosse o dia 31 pra cobrir qualquer dueDay 29-31.
+    const lastDayOfMonth = new Date(Date.UTC(referenceYear, referenceMonth, 0)).getUTCDate();
+    const effectiveDay = currentDay === lastDayOfMonth ? 31 : currentDay;
 
     const dueRecurringPayments = await this.prisma.employeeRecurringPayment.findMany({
       where: {
+        companyId,
         status: 'ACTIVE',
-        dueDay: { lte: currentDay },
+        dueDay: { lte: effectiveDay },
         employee: { status: { not: 'INACTIVE' } },
         payments: { none: { referenceYear, referenceMonth } },
       },
@@ -119,7 +131,17 @@ export class EmployeeRecurringPaymentsService {
         await this.generateCharge(recurring.id);
         generated++;
       } catch (err) {
-        if (!(err instanceof ConflictException)) {
+        // 409 = outra execução já gerou este pagamento — esperado, ignorado.
+        // 400/404 = entre o findMany e o generateCharge o funcionário foi
+        // desligado ou a recorrência foi removida — corridas benignas também,
+        // não são falhas: logar como erro só geraria alarme falso.
+        if (
+          !(
+            err instanceof ConflictException ||
+            err instanceof BadRequestException ||
+            err instanceof NotFoundException
+          )
+        ) {
           this.logger.error(
             `Falha ao gerar pagamento da recorrência ${recurring.id}`,
             err instanceof Error ? err.stack : String(err),

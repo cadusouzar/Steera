@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -167,6 +167,46 @@ describe('SubscriptionsService', () => {
       });
     });
 
+    it.each([
+      ['fevereiro (28 dias)', '2026-02-28T12:00:00Z', 2026, 2],
+      ['fevereiro bissexto (29 dias)', '2028-02-29T12:00:00Z', 2028, 2],
+      ['abril (30 dias)', '2026-04-30T12:00:00Z', 2026, 4],
+    ])(
+      'treats the last day of %s as day 31, so a dueDay of 29-31 is still selected that month',
+      async (_label, systemTime, referenceYear, referenceMonth) => {
+        jest.useFakeTimers().setSystemTime(new Date(systemTime));
+        prisma.subscription.findMany.mockResolvedValue([]);
+
+        await service.generateDueCharges();
+
+        expect(prisma.subscription.findMany).toHaveBeenCalledWith({
+          where: {
+            status: 'ACTIVE',
+            dueDay: { lte: 31 },
+            client: { status: { not: 'INACTIVE' } },
+            receivables: { none: { referenceYear, referenceMonth } },
+          },
+        });
+      },
+    );
+
+    it('does NOT widen the dueDay filter before the last day of a short month', async () => {
+      // 27 de fevereiro: ainda não é o último dia, então dueDay 28-31 continua de fora.
+      jest.useFakeTimers().setSystemTime(new Date('2026-02-27T12:00:00Z'));
+      prisma.subscription.findMany.mockResolvedValue([]);
+
+      await service.generateDueCharges();
+
+      expect(prisma.subscription.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'ACTIVE',
+          dueDay: { lte: 27 },
+          client: { status: { not: 'INACTIVE' } },
+          receivables: { none: { referenceYear: 2026, referenceMonth: 2 } },
+        },
+      });
+    });
+
     it('calls generateCharge for each subscription returned and counts how many succeeded', async () => {
       prisma.subscription.findMany.mockResolvedValue([
         { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
@@ -204,7 +244,51 @@ describe('SubscriptionsService', () => {
       expect(result).toEqual({ checked: 2, generated: 1 });
     });
 
+    it('silently skips a subscription whose client was deactivated between the query and the charge, without logging an error', async () => {
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      prisma.subscription.findMany.mockResolvedValue([
+        { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
+        { id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      prisma.subscription.findUnique
+        .mockResolvedValueOnce({ id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' })
+        .mockResolvedValueOnce({ id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' });
+      // client-1 foi desativado depois do findMany -> BadRequestException (corrida benigna).
+      prisma.client.findUnique
+        .mockResolvedValueOnce({ id: 'client-1', status: 'INACTIVE' })
+        .mockResolvedValueOnce({ id: 'client-2', status: 'ACTIVE' });
+      prisma.receivable.create.mockResolvedValue({ id: 'rec-2' });
+
+      const result = await service.generateDueCharges();
+
+      expect(result).toEqual({ checked: 2, generated: 1 });
+      expect(prisma.receivable.create).toHaveBeenCalledTimes(1);
+      expect(logError).not.toHaveBeenCalled();
+      logError.mockRestore();
+    });
+
+    it('silently skips a subscription deleted between the query and the charge, without logging an error', async () => {
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      prisma.subscription.findMany.mockResolvedValue([
+        { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
+        { id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' },
+      ]);
+      // sub-1 sumiu entre o findMany e o generateCharge -> NotFoundException.
+      prisma.subscription.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' });
+      prisma.client.findUnique.mockResolvedValue({ id: 'client-2', status: 'ACTIVE' });
+      prisma.receivable.create.mockResolvedValue({ id: 'rec-2' });
+
+      const result = await service.generateDueCharges();
+
+      expect(result).toEqual({ checked: 2, generated: 1 });
+      expect(logError).not.toHaveBeenCalled();
+      logError.mockRestore();
+    });
+
     it('logs but does not throw when a non-conflict error occurs, and still processes the remaining subscriptions', async () => {
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       prisma.subscription.findMany.mockResolvedValue([
         { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
         { id: 'sub-2', clientId: 'client-2', description: 'Plano B', amount: 200, dueDay: 5, status: 'ACTIVE' },
@@ -220,6 +304,9 @@ describe('SubscriptionsService', () => {
       const result = await service.generateDueCharges();
 
       expect(result).toEqual({ checked: 2, generated: 1 });
+      // Erro genuinamente inesperado: este SIM tem que aparecer no log.
+      expect(logError).toHaveBeenCalledTimes(1);
+      logError.mockRestore();
     });
   });
 });
