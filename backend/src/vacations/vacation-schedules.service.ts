@@ -26,13 +26,33 @@ export class VacationSchedulesService {
     return { start, end };
   }
 
-  private async assertNoOverlap(employeeId: string, companyId: string, start: Date, end: Date) {
-    const existing = await this.prisma.vacationSchedule.findMany({
+  // Busca única, reaproveitada tanto pela checagem de sobreposição quanto pelo
+  // teto de 30 dias abaixo — evita duas idas ao banco pelo mesmo conjunto de linhas.
+  private async getActiveSchedules(employeeId: string, companyId: string) {
+    return this.prisma.vacationSchedule.findMany({
       where: { employeeId, companyId, status: { not: 'CANCELLED' } },
     });
+  }
+
+  private assertNoOverlap(existing: { startDate: Date; endDate: Date }[], start: Date, end: Date) {
     const overlaps = existing.some((row) => start <= row.endDate && end >= row.startDate);
     if (overlaps) {
       throw new BadRequestException('Já existe um período de férias agendado que se sobrepõe a este intervalo');
+    }
+  }
+
+  // Teto fixo de 30 dias somados (existentes + novo pedido), não uma proporção
+  // acumulada — a antiga calculadora de saldo/bônus foi removida de propósito.
+  // `exceptionAuthorized: true` no DTO ignora esse teto por completo.
+  private assertWithinCap(existing: { daysCount: number }[], newDaysCount: number, exceptionAuthorized?: boolean) {
+    if (exceptionAuthorized === true) return;
+    const CAP = 30;
+    const existingSum = existing.reduce((sum, row) => sum + row.daysCount, 0);
+    const total = existingSum + newDaysCount;
+    if (total > CAP) {
+      throw new BadRequestException(
+        `Limite de 30 dias de férias excedido: já agendados ${existingSum} dias, mais ${newDaysCount} solicitados = ${total} dias. Marque a exceção para agendar mesmo assim.`,
+      );
     }
   }
 
@@ -48,7 +68,9 @@ export class VacationSchedulesService {
     }
     const { start, end } = this.validateRange(dto.startDate, dto.endDate, dto.daysCount);
 
-    await this.assertNoOverlap(employeeId, employee.companyId, start, end);
+    const existing = await this.getActiveSchedules(employeeId, employee.companyId);
+    this.assertNoOverlap(existing, start, end);
+    this.assertWithinCap(existing, dto.daysCount, dto.exceptionAuthorized);
 
     return this.prisma.vacationSchedule.create({
       data: {

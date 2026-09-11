@@ -70,7 +70,7 @@ describe('VacationSchedulesService', () => {
     });
   });
 
-  it('allows scheduling a large daysCount with no existing schedules — there is no balance ceiling anymore', async () => {
+  it('allows scheduling a large daysCount with no existing schedules when the exception is authorized — there is no balance ceiling anymore, only the flat 30-day cap', async () => {
     employeesService.assertExists.mockResolvedValue({
       id: 'employee-1', companyId: 'company-1', contractType: 'CLT',
       admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
@@ -79,11 +79,80 @@ describe('VacationSchedulesService', () => {
     prisma.vacationSchedule.create.mockResolvedValue({ id: 'schedule-1', status: 'SCHEDULED' });
 
     // 200 days would have far exceeded any possible accrued balance under the old
-    // calculation service — this now succeeds because there's nothing left to check.
-    await service.schedule('employee-1', { startDate: '2026-01-01', endDate: '2026-07-19', daysCount: 200 });
+    // calculation service (removed) — it would also blow past the new flat 30-day
+    // cap, so exceptionAuthorized is required for this to succeed.
+    await service.schedule('employee-1', {
+      startDate: '2026-01-01', endDate: '2026-07-19', daysCount: 200, exceptionAuthorized: true,
+    });
 
     expect(prisma.vacationSchedule.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ daysCount: 200, status: 'SCHEDULED' }),
+    });
+  });
+
+  it('rejects a single request that itself exceeds the 30-day cap, without exceptionAuthorized', async () => {
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+      admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.schedule('employee-1', { startDate: '2026-01-01', endDate: '2026-02-09', daysCount: 40 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.vacationSchedule.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects when existing non-cancelled schedules (20 days) plus a new 15-day request would total 35 days', async () => {
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+      admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([
+      { id: 'e1', startDate: new Date('2026-01-05'), endDate: new Date('2026-01-14'), daysCount: 10, status: 'SCHEDULED' },
+      { id: 'e2', startDate: new Date('2026-03-01'), endDate: new Date('2026-03-10'), daysCount: 10, status: 'APPROVED' },
+    ]);
+
+    await expect(
+      service.schedule('employee-1', { startDate: '2026-05-01', endDate: '2026-05-15', daysCount: 15 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.vacationSchedule.create).not.toHaveBeenCalled();
+  });
+
+  it('succeeds for the same 35-day-total scenario when exceptionAuthorized is true', async () => {
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+      admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([
+      { id: 'e1', startDate: new Date('2026-01-05'), endDate: new Date('2026-01-14'), daysCount: 10, status: 'SCHEDULED' },
+      { id: 'e2', startDate: new Date('2026-03-01'), endDate: new Date('2026-03-10'), daysCount: 10, status: 'APPROVED' },
+    ]);
+    prisma.vacationSchedule.create.mockResolvedValue({ id: 'schedule-1', status: 'SCHEDULED' });
+
+    await service.schedule('employee-1', {
+      startDate: '2026-05-01', endDate: '2026-05-15', daysCount: 15, exceptionAuthorized: true,
+    });
+
+    expect(prisma.vacationSchedule.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ daysCount: 15, status: 'SCHEDULED' }),
+    });
+  });
+
+  it('excludes cancelled schedules from the 30-day cap sum (cancelled 25 days + new 10-day request succeeds)', async () => {
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+      admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
+    });
+    // The query already filters status !== CANCELLED, so a cancelled 25-day
+    // schedule would never be returned here — mirrors what Prisma would return.
+    prisma.vacationSchedule.findMany.mockResolvedValue([]);
+    prisma.vacationSchedule.create.mockResolvedValue({ id: 'schedule-1', status: 'SCHEDULED' });
+
+    await service.schedule('employee-1', { startDate: '2026-06-01', endDate: '2026-06-10', daysCount: 10 });
+
+    expect(prisma.vacationSchedule.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ daysCount: 10, status: 'SCHEDULED' }),
     });
   });
 
