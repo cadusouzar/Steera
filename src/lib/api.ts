@@ -355,14 +355,6 @@ interface ApiEmployeeRecurringPayment {
   dueDay: number;
   status: 'ACTIVE' | 'INACTIVE';
 }
-interface ApiVacationStatus {
-  monthsWorked: number;
-  acquisitionComplete: boolean;
-  totalAcquiredDays: number;
-  proportionalDays: number;
-  balanceDays: number;
-  oneThirdBonus: number | string;
-}
 interface ApiVacationSchedule {
   id: string;
   startDate: string;
@@ -429,14 +421,6 @@ export interface EmployeeRecurringPaymentRecord {
   amount: number;
   dueDay: number;
   status: 'active' | 'inactive';
-}
-export interface VacationStatus {
-  monthsWorked: number;
-  acquisitionComplete: boolean;
-  totalAcquiredDays: number;
-  proportionalDays: number;
-  balanceDays: number;
-  oneThirdBonus: number;
 }
 export interface VacationScheduleRecord {
   id: string;
@@ -558,17 +542,6 @@ function mapEmployeeRecurringPayment(r: ApiEmployeeRecurringPayment): EmployeeRe
   };
 }
 
-function mapVacationStatus(v: ApiVacationStatus): VacationStatus {
-  return {
-    monthsWorked: v.monthsWorked,
-    acquisitionComplete: v.acquisitionComplete,
-    totalAcquiredDays: v.totalAcquiredDays,
-    proportionalDays: v.proportionalDays,
-    balanceDays: v.balanceDays,
-    oneThirdBonus: Number(v.oneThirdBonus),
-  };
-}
-
 function mapVacationSchedule(s: ApiVacationSchedule): VacationScheduleRecord {
   return {
     id: s.id,
@@ -634,15 +607,20 @@ export async function createEmployee(input: EmployeeFormInput): Promise<Employee
 export async function updateEmployee(id: string, input: Partial<EmployeeFormInput>): Promise<EmployeeDetail> {
   const dto: Record<string, unknown> = { ...input };
   if (input.cpf !== undefined) dto.cpf = stripCpf(input.cpf);
-  // Mesma normalização que toEmployeeDto já aplica no create: campos de texto opcionais
-  // viram `undefined` (omitidos do JSON) quando vazios, em vez de "" — o backend valida
-  // email/admissionDate/department com @IsOptional(), que só pula null/undefined, não "".
-  if (input.email !== undefined) dto.email = input.email || undefined;
-  if (input.phone !== undefined) dto.phone = input.phone || undefined;
-  if (input.address !== undefined) dto.address = input.address || undefined;
+  // email/phone/address/bankDetails são colunas genuinamente nullable (String? no schema
+  // Prisma) — ao limpar o campo, enviamos `null` explícito (em vez de `undefined`, que o
+  // JSON.stringify omite do body, fazendo o backend nunca ver a atualização e manter o
+  // valor antigo silenciosamente). O backend aceita `null` via @IsOptional() e persiste
+  // como NULL de verdade.
+  if (input.email !== undefined) dto.email = input.email || null;
+  if (input.phone !== undefined) dto.phone = input.phone || null;
+  if (input.address !== undefined) dto.address = input.address || null;
+  if (input.bankDetails !== undefined) dto.bankDetails = input.bankDetails || null;
+  // department/admissionDate NÃO são nullable (String / DateTime @db.Date sem `?`) — aqui
+  // `|| undefined` existe só pra nunca mandar uma string vazia inválida, não pra "limpar"
+  // nada, então continuam como estavam.
   if (input.department !== undefined) dto.department = input.department || undefined;
   if (input.admissionDate !== undefined) dto.admissionDate = input.admissionDate || undefined;
-  if (input.bankDetails !== undefined) dto.bankDetails = input.bankDetails || undefined;
   if (input.contractType !== undefined) dto.contractType = input.contractType.toUpperCase();
   if (input.paymentDay !== undefined) {
     const { paymentDueDay, payOnLastBusinessDay } = fromPaymentDay(input.paymentDay);
@@ -714,22 +692,6 @@ export async function generateEmployeeCharge(recurringPaymentId: string): Promis
 }
 
 // ---- Vacations (Férias) ----
-export async function getVacationStatus(employeeId: string): Promise<VacationStatus> {
-  const v = await request<ApiVacationStatus>(`/employees/${employeeId}/vacation/status`);
-  return mapVacationStatus(v);
-}
-
-export async function simulateVacation(
-  employeeId: string,
-  dto: { startDate: string; endDate: string; daysCount: number },
-): Promise<VacationStatus & { sufficientBalance: boolean }> {
-  const v = await request<ApiVacationStatus & { sufficientBalance: boolean }>(
-    `/employees/${employeeId}/vacation/simulate`,
-    { method: 'POST', body: JSON.stringify(dto) },
-  );
-  return { ...mapVacationStatus(v), sufficientBalance: v.sufficientBalance };
-}
-
 export async function scheduleVacation(
   employeeId: string,
   dto: { startDate: string; endDate: string; daysCount: number },

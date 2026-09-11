@@ -28,20 +28,15 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [vacationStatus, setVacationStatus] = useState<api.VacationStatus | null>(null);
   const [vacationSchedules, setVacationSchedules] = useState<api.VacationScheduleRecord[]>([]);
-  const [vacationUnavailable, setVacationUnavailable] = useState(false);
   const [isSchedulingOpen, setIsSchedulingOpen] = useState(false);
   const [scheduleStart, setScheduleStart] = useState('');
   const [scheduleEnd, setScheduleEnd] = useState('');
-  const [simulation, setSimulation] = useState<(api.VacationStatus & { sufficientBalance: boolean }) | null>(null);
-  const [isSimulating, setIsSimulating] = useState(false);
   const [isScheduling, setIsScheduling] = useState(false);
 
   const loadFinance = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
-    setVacationUnavailable(false);
     try {
       const [detail, paymentList, recurringList, schedules] = await Promise.all([
         api.getEmployee(employeeId),
@@ -53,12 +48,6 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
       setPayments(paymentList);
       setRecurringPayments(recurringList);
       setVacationSchedules(schedules);
-
-      try {
-        setVacationStatus(await api.getVacationStatus(employeeId));
-      } catch {
-        setVacationUnavailable(true); // vínculo não-CLT (422)
-      }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os dados financeiros.');
     } finally {
@@ -102,23 +91,6 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     return Math.round(diff / 86_400_000) + 1;
   };
 
-  const handleSimulate = async () => {
-    if (!scheduleStart || !scheduleEnd) return;
-    setIsSimulating(true);
-    setActionError(null);
-    setSimulation(null);
-    try {
-      const result = await api.simulateVacation(employeeId, {
-        startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd),
-      });
-      setSimulation(result);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível simular o período.');
-    } finally {
-      setIsSimulating(false);
-    }
-  };
-
   const handleConfirmSchedule = async () => {
     if (!scheduleStart || !scheduleEnd || isScheduling) return;
     setIsScheduling(true);
@@ -128,11 +100,9 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
         startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd),
       });
       setVacationSchedules(await api.listVacationSchedules(employeeId));
-      setVacationStatus(await api.getVacationStatus(employeeId));
       setIsSchedulingOpen(false);
       setScheduleStart('');
       setScheduleEnd('');
-      setSimulation(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível agendar as férias.');
     } finally {
@@ -182,6 +152,8 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
       default: return 'bg-primary/10 text-primary border-primary/20';
     }
   };
+
+  const vacationUnavailable = employee?.contractType !== 'clt';
 
   return (
     <AnimatePresence>
@@ -397,94 +369,35 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                       </div>
                     ) : (
                       <>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                          <div className="bg-primary/10 border border-primary/20 p-5 rounded-2xl">
-                            <p className="text-xs text-primary/80 uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
-                              <Calendar size={14} /> Admissão
-                            </p>
-                            <p className="text-xl font-bold text-primary">
-                              {formatDateOnly(employee.admissionDate)}
-                            </p>
-                            <p className="text-xs text-primary/70 mt-1">
-                              {vacationStatus ? Math.floor(vacationStatus.monthsWorked / 12) : 0} anos e {vacationStatus ? vacationStatus.monthsWorked % 12 : 0} meses
-                            </p>
-                          </div>
-
-                          <div className="bg-background border border-border/60 p-5 rounded-2xl shadow-sm">
-                            <p className="text-xs text-muted uppercase font-bold tracking-wider mb-1">Saldo Disponível</p>
-                            <p className="text-3xl font-bold text-foreground">{vacationStatus?.balanceDays ?? 0} <span className="text-lg text-muted font-medium">dias</span></p>
-                            <p className="text-xs text-muted mt-1">
-                              Para gozo imediato
-                            </p>
-                          </div>
-
-                          <div className="bg-background border border-border/60 p-5 rounded-2xl shadow-sm">
-                            <p className="text-xs text-muted uppercase font-bold tracking-wider mb-1">Em Aquisição</p>
-                            <p className="text-3xl font-bold text-foreground">{vacationStatus?.proportionalDays ?? 0} <span className="text-lg text-muted font-medium">dias</span></p>
-                            <p className="text-xs text-muted mt-1">
-                              Proporcionais (ano vigente)
-                            </p>
-                          </div>
-                        </div>
-
-                        {vacationStatus && !vacationStatus.acquisitionComplete && (
-                          <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-xl flex items-start gap-3">
-                            <AlertCircle size={18} className="text-orange-500 shrink-0 mt-0.5" />
-                            <div>
-                              <p className="text-sm font-bold text-orange-600 dark:text-orange-400">Período Aquisitivo Incompleto</p>
-                              <p className="text-xs text-orange-600/80 dark:text-orange-400/80 mt-1">
-                                O funcionário ainda não completou 1 ano de empresa. O direito a 30 dias de férias é concedido após o primeiro ano completo.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-
                         {isSchedulingOpen && (
                           <div className="bg-secondary/10 border border-border/40 rounded-2xl p-5 space-y-4">
                             <h4 className="text-sm font-bold text-foreground">Agendar novo período</h4>
                             <div className="grid grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Início</label>
-                                <input type="date" value={scheduleStart} onChange={(e) => { setScheduleStart(e.target.value); setSimulation(null); }} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="date" value={scheduleStart} onChange={(e) => setScheduleStart(e.target.value)} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Fim</label>
-                                <input type="date" value={scheduleEnd} onChange={(e) => { setScheduleEnd(e.target.value); setSimulation(null); }} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input type="date" value={scheduleEnd} onChange={(e) => setScheduleEnd(e.target.value)} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
                             </div>
 
-                            {!simulation ? (
+                            <div className="flex gap-3 pt-2">
                               <button
-                                onClick={handleSimulate}
-                                disabled={!scheduleStart || !scheduleEnd || isSimulating}
-                                className="text-sm font-bold text-primary hover:bg-primary/10 px-4 py-2.5 rounded-xl transition-colors disabled:opacity-50"
+                                onClick={() => { setIsSchedulingOpen(false); setScheduleStart(''); setScheduleEnd(''); }}
+                                className="flex-1 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
                               >
-                                {isSimulating ? 'Simulando...' : 'Simular'}
+                                Cancelar
                               </button>
-                            ) : (
-                              <div className="bg-background border border-border/60 rounded-xl p-4 space-y-2">
-                                <p className="text-sm">
-                                  {daysBetween(scheduleStart, scheduleEnd)} dias · Adicional de 1/3: <strong>{formatCurrency(simulation.oneThirdBonus)}</strong>
-                                </p>
-                                {!simulation.sufficientBalance && (
-                                  <p className="text-sm text-red-500 font-medium flex items-center gap-1.5">
-                                    <AlertCircle size={14} /> Saldo insuficiente para este período.
-                                  </p>
-                                )}
-                                <div className="flex gap-3 pt-2">
-                                  <button onClick={() => setIsSchedulingOpen(false)} className="flex-1 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">
-                                    Cancelar
-                                  </button>
-                                  <button
-                                    onClick={handleConfirmSchedule}
-                                    disabled={!simulation.sufficientBalance || isScheduling}
-                                    className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
-                                  >
-                                    {isScheduling ? 'Agendando...' : 'Confirmar Agendamento'}
-                                  </button>
-                                </div>
-                              </div>
-                            )}
+                              <button
+                                onClick={handleConfirmSchedule}
+                                disabled={!scheduleStart || !scheduleEnd || isScheduling}
+                                className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+                              >
+                                {isScheduling ? 'Agendando...' : 'Confirmar Agendamento'}
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -495,7 +408,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                             </h3>
                             <button
                               onClick={() => setIsSchedulingOpen(true)}
-                              disabled={!vacationStatus?.balanceDays}
+                              disabled={isSchedulingOpen}
                               className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Agendar Férias
