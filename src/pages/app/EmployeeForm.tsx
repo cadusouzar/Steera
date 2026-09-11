@@ -1,19 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Save, User, MapPin, Briefcase, DollarSign, AlertTriangle, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Save, User, Briefcase, DollarSign, AlertTriangle, Loader2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
+import * as api from '../../lib/api';
+import type { Role } from '../../lib/api';
 
 const EmployeeForm = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('pessoal');
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Form State
-  const [status, setStatus] = useState('active');
+  // Dados Pessoais
+  const [fullName, setFullName] = useState('');
+  const [cpf, setCpf] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+
+  // Cargo & Vínculo
   const [roleId, setRoleId] = useState('');
-  const [contractType, setContractType] = useState('clt');
-  const [paymentDay, setPaymentDay] = useState('5');
-  const [salaryRecurrence, setSalaryRecurrence] = useState(true);
+  const [department, setDepartment] = useState('');
+  const [admissionDate, setAdmissionDate] = useState('');
+  const [contractType, setContractType] = useState<'clt' | 'pj' | 'estagio'>('clt');
+
+  // Financeiro
+  const [baseValue, setBaseValue] = useState('');
+  const [paymentDay, setPaymentDay] = useState<'5' | '15' | '20' | 'last'>('5');
+  const [bankDetails, setBankDetails] = useState('');
+  const [salaryRecurrenceEnabled, setSalaryRecurrenceEnabled] = useState(true);
+
+  useEffect(() => {
+    api.listActiveRoles().then(setRoles).catch(() => setRoles([]));
+  }, []);
 
   const tabs = [
     { id: 'pessoal', label: 'Dados Pessoais', icon: <User size={16} /> },
@@ -22,10 +43,36 @@ const EmployeeForm = () => {
     { id: 'advertencias', label: 'Advertências', icon: <AlertTriangle size={16} /> },
   ];
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate save
-    navigate('/app/funcionarios');
+    if (!fullName || !cpf || !roleId || !admissionDate || !department || !baseValue || isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const created = await api.createEmployee({
+        fullName, cpf, roleId, email: email || undefined, phone: phone || undefined,
+        address: address || undefined, contractType, admissionDate, department,
+        baseValue: Number(baseValue), paymentDay, bankDetails: bankDetails || undefined,
+        salaryRecurrenceEnabled,
+      });
+
+      if (salaryRecurrenceEnabled) {
+        try {
+          await api.createEmployeeRecurringPayment(created.id, {
+            description: 'Salário', amount: created.baseValue,
+            dueDay: paymentDay === 'last' ? 31 : Number(paymentDay),
+          });
+        } catch {
+          // Funcionário já foi criado — a recorrência pode ser configurada depois na aba de pagamentos.
+        }
+      }
+
+      navigate('/app/funcionarios');
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar o funcionário.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -38,7 +85,7 @@ const EmployeeForm = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <Link 
+            <Link
               to="/app/funcionarios"
               className="w-10 h-10 rounded-full bg-secondary/50 flex items-center justify-center text-muted hover:text-foreground transition-colors"
             >
@@ -49,24 +96,32 @@ const EmployeeForm = () => {
               <p className="text-muted text-sm mt-1">Preencha o dossiê do colaborador.</p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
-            <button 
+            <button
               type="button"
               onClick={() => navigate('/app/funcionarios')}
               className="px-5 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary/50 transition-colors"
             >
               Cancelar
             </button>
-            <button 
+            <button
               onClick={handleSave}
-              className="bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm flex items-center gap-2"
+              disabled={isSaving}
+              className="bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Save size={18} />
-              Salvar Registro
+              {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+              {isSaving ? 'Salvando...' : 'Salvar Registro'}
             </button>
           </div>
         </div>
+
+        {/* Error Banner */}
+        {saveError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
+            {saveError}
+          </div>
+        )}
 
         {/* Content Area with Tabs */}
         <div className="glass-panel rounded-[2rem] border border-border/50">
@@ -95,30 +150,23 @@ const EmployeeForm = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Nome Completo</label>
-                    <input type="text" className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Nome completo do funcionário" />
+                    <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Nome completo do funcionário" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground/80 mb-2">CPF</label>
+                    <input type="text" value={cpf} onChange={(e) => setCpf(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="000.000.000-00" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground/80 mb-2">E-mail Pessoal</label>
-                    <input type="email" className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="email@exemplo.com" />
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="email@exemplo.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Telefone / WhatsApp</label>
-                    <input type="text" className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="(00) 00000-0000" />
+                    <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="(00) 00000-0000" />
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Endereço Completo</label>
-                    <input type="text" className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Rua, Número, Bairro, Cidade - Estado" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Status do Cadastro</label>
-                    <CustomSelect
-                      value={status}
-                      onChange={setStatus}
-                      options={[
-                        { value: 'active', label: '🟢 Ativo' },
-                        { value: 'inactive', label: '⚫ Inativo' }
-                      ]}
-                    />
+                    <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Rua, Número, Bairro, Cidade - Estado" />
                   </div>
                 </div>
               </motion.div>
@@ -131,25 +179,29 @@ const EmployeeForm = () => {
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Cargo</label>
                     <CustomSelect
                       value={roleId}
-                      onChange={setRoleId}
-                      options={[
-                        { value: '1', label: 'Desenvolvedor Front-end (Tecnologia)' },
-                        { value: '2', label: 'Analista de Recursos Humanos (RH)' },
-                        { value: '3', label: 'Gerente de Vendas (Comercial)' }
-                      ]}
+                      onChange={(val) => {
+                        setRoleId(val);
+                        const role = roles.find(r => r.id === val);
+                        if (role) setDepartment(role.department);
+                      }}
+                      options={roles.map(r => ({ value: r.id, label: `${r.name} (${r.department})` }))}
                       placeholder="Selecione um cargo..."
                     />
                     <p className="text-xs text-muted mt-2">Os cargos devem ser cadastrados previamente na tela de Cargos.</p>
                   </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-foreground/80 mb-2">Departamento</label>
+                    <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" />
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Data de Admissão</label>
-                    <input type="date" className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 text-foreground" />
+                    <input type="date" value={admissionDate} onChange={(e) => setAdmissionDate(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 text-foreground" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Tipo de Contrato</label>
                     <CustomSelect
                       value={contractType}
-                      onChange={setContractType}
+                      onChange={(val) => setContractType(val as typeof contractType)}
                       options={[
                         { value: 'clt', label: 'CLT' },
                         { value: 'pj', label: 'PJ' },
@@ -168,14 +220,14 @@ const EmployeeForm = () => {
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Salário Base (R$)</label>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted">R$</span>
-                      <input type="text" className="w-full bg-background border border-border rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="0,00" />
+                      <input type="number" step="0.01" value={baseValue} onChange={(e) => setBaseValue(e.target.value)} className="w-full bg-background border border-border rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="0,00" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Dia de Pagamento</label>
                     <CustomSelect
                       value={paymentDay}
-                      onChange={setPaymentDay}
+                      onChange={(val) => setPaymentDay(val as typeof paymentDay)}
                       options={[
                         { value: '5', label: 'Dia 5 útil' },
                         { value: '15', label: 'Dia 15' },
@@ -186,7 +238,7 @@ const EmployeeForm = () => {
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Dados Bancários (Opcional)</label>
-                    <input type="text" className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Banco, Agência, Conta PIX..." />
+                    <input type="text" value={bankDetails} onChange={(e) => setBankDetails(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Banco, Agência, Conta PIX..." />
                   </div>
                   <div className="md:col-span-2 flex items-center justify-between p-5 bg-primary/5 rounded-xl border border-primary/20 mt-2">
                     <div>
@@ -194,7 +246,7 @@ const EmployeeForm = () => {
                       <p className="text-sm text-muted">Gerar despesa de salário automaticamente todo mês, para não precisar adicionar manualmente.</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                      <input type="checkbox" className="sr-only peer" checked={salaryRecurrence} onChange={(e) => setSalaryRecurrence(e.target.checked)} />
+                      <input type="checkbox" className="sr-only peer" checked={salaryRecurrenceEnabled} onChange={(e) => setSalaryRecurrenceEnabled(e.target.checked)} />
                       <div className="w-14 h-7 bg-secondary border-border border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary shadow-inner"></div>
                     </label>
                   </div>
