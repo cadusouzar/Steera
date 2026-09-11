@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Settings, Download, Trash2 } from 'lucide-react';
 import { DataSidebar } from '../../components/analytics/DataSidebar';
@@ -35,7 +35,7 @@ const DashboardBuilder = () => {
     });
   };
 
-  const handleLayoutChange = (layout: any[]) => {
+  const handleLayoutChange = (layout: readonly any[]) => {
     layout.forEach(l => {
       updateWidgetPosition(l.i, { x: l.x, y: l.y, w: l.w, h: l.h });
     });

@@ -23,7 +23,7 @@ interface ChartRendererProps {
   title: string;
 }
 
-export const ChartRenderer: React.FC<ChartRendererProps> = ({ type, title }) => {
+export const ChartRenderer: React.FC<ChartRendererProps> = ({ type }) => {
   if (type === 'kpi-card') {
     return (
       <div className="flex flex-col items-center justify-center h-full">
@@ -69,7 +69,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({ type, title }) => 
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {MOCK_DATA.map((entry, index) => (
+                  {MOCK_DATA.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>

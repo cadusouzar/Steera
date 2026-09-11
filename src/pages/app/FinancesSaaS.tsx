@@ -2,15 +2,14 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import confetti from 'canvas-confetti';
-import { 
-  Plus, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  Wallet, 
-  CheckCircle2, 
-  X, 
-  TrendingUp, 
-  Landmark, 
+import {
+  Plus,
+  ArrowUpRight,
+  ArrowDownRight,
+  Wallet,
+  X,
+  TrendingUp,
+  Landmark,
   Calendar,
   Building2,
   Utensils,

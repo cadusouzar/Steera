@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
-import { Search, Plus, Filter, FileText, CheckCircle2, AlertCircle, XCircle, X, Edit2, Trash2, DollarSign, Calculator, Printer, HandCoins, Package } from 'lucide-react';
+import { Search, Plus, Filter, CheckCircle2, AlertCircle, XCircle, X, Edit2, Trash2, Calculator, Printer, HandCoins, Package } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 export interface QuoteItem {
@@ -237,7 +237,7 @@ const QuotesList = () => {
           </div>
           
           <div className="space-y-3">
-            {products.map((item, index) => (
+            {products.map((item) => (
               <div key={item.id} className="flex gap-3 items-start bg-background p-3 rounded-xl border border-border shadow-sm">
                 <div className="flex-1">
                   <input 
@@ -314,7 +314,7 @@ const QuotesList = () => {
           </div>
           
           <div className="space-y-3">
-            {labor.map((item, index) => (
+            {labor.map((item) => (
               <div key={item.id} className="flex gap-3 items-start bg-background p-3 rounded-xl border border-border shadow-sm">
                 <div className="flex-1">
                   <input 

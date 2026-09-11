@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { Search, Plus, Filter, ShoppingCart, CheckCircle2, X, Trash2, TrendingDown, Clock, Building2, Package, Tag, ArrowRight, AlertCircle, FileText } from 'lucide-react';

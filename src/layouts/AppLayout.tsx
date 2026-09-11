@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useTheme } from '../components/ThemeProvider';
 import ThemeToggle from '../components/ThemeToggle';
 import UserProfileDropdown from '../components/UserProfileDropdown';
 import UserProfileDrawer from '../components/UserProfileDrawer';
-import { Users, Briefcase, BarChart3, TrendingUp, Settings, LogOut, Moon, Sun, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield } from 'lucide-react';
+import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield } from 'lucide-react';
 
 const AppLayout = () => {
   const { theme, toggleTheme } = useTheme();

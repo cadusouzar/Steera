@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Plus, Search, X, Edit, Trash2, UserPlus, Key, AlertCircle, FileQuestion, LayoutDashboard, HeartHandshake, Users, TrendingUp, Package, BarChart3 } from 'lucide-react';
+import { Shield, Search, X, Edit, Trash2, UserPlus, Key, FileQuestion, LayoutDashboard, HeartHandshake, Users, TrendingUp, Package, BarChart3 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
 

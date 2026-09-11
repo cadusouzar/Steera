@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, DollarSign, Calendar, AlertCircle, CheckCircle2, Clock, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2, Edit2, Save, RotateCcw } from 'lucide-react';
+import { X, DollarSign, Calendar, CheckCircle2, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2, Edit2, Save, RotateCcw } from 'lucide-react';
 import type { Client, Receivable, Subscription } from '../pages/app/ClientsList';
 
 // Parses a date-only "YYYY-MM-DD" string as local midnight instead of
@@ -130,7 +130,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
     e.preventDefault();
     if (!newRec.description || !newRec.amount || !newRec.dueDate) return;
     
-    const isOverdue = new Date(newRec.dueDate) < new Date() && newRec.status !== 'paid';
+    const isOverdue = new Date(newRec.dueDate) < new Date();
     
     onAddReceivable(client.id, {
       description: newRec.description,

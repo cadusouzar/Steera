@@ -9,7 +9,7 @@ import { BarChart3 } from 'lucide-react';
 interface WidgetCanvasProps {
   widgets: WidgetConfig[];
   onDropWidget?: (type: string, position: {x: number, y: number}) => void;
-  onLayoutChange?: (layout: any[]) => void;
+  onLayoutChange?: (layout: readonly any[]) => void;
   selectedWidgetId?: string | null;
   onSelectWidget?: (id: string) => void;
 }
@@ -64,9 +64,8 @@ export const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
           breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
           cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
           rowHeight={100}
-          onLayoutChange={(newLayout: any[]) => onLayoutChange && onLayoutChange(newLayout)}
-          isDraggable={true}
-          isResizable={true}
+          width={1200}
+          onLayoutChange={(newLayout) => onLayoutChange && onLayoutChange(newLayout)}
           margin={[16, 16]}
         >
           {widgets.map((widget) => (

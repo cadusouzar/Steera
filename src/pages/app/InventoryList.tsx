@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
-import { Search, Plus, Archive, Package, AlertTriangle, X, Edit2, Trash2, Box, Info, Filter, ArrowUp, ArrowDown, FileText } from 'lucide-react';
+import { Search, Plus, Archive, Package, AlertTriangle, X, Edit2, Trash2, Box, Info, Filter, ArrowUp, FileText } from 'lucide-react';
 import InventoryReportModal from '../../components/InventoryReportModal';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 
