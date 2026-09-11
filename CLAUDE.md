@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Sobre o projeto
 
-QuickFlow (`package.json` name: `nexus-erp`) é um front-end de ERP em React + TypeScript, sem backend — todo o estado é mockado em memória (`useState` com arrays fixos) ou persistido no `localStorage` do navegador (só os módulos de Analytics fazem isso).
+QuickFlow (`package.json` name: `nexus-erp`) é um ERP com front-end em React + TypeScript e um backend real (NestJS + Prisma + PostgreSQL, ver seção "Backend" abaixo) para os módulos de Clientes/Financeiro e Recursos Humanos. O restante do app (Analytics, Estoque, Orçamentos, Compras, Usuários) ainda é mockado em memória (`useState` com arrays fixos) ou persistido no `localStorage` do navegador (só os módulos de Analytics fazem isso) — não assuma backend real fora de Clientes/Financeiro/RH.
 
 **Stack:** React 18, TypeScript, Vite, React Router v6, Tailwind CSS, lucide-react (ícones), Recharts (gráficos), react-grid-layout (grid arrastável do dashboard builder), framer-motion, three.js/@react-three/fiber/drei (hero 3D da landing page), html2canvas + jspdf (exportação de relatórios em PDF).
 
@@ -74,18 +74,19 @@ npm run test:e2e          # teste de integração (precisa de PostgreSQL local r
 - `PORT` — porta HTTP do backend (padrão 3001)
 
 **Arquitetura:** 4 módulos financeiros (`ClientsModule`, `ReceivablesModule`, `SubscriptionsModule`,
-`ReportsModule`) + `PrismaModule` global + 7 módulos de Recursos Humanos (`CompanyModule`,
+`ReportsModule`) + `PrismaModule` global + 8 módulos de Recursos Humanos (`CompanyModule`,
 `RolesModule`, `EmployeesModule`, `EmployeeWarningsModule`, `EmployeePaymentsModule`,
-`EmployeeRecurringPaymentsModule`, `VacationsModule`). "Overdue" em lançamentos/pagamentos é sempre
-derivado em runtime (nunca persistido). Ver `[[ARQUITETURA]]`, `[[BANCO-DE-DADOS]]`, `[[API]]`,
-`[[AMBIENTE-LOCAL]]` e `[[DECISOES-TECNICAS]]` no vault (`B:\Quickflow\Quickflow`) para detalhes.
+`EmployeeRecurringPaymentsModule`, `VacationsModule`, `LeavesModule`). "Overdue" em
+lançamentos/pagamentos é sempre derivado em runtime (nunca persistido). Ver `[[ARQUITETURA]]`,
+`[[BANCO-DE-DADOS]]`, `[[API]]`, `[[AMBIENTE-LOCAL]]` e `[[DECISOES-TECNICAS]]` no vault
+(`B:\Quickflow\Quickflow`) para detalhes.
 
 **Módulo de RH (`RolesModule`, `EmployeesModule`, `EmployeeWarningsModule`, `EmployeePaymentsModule`,
-`EmployeeRecurringPaymentsModule`, `VacationsModule`, `CompanyModule`):** cobre Cargos, Funcionários
-(CPF único **por empresa**, mascarado/omitido de dados bancários na listagem por LGPD — completo só
-em `GET /employees/:id`), Advertências (sempre aninhadas sob `/employees/:employeeId/warnings`),
-Pagamentos avulsos e recorrentes (espelha o par `Receivable`/`Subscription`, mesma regra de overdue
-derivado) e Férias.
+`EmployeeRecurringPaymentsModule`, `VacationsModule`, `LeavesModule`, `CompanyModule`):** cobre
+Cargos, Funcionários (CPF único **por empresa**, mascarado/omitido de dados bancários na listagem
+por LGPD — completo só em `GET /employees/:id`), Advertências (sempre aninhadas sob
+`/employees/:employeeId/warnings`), Pagamentos avulsos e recorrentes (espelha o par
+`Receivable`/`Subscription`, mesma regra de overdue derivado), Férias e Afastamento.
 
 - **Stub de empresa única, não é autenticação real:** nenhuma rota de RH aceita `companyId` do
   cliente — todo service resolve a "empresa atual" via `CompanyContextService
@@ -93,12 +94,29 @@ derivado) e Férias.
   banco (criada sob demanda). **Autenticação/multi-tenant real não está implementada em lugar
   nenhum do projeto** (frontend nem backend) — decisão explícita e pendência conhecida, não uma
   omissão. Ver `[[DECISOES-TECNICAS]]` seção 8.
-- **Férias:** `VacationCalculationService` é uma calculadora pura (zero acesso a banco) que
-  implementa só a regra básica CLT — 30 dias por período aquisitivo completo de 12 meses + dias
-  proporcionais do período incompleto + adicional constitucional de 1/3 (CF/88 art. 7º XVII).
-  **Fora de escopo, de propósito** (não aproximado): faltas injustificadas, abono pecuniário,
-  adiantamento de 13º, INSS/IRRF, férias em dobro/vencidas, fracionamento em períodos. Disponível
-  só para `contractType = CLT` — outros vínculos recebem `422` explícito.
+- **Férias — sem cálculo de saldo, com teto flat de 30 dias (decisão revertida em 11/09/2026):** o
+  projeto não tem, e nunca teve no escopo pretendido, o conceito de "saldo de férias". A calculadora
+  de saldo/dias/adicional de 1/3 (`VacationCalculationService`, que existiu por um curto período)
+  foi **removida por completo**, junto dos endpoints `GET .../vacation/status` e
+  `POST .../vacation/simulate` e das colunas `VacationSchedule.acquisitivePeriodStart`/
+  `acquisitivePeriodEnd` (dropadas via migration). Agendar férias hoje é: escolher um período
+  (`POST /employees/:id/vacation/schedule`), o backend confirma que não sobrepõe outro período já
+  agendado (férias **ou** afastamento, ver abaixo) do mesmo funcionário, confirma que a soma de
+  `daysCount` de todos os períodos de férias não-cancelados do funcionário + o novo pedido não
+  passa de **30 dias** (teto fixo, não é cálculo de acúmulo/proporcionalidade) e salva. O teto pode
+  ser ignorado enviando `exceptionAuthorized: true` no corpo do pedido — sem persistir nada no
+  funcionário, é uma autorização pontual por agendamento (frontend expõe isso como um checkbox que
+  só aparece depois de um erro de limite excedido). A única regra que sobrevive da versão anterior é
+  de elegibilidade, não de cálculo: só `contractType = CLT` pode agendar férias (outros vínculos
+  recebem `422` explícito) — é uma regra trabalhista, independente de qualquer cálculo de dias. Ver
+  `[[DECISOES-TECNICAS]]` seção 8 para o histórico completo da decisão original e da reversão.
+- **Afastamento (`LeavesModule`, novo em 11/09/2026):** trilha separada de agendamento de período,
+  mesma mecânica de férias (data início/fim, sem sobreposição), mas **sem** a regra de CLT e **sem**
+  teto de dias — disponível para qualquer `contractType`. Tem um campo livre opcional `reason`
+  (motivo, texto livre, sem lista fixa). A checagem de sobreposição é cruzada com férias nos dois
+  sentidos: um funcionário não pode ter férias e afastamento em períodos que se sobrepõem, não
+  importa qual dos dois foi agendado primeiro. Rotas: `POST/GET /employees/:id/leave/schedule(s)`,
+  `PATCH /leave-schedules/:id/cancel`. Ver `[[DECISOES-TECNICAS]]` seção 8.6.
 - **Frontend de RH integrado ao backend real:** `src/pages/app/Roles.tsx`, `EmployeesList.tsx`,
   `EmployeeForm.tsx` e `src/components/FinanceAndVacationModal.tsx` consomem o backend de verdade —
   mesmo padrão já usado em Clientes/`ClientsList.tsx`: tipos brutos `Api*` → funções `map*` →
@@ -111,10 +129,10 @@ derivado) e Férias.
 - Outras pendências conhecidas (ver `[[DECISOES-TECNICAS]]` seção 8): sem histórico de mudança de
   cargo (só o `roleId` atual é rastreado); checagem de CPF único é TOCTOU (não captura violação de
   constraint); `EmployeeRecurringPaymentsService.generateCharge` só verifica o status do
-  funcionário, não o da própria recorrência; `oneThirdBonus` retornado por
-  `GET .../vacation/status` e `POST .../vacation/simulate` não escala de forma linear com a
-  quantidade de dias do período solicitado entre chamadas diferentes (achado ao testar o frontend
-  na Task 8) — merece um olhar dedicado de quem mexer em `VacationCalculationService` a seguir.
+  funcionário, não o da própria recorrência; `updateEmployee` do frontend limpa `email`/`phone`/
+  `address`/`bankDetails` corretamente (envia `null` explícito). Sem cancelamento de férias/
+  afastamento pela UI (o endpoint `PATCH .../cancel` existe nos dois, mas nenhum botão chama ele
+  ainda — mesma lacuna nos dois recursos, de propósito, escopo futuro).
 
 **Exclusão de cliente é sempre lógica, nunca física:** `PATCH /clients/:id/deactivate` marca o
 cliente como `INACTIVE` mas nunca apaga o registro nem seus lançamentos. O flag
