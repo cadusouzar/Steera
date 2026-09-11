@@ -11,6 +11,14 @@ interface FinanceAndVacationModalProps {
 
 const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
+// Formata uma data-only string (ex.: "2026-09-01" ou "2026-09-01T00:00:00.000Z") sem
+// passar por `Date`/`toLocaleDateString`, que converteriam para o fuso horário local do
+// navegador e podem exibir o dia anterior em fusos com offset negativo (ex.: Brasil, UTC-3).
+const formatDateOnly = (dateStr: string) => {
+  const [year, month, day] = dateStr.slice(0, 10).split('-');
+  return `${day}/${month}/${year}`;
+};
+
 const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ employeeId, onClose }) => {
   const [activeTab, setActiveTab] = useState<'finance' | 'vacation'>('finance');
   const [employee, setEmployee] = useState<EmployeeDetail | null>(null);
@@ -213,7 +221,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                     <div className="text-muted text-sm font-medium flex items-center gap-2 mt-1">
                       <span className="uppercase text-xs font-bold tracking-wider">{employee.contractType}</span>
                       <span>•</span>
-                      <span>Admitido em {new Date(employee.admissionDate).toLocaleDateString('pt-BR')}</span>
+                      <span>Admitido em {formatDateOnly(employee.admissionDate)}</span>
                     </div>
                   </div>
                 </div>
@@ -323,7 +331,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                 </div>
                                 <div>
                                   <p className="font-bold text-foreground">{payment.description}</p>
-                                  <p className="text-sm text-muted">{new Date(payment.dueDate).toLocaleDateString('pt-BR')} • {formatCurrency(payment.amount)}</p>
+                                  <p className="text-sm text-muted">{formatDateOnly(payment.dueDate)} • {formatCurrency(payment.amount)}</p>
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 justify-between sm:justify-end">
@@ -381,7 +389,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                               <Calendar size={14} /> Admissão
                             </p>
                             <p className="text-xl font-bold text-primary">
-                              {new Date(employee.admissionDate).toLocaleDateString('pt-BR')}
+                              {formatDateOnly(employee.admissionDate)}
                             </p>
                             <p className="text-xs text-primary/70 mt-1">
                               {vacationStatus ? Math.floor(vacationStatus.monthsWorked / 12) : 0} anos e {vacationStatus ? vacationStatus.monthsWorked % 12 : 0} meses
@@ -490,7 +498,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                     </div>
                                     <div>
                                       <p className="text-sm font-bold text-foreground">
-                                        {new Date(sched.startDate).toLocaleDateString('pt-BR')} até {new Date(sched.endDate).toLocaleDateString('pt-BR')}
+                                        {formatDateOnly(sched.startDate)} até {formatDateOnly(sched.endDate)}
                                       </p>
                                       <p className="text-xs text-muted mt-0.5">{sched.daysCount} dias</p>
                                     </div>
