@@ -1,4 +1,5 @@
 node_modules
+dist
 .superpowers/
 backend/node_modules
 backend/dist
