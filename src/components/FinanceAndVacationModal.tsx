@@ -189,6 +189,14 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   const vacationUnavailable = employee?.contractType !== 'clt';
   const vacationCapExceeded = !!actionError && actionError.includes('Limite de 30 dias');
 
+  // `actionError` é um estado único compartilhado entre as abas Férias e Afastamento — trocar de
+  // aba sem limpá-lo deixaria o banner (e, no caso do teto de 30 dias, o checkbox de exceção)
+  // vazar de uma aba pra outra sem nenhuma submissão nova ter acontecido ali.
+  const handleTabChange = (tab: 'finance' | 'vacation' | 'leave') => {
+    setActionError(null);
+    setActiveTab(tab);
+  };
+
   return (
     <AnimatePresence>
       <motion.div
@@ -256,7 +264,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
               {/* Tabs */}
               <div className="flex border-b border-border/50 px-6 md:px-8 shrink-0">
                 <button
-                  onClick={() => setActiveTab('finance')}
+                  onClick={() => handleTabChange('finance')}
                   className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'finance'
                       ? 'border-primary text-primary'
                       : 'border-transparent text-muted hover:text-foreground'
@@ -265,7 +273,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                   <DollarSign size={16} /> Pagamentos
                 </button>
                 <button
-                  onClick={() => setActiveTab('vacation')}
+                  onClick={() => handleTabChange('vacation')}
                   className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'vacation'
                       ? 'border-primary text-primary'
                       : 'border-transparent text-muted hover:text-foreground'
@@ -274,7 +282,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                   <Umbrella size={16} /> Férias
                 </button>
                 <button
-                  onClick={() => setActiveTab('leave')}
+                  onClick={() => handleTabChange('leave')}
                   className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'leave'
                       ? 'border-primary text-primary'
                       : 'border-transparent text-muted hover:text-foreground'
@@ -399,7 +407,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                       </div>
                     )}
 
-                    {vacationCapExceeded && (
+                    {isSchedulingOpen && vacationCapExceeded && (
                       <label className="flex items-center gap-2.5 px-4 py-3 bg-secondary/20 border border-border/40 rounded-xl text-sm text-foreground cursor-pointer">
                         <input
                           type="checkbox"
@@ -440,7 +448,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
                             <div className="flex gap-3 pt-2">
                               <button
-                                onClick={() => { setIsSchedulingOpen(false); setScheduleStart(''); setScheduleEnd(''); setExceptionAuthorized(false); }}
+                                onClick={() => { setIsSchedulingOpen(false); setScheduleStart(''); setScheduleEnd(''); setExceptionAuthorized(false); setActionError(null); }}
                                 className="flex-1 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
                               >
                                 Cancelar
@@ -462,7 +470,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                               <History size={18} className="text-primary/70" /> Histórico de Férias
                             </h3>
                             <button
-                              onClick={() => { setIsSchedulingOpen(true); setExceptionAuthorized(false); }}
+                              onClick={() => { setIsSchedulingOpen(true); setExceptionAuthorized(false); setActionError(null); }}
                               disabled={isSchedulingOpen}
                               className="text-xs font-bold text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
