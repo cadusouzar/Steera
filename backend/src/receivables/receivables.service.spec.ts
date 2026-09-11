@@ -25,10 +25,11 @@ describe('deriveReceivableStatus', () => {
   it('treats a receivable due today as pending, not overdue (regression: UTC-midnight @db.Date)', () => {
     // Prisma reads a `@db.Date` column back as UTC midnight, never local midnight.
     // A PENDING receivable due exactly today must therefore derive to 'pending'
-    // in any local timezone offset (this failed in UTC-3 while startOfToday()
-    // built local midnight).
+    // in any local timezone offset. Built from UTC getters (not local) to
+    // genuinely match the UTC calendar day, independent of the machine's
+    // timezone — startOfToday() itself must do the same (see common/date.util.ts).
     const now = new Date();
-    const utcMidnightToday = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const utcMidnightToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const result = deriveReceivableStatus({
       status: ReceivableStatus.PENDING,
       dueDate: utcMidnightToday,
@@ -39,7 +40,7 @@ describe('deriveReceivableStatus', () => {
   it('treats a receivable due yesterday as overdue (UTC-midnight @db.Date)', () => {
     const now = new Date();
     const utcMidnightYesterday = new Date(
-      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
     );
     const result = deriveReceivableStatus({
       status: ReceivableStatus.PENDING,
@@ -51,7 +52,7 @@ describe('deriveReceivableStatus', () => {
   it('treats a receivable due tomorrow as pending (UTC-midnight @db.Date)', () => {
     const now = new Date();
     const utcMidnightTomorrow = new Date(
-      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
     );
     const result = deriveReceivableStatus({
       status: ReceivableStatus.PENDING,
@@ -142,10 +143,11 @@ describe('ReceivablesService', () => {
 
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
-    // Build the string from the same calendar-day components startOfToday() uses.
-    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    // Build the string from UTC calendar-day components — matching what
+    // startOfToday() itself now correctly computes (see common/date.util.ts).
+    const todayStr = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
     const expectedUtcMidnight = new Date(
-      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()),
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
 
     prisma.receivable.create.mockImplementation(({ data }: any) => ({

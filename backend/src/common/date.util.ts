@@ -4,7 +4,12 @@
 // comparar como atrasado em qualquer fuso a oeste de UTC (ex.: UTC-3).
 export function startOfToday(): Date {
   const now = new Date();
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  // getUTCFullYear/getUTCMonth/getUTCDate — não getFullYear/getMonth/getDate
+  // (local). Usar os getters locais aqui anularia o comentário acima: o
+  // resultado seria "meia-noite UTC do dia local", que diverge do dia UTC
+  // real sempre que o fuso local não é UTC e o horário local está perto da
+  // virada de dia UTC (ex.: 21h-23h59 no horário de Brasília, UTC-3).
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
 export function parseDateOnly(value: string): Date {
