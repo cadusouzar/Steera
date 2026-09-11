@@ -7,14 +7,22 @@ import { VacationSchedulesService } from './vacation-schedules.service';
 
 describe('VacationSchedulesService', () => {
   let service: VacationSchedulesService;
-  let prisma: { vacationSchedule: Record<string, jest.Mock>; employeePayment: Record<string, jest.Mock> };
+  let prisma: {
+    vacationSchedule: Record<string, jest.Mock>;
+    leaveSchedule: Record<string, jest.Mock>;
+    employeePayment: Record<string, jest.Mock>;
+  };
   let employeesService: { assertExists: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
       vacationSchedule: { findMany: jest.fn(), create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+      leaveSchedule: { findMany: jest.fn() },
       employeePayment: { count: jest.fn() },
     };
+    // Default: nenhum afastamento existente. Testes que exercitam a checagem
+    // cruzada de sobreposição sobrescrevem este mock explicitamente.
+    prisma.leaveSchedule.findMany.mockResolvedValue([]);
     employeesService = { assertExists: jest.fn() };
     const module = await Test.createTestingModule({
       providers: [
@@ -47,6 +55,22 @@ describe('VacationSchedulesService', () => {
     });
     prisma.vacationSchedule.findMany.mockResolvedValue([
       { id: 'existing', startDate: new Date('2026-02-10'), endDate: new Date('2026-02-20'), status: 'SCHEDULED' },
+    ]);
+
+    await expect(
+      service.schedule('employee-1', { startDate: '2026-02-15', endDate: '2026-02-25', daysCount: 11 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.vacationSchedule.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects scheduling when the requested range overlaps an existing non-cancelled LeaveSchedule (cross-table check, symmetric with LeaveSchedulesService)', async () => {
+    employeesService.assertExists.mockResolvedValue({
+      id: 'employee-1', companyId: 'company-1', contractType: 'CLT', status: 'ACTIVE',
+      admissionDate: new Date('2024-01-01T00:00:00Z'), baseValue: 3000,
+    });
+    prisma.vacationSchedule.findMany.mockResolvedValue([]);
+    prisma.leaveSchedule.findMany.mockResolvedValue([
+      { id: 'leave-1', startDate: new Date('2026-02-10'), endDate: new Date('2026-02-20'), status: 'SCHEDULED' },
     ]);
 
     await expect(

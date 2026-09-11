@@ -28,16 +28,28 @@ export class VacationSchedulesService {
 
   // Busca única, reaproveitada tanto pela checagem de sobreposição quanto pelo
   // teto de 30 dias abaixo — evita duas idas ao banco pelo mesmo conjunto de linhas.
+  // Só férias — o teto de 30 dias é especificamente um teto de dias de férias,
+  // dias de afastamento não entram nessa soma (ver assertWithinCap).
   private async getActiveSchedules(employeeId: string, companyId: string) {
     return this.prisma.vacationSchedule.findMany({
       where: { employeeId, companyId, status: { not: 'CANCELLED' } },
     });
   }
 
+  private async getActiveLeaveSchedules(employeeId: string, companyId: string) {
+    return this.prisma.leaveSchedule.findMany({
+      where: { employeeId, companyId, status: { not: 'CANCELLED' } },
+    });
+  }
+
+  // Simétrico a LeaveSchedulesService.assertNoOverlap: um funcionário não pode
+  // estar de férias e de afastamento ao mesmo tempo, então a sobreposição é
+  // checada contra as duas tabelas (excluindo canceladas em cada uma) — mesmo
+  // que o teto de 30 dias acima considere só VacationSchedule.
   private assertNoOverlap(existing: { startDate: Date; endDate: Date }[], start: Date, end: Date) {
     const overlaps = existing.some((row) => start <= row.endDate && end >= row.startDate);
     if (overlaps) {
-      throw new BadRequestException('Já existe um período de férias agendado que se sobrepõe a este intervalo');
+      throw new BadRequestException('Já existe um período de férias ou afastamento agendado que se sobrepõe a este intervalo');
     }
   }
 
@@ -68,9 +80,13 @@ export class VacationSchedulesService {
     }
     const { start, end } = this.validateRange(dto.startDate, dto.endDate, dto.daysCount);
 
-    const existing = await this.getActiveSchedules(employeeId, employee.companyId);
-    this.assertNoOverlap(existing, start, end);
-    this.assertWithinCap(existing, dto.daysCount, dto.exceptionAuthorized);
+    const [existingVacations, existingLeaves] = await Promise.all([
+      this.getActiveSchedules(employeeId, employee.companyId),
+      this.getActiveLeaveSchedules(employeeId, employee.companyId),
+    ]);
+    this.assertNoOverlap([...existingVacations, ...existingLeaves], start, end);
+    // Só férias entram na soma do teto — afastamento não conta (ver getActiveSchedules acima).
+    this.assertWithinCap(existingVacations, dto.daysCount, dto.exceptionAuthorized);
 
     return this.prisma.vacationSchedule.create({
       data: {
