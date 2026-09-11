@@ -1,47 +1,46 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, MoreHorizontal, X, FileQuestion, Briefcase, ChevronRight, Check, Trash2 } from 'lucide-react';
+import { Plus, Search, X, FileQuestion, Briefcase, ChevronRight, Check, Ban, RotateCcw, Loader2 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import * as api from '../../lib/api';
+import type { Role } from '../../lib/api';
 
-interface Role {
-  id: string;
-  name: string;
-  department: string;
-  color?: string;
-  attributions?: string;
-}
-
-const mockRoles: Role[] = [
-  { id: '1', name: 'Desenvolvedor Front-end', department: 'Tecnologia', color: 'bg-blue-500', attributions: 'Desenvolver interfaces do usuário (UI) seguindo as diretrizes de design. Consumir APIs REST. Garantir acessibilidade e performance.' },
-  { id: '2', name: 'Analista de Recursos Humanos', department: 'RH', color: 'bg-green-500', attributions: 'Gerenciar o ciclo de vida dos funcionários. Realizar entrevistas de seleção. Acompanhar métricas de satisfação interna.' },
-  { id: '3', name: 'Gerente de Vendas', department: 'Comercial', color: 'bg-orange-500', attributions: 'Liderar a equipe de executivos de conta. Definir e buscar atingimento de cotas. Negociar contratos de grande porte.' },
-  { id: '4', name: 'Designer UI/UX', department: 'Produto', color: 'bg-purple-500', attributions: '' },
-  { id: '5', name: 'Tech Lead', department: 'Tecnologia', color: 'bg-blue-500', attributions: '' },
-];
-
-const AVAILABLE_COLORS = [
-  { id: 'blue', class: 'bg-blue-500' },
-  { id: 'purple', class: 'bg-purple-500' },
-  { id: 'pink', class: 'bg-pink-500' },
-  { id: 'red', class: 'bg-red-500' },
-  { id: 'orange', class: 'bg-orange-500' },
-  { id: 'yellow', class: 'bg-yellow-500' },
-  { id: 'green', class: 'bg-green-500' },
-  { id: 'teal', class: 'bg-teal-500' },
-  { id: 'accent', class: 'bg-accent' },
+const COLOR_SWATCHES = [
+  '#3B82F6', '#A855F7', '#EC4899', '#EF4444',
+  '#F97316', '#EAB308', '#22C55E', '#14B8A6', '#2563EB',
 ];
 
 const Roles = () => {
-  const [roles, setRoles] = useState<Role[]>(mockRoles);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Drawer state
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isConfirmingDeactivate, setIsConfirmingDeactivate] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [newRole, setNewRole] = useState({ name: '', department: '' });
+  const [newRole, setNewRole] = useState({ name: '', department: '', colorHex: '#2563EB', description: '' });
+
+  const loadRoles = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      setRoles(await api.listRoles());
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os cargos.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRoles();
+  }, [loadRoles]);
 
   useEscapeKey(() => {
     setSelectedRole(null);
@@ -60,9 +59,9 @@ const Roles = () => {
     };
   }, [isModalOpen, selectedRole]);
 
-  // Reset delete confirmation when drawer changes
+  // Reset deactivate confirmation when drawer changes
   useEffect(() => {
-    setIsConfirmingDelete(false);
+    setIsConfirmingDeactivate(false);
   }, [selectedRole]);
 
   const filteredRoles = useMemo(() => {
@@ -75,23 +74,69 @@ const Roles = () => {
     );
   }, [roles, searchQuery]);
 
-  const handleAddRole = (e: React.FormEvent) => {
+  const handleAddRole = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newRole.name.trim() && newRole.department.trim()) {
-      setRoles([...roles, { id: crypto.randomUUID(), color: 'bg-accent', ...newRole }]);
-      setNewRole({ name: '', department: '' });
+    if (!newRole.name.trim() || !newRole.department.trim() || isSaving) return;
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const created = await api.createRole({
+        name: newRole.name, department: newRole.department,
+        colorHex: newRole.colorHex, description: newRole.description || undefined,
+      });
+      setRoles(prev => [...prev, created]);
+      setNewRole({ name: '', department: '', colorHex: '#2563EB', description: '' });
       setIsModalOpen(false);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível criar o cargo.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handleUpdateRole = (updatedRole: Role) => {
-    setRoles(roles.map(r => r.id === updatedRole.id ? updatedRole : r));
-    setSelectedRole(null);
+  const handleUpdateRole = async (updatedRole: Role) => {
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const saved = await api.updateRole(updatedRole.id, {
+        name: updatedRole.name, department: updatedRole.department,
+        colorHex: updatedRole.colorHex, description: updatedRole.description,
+      });
+      setRoles(prev => prev.map(r => r.id === saved.id ? saved : r));
+      setSelectedRole(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível salvar o cargo.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDeleteRole = (id: string) => {
-    setRoles(roles.filter(r => r.id !== id));
-    setSelectedRole(null);
+  const handleDeactivateRole = async (id: string) => {
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const updated = await api.deactivateRole(id);
+      setRoles(prev => prev.map(r => r.id === id ? updated : r));
+      setSelectedRole(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível inativar o cargo.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReactivateRole = async (id: string) => {
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const updated = await api.reactivateRole(id);
+      setRoles(prev => prev.map(r => r.id === id ? updated : r));
+      setSelectedRole(updated);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível reativar o cargo.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -113,7 +158,7 @@ const Roles = () => {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => { setActionError(null); setIsModalOpen(true); }}
             className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
           >
             <Plus size={18} />
@@ -144,8 +189,18 @@ const Roles = () => {
         </div>
 
         {/* Data Grid or Empty State */}
+        {loadError && (
+          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm">
+            {loadError}
+          </div>
+        )}
+
         <div className="glass-panel rounded-3xl border border-border/60 overflow-hidden shadow-sm">
-          {filteredRoles.length > 0 ? (
+          {isLoading ? (
+            <div className="py-24 flex items-center justify-center text-muted">
+              <Loader2 className="animate-spin" size={28} />
+            </div>
+          ) : filteredRoles.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -155,6 +210,9 @@ const Roles = () => {
                     </th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
                       Departamento
+                    </th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
+                      Status
                     </th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">
                       Ações
@@ -185,9 +243,20 @@ const Roles = () => {
                         </td>
                         <td className="px-8 py-6">
                           <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium bg-secondary/60 text-foreground/80 border border-border/60 shadow-sm">
-                            <div className={`w-2 h-2 rounded-full ${role.color || 'bg-accent'}`} />
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: role.colorHex }} />
                             {role.department}
                           </span>
+                        </td>
+                        <td className="px-8 py-6">
+                          {role.active ? (
+                            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
+                              <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> ATIVO
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-secondary text-foreground/60 border border-border/60">
+                              <div className="w-1.5 h-1.5 rounded-full bg-foreground/40" /> INATIVO
+                            </span>
+                          )}
                         </td>
                         <td className="px-8 py-6 text-right">
                           <button
@@ -260,6 +329,11 @@ const Roles = () => {
                     <X size={20} />
                   </button>
                 </div>
+                {actionError && (
+                  <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
+                    {actionError}
+                  </div>
+                )}
                 <form onSubmit={handleAddRole} className="space-y-6">
                   <div>
                     <label className="block text-sm font-semibold text-foreground/90 mb-2">
@@ -288,6 +362,36 @@ const Roles = () => {
                       placeholder="Ex: Criação"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-foreground/90 mb-2">Cor de Identificação</label>
+                    <div className="flex flex-wrap gap-3 mb-3">
+                      {COLOR_SWATCHES.map(hex => (
+                        <button
+                          key={hex} type="button"
+                          onClick={() => setNewRole({ ...newRole, colorHex: hex })}
+                          style={{ backgroundColor: hex }}
+                          className={`w-9 h-9 rounded-full transition-transform flex items-center justify-center ${newRole.colorHex === hex ? 'ring-4 ring-primary/30 scale-110' : 'hover:scale-105 opacity-90'}`}
+                        >
+                          {newRole.colorHex === hex && <Check size={14} className="text-white" />}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text" value={newRole.colorHex}
+                      onChange={(e) => setNewRole({ ...newRole, colorHex: e.target.value })}
+                      pattern="^#[0-9A-Fa-f]{6}$" placeholder="#2563EB"
+                      className="w-32 bg-background border border-border/80 rounded-xl px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-foreground/90 mb-2">Descrição (opcional)</label>
+                    <textarea
+                      rows={3} value={newRole.description}
+                      onChange={(e) => setNewRole({ ...newRole, description: e.target.value })}
+                      className="w-full bg-background border border-border/80 rounded-xl p-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                      placeholder="Atribuições e responsabilidades..."
+                    />
+                  </div>
                   <div className="pt-6 flex gap-3">
                     <button
                       type="button"
@@ -300,10 +404,10 @@ const Roles = () => {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       type="submit"
-                      disabled={!newRole.name.trim() || !newRole.department.trim()}
+                      disabled={!newRole.name.trim() || !newRole.department.trim() || isSaving}
                       className="flex-1 py-4 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-base"
                     >
-                      Salvar Cargo
+                      {isSaving ? 'Salvando...' : 'Salvar Cargo'}
                     </motion.button>
                   </div>
                 </form>
@@ -338,7 +442,7 @@ const Roles = () => {
                   <div className="flex items-start justify-between">
                     <div>
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-secondary text-foreground/80 border border-border/40 mb-3">
-                        <div className={`w-1.5 h-1.5 rounded-full ${selectedRole.color || 'bg-accent'}`} />
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: selectedRole.colorHex }} />
                         {selectedRole.department}
                       </span>
                       <h2 className="text-2xl font-heading font-bold text-foreground">
@@ -368,8 +472,8 @@ const Roles = () => {
                       </p>
                       <textarea
                         rows={5}
-                        value={selectedRole.attributions || ''}
-                        onChange={(e) => setSelectedRole({ ...selectedRole, attributions: e.target.value })}
+                        value={selectedRole.description || ''}
+                        onChange={(e) => setSelectedRole({ ...selectedRole, description: e.target.value })}
                         placeholder="Ex: Responsável por liderar as iniciativas de design da empresa, gerenciar o time de criação..."
                         className="w-full bg-background border border-border/80 rounded-xl p-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm placeholder:text-muted/50 resize-none"
                       />
@@ -384,14 +488,15 @@ const Roles = () => {
                         Escolha uma cor para representar este cargo nos organogramas e tabelas.
                       </p>
                       <div className="flex flex-wrap gap-3">
-                        {AVAILABLE_COLORS.map(color => (
+                        {COLOR_SWATCHES.map(hex => (
                           <button
-                            key={color.id}
+                            key={hex}
                             type="button"
-                            onClick={() => setSelectedRole({ ...selectedRole, color: color.class })}
-                            className={`w-10 h-10 rounded-full transition-transform flex items-center justify-center ${color.class} ${selectedRole.color === color.class ? 'ring-4 ring-primary/30 scale-110 shadow-lg' : 'hover:scale-105 shadow-sm opacity-90'}`}
+                            onClick={() => setSelectedRole({ ...selectedRole, colorHex: hex })}
+                            style={{ backgroundColor: hex }}
+                            className={`w-10 h-10 rounded-full transition-transform flex items-center justify-center ${selectedRole.colorHex === hex ? 'ring-4 ring-primary/30 scale-110 shadow-lg' : 'hover:scale-105 shadow-sm opacity-90'}`}
                           >
-                            {selectedRole.color === color.class && <Check size={16} className="text-white" />}
+                            {selectedRole.colorHex === hex && <Check size={16} className="text-white" />}
                           </button>
                         ))}
                       </div>
@@ -401,42 +506,52 @@ const Roles = () => {
                 </div>
 
                 {/* Drawer Footer */}
+                {actionError && (
+                  <div className="mx-6 md:mx-8 mb-4 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-red-600 dark:text-red-400 text-sm">
+                    {actionError}
+                  </div>
+                )}
                 <div className="p-6 md:p-8 border-t border-border/40 bg-secondary/10 flex items-center justify-between gap-4">
-                  {isConfirmingDelete ? (
-                    <motion.button
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      onClick={() => handleDeleteRole(selectedRole.id)}
-                      onMouseLeave={() => setIsConfirmingDelete(false)}
-                      className="px-5 py-3.5 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20 text-sm flex items-center gap-2"
-                    >
-                      <Trash2 size={16} />
-                      Confirmar Exclusão
-                    </motion.button>
+                  {selectedRole.active ? (
+                    isConfirmingDeactivate ? (
+                      <motion.button
+                        initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+                        onClick={() => handleDeactivateRole(selectedRole.id)}
+                        onMouseLeave={() => setIsConfirmingDeactivate(false)}
+                        disabled={isSaving}
+                        className="px-5 py-3.5 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20 text-sm flex items-center gap-2 disabled:opacity-60"
+                      >
+                        <Ban size={16} /> Confirmar Inativação
+                      </motion.button>
+                    ) : (
+                      <button
+                        onClick={() => setIsConfirmingDeactivate(true)}
+                        className="px-5 py-3.5 rounded-xl font-medium text-red-500 hover:bg-red-500/10 transition-colors text-sm flex items-center gap-2"
+                      >
+                        <Ban size={16} /> Inativar Cargo
+                      </button>
+                    )
                   ) : (
                     <button
-                      onClick={() => setIsConfirmingDelete(true)}
-                      className="px-5 py-3.5 rounded-xl font-medium text-red-500 hover:bg-red-500/10 transition-colors text-sm flex items-center gap-2"
+                      onClick={() => handleReactivateRole(selectedRole.id)}
+                      disabled={isSaving}
+                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm flex items-center gap-2 disabled:opacity-60"
                     >
-                      <Trash2 size={16} />
-                      Excluir Cargo
+                      <RotateCcw size={16} /> Reativar Cargo
                     </button>
                   )}
 
                   <div className="flex gap-3 ml-auto">
-                    <button
-                      onClick={() => setSelectedRole(null)}
-                      className="px-5 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-                    >
+                    <button onClick={() => setSelectedRole(null)} className="px-5 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">
                       Cancelar
                     </button>
                     <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
+                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                       onClick={() => handleUpdateRole(selectedRole)}
-                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm"
+                      disabled={isSaving}
+                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm disabled:opacity-60"
                     >
-                      Salvar
+                      {isSaving ? 'Salvando...' : 'Salvar'}
                     </motion.button>
                   </div>
                 </div>
