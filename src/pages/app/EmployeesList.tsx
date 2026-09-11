@@ -1,100 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Filter, X, FileText, AlertCircle, Calendar, User, Briefcase, DollarSign, Activity, ChevronRight, Edit2, Save, MapPin, Phone, Mail, Building, CreditCard, ChevronDown, RefreshCw } from 'lucide-react';
+import { Plus, Search, Filter, X, AlertCircle, Briefcase, ChevronRight, Edit2, Save, DollarSign, Loader2, Ban, RotateCcw, User, Activity } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
 import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import * as api from '../../lib/api';
+import type { EmployeeDetail, EmployeeListItem, EmployeeWarning, Role } from '../../lib/api';
 
-interface Warning {
-  id: string;
-  date: string;
-  reason: string;
+export interface Employee extends EmployeeDetail {
+  warnings: EmployeeWarning[];
 }
 
-interface Payment {
-  id: string;
-  month: string;
-  year: number;
-  status: 'paid' | 'pending' | 'overdue';
-  amount: string;
-}
-
-export interface Employee {
-  id: string;
-  name: string;
-  role: string;
-  salary: string;
-  status: 'active' | 'inactive';
-  cpf: string;
-  admissionDate: string;
-  department: string;
-  warnings: Warning[];
-  email?: string;
-  phone?: string;
-  address?: string;
-  contractType?: string;
-  paymentDay?: string;
-  bankDetails?: string;
-  payments: Payment[];
-  vacation: {
-    daysTaken: number;
-    history: { startDate: string; endDate: string }[];
-  };
-  salaryRecurrence?: boolean;
-}
-
-const initialEmployees: Employee[] = [
-  {
-    id: '1', name: 'João Silva', role: 'Desenvolvedor Front-end', salary: 'R$ 7.500', status: 'active',
-    cpf: '111.222.333-44', admissionDate: '2023-01-15', department: 'Tecnologia',
-    email: 'joao.silva@exemplo.com', phone: '(11) 99999-9999', address: 'Rua das Flores, 123, São Paulo - SP',
-    contractType: 'clt', paymentDay: '5', bankDetails: 'Banco Itaú, Ag 1234, CC 56789-0', salaryRecurrence: true,
-    warnings: [],
-    payments: [
-      { id: 'p1', month: 'maio', year: 2026, status: 'paid', amount: 'R$ 7.500' },
-      { id: 'p2', month: 'junho', year: 2026, status: 'pending', amount: 'R$ 7.500' }
-    ],
-    vacation: { daysTaken: 0, history: [] }
-  },
-  {
-    id: '2', name: 'Maria Santos', role: 'Analista de RH', salary: 'R$ 4.200', status: 'active',
-    cpf: '222.333.444-55', admissionDate: '2022-05-10', department: 'Recursos Humanos',
-    email: 'maria.santos@exemplo.com', phone: '(11) 88888-8888', address: 'Av. Paulista, 1000, São Paulo - SP',
-    contractType: 'clt', paymentDay: '5', bankDetails: 'Banco Bradesco, Ag 4321, CC 98765-4', salaryRecurrence: true,
-    warnings: [{ id: 'w1', date: '2023-11-20', reason: 'Atraso injustificado' }],
-    payments: [
-      { id: 'p3', month: 'maio', year: 2026, status: 'paid', amount: 'R$ 4.200' },
-      { id: 'p4', month: 'junho', year: 2026, status: 'overdue', amount: 'R$ 4.200' }
-    ],
-    vacation: { daysTaken: 15, history: [{ startDate: '2024-01-10', endDate: '2024-01-25' }] }
-  },
-  {
-    id: '3', name: 'Pedro Almeida', role: 'Gerente de Vendas', salary: 'R$ 9.000', status: 'inactive',
-    cpf: '333.444.555-66', admissionDate: '2021-08-01', department: 'Comercial',
-    email: 'pedro.almeida@exemplo.com', phone: '(11) 77777-7777', address: 'Rua Augusta, 500, São Paulo - SP',
-    contractType: 'pj', paymentDay: '15', bankDetails: 'Nubank, Ag 0001, CC 123456-7', salaryRecurrence: false,
-    warnings: [],
-    payments: [
-      { id: 'p5', month: 'maio', year: 2026, status: 'paid', amount: 'R$ 9.000' }
-    ],
-    vacation: { daysTaken: 0, history: [] }
-  },
-];
+const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
 const EmployeesList = () => {
-  const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
+  const [employeeItems, setEmployeeItems] = useState<EmployeeListItem[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Drawer state
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [isDrawerLoading, setIsDrawerLoading] = useState(false);
 
   // Finance Modal state
-  const [financeEmployee, setFinanceEmployee] = useState<Employee | null>(null);
+  const [financeEmployeeId, setFinanceEmployeeId] = useState<string | null>(null);
 
   // Edit state
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Employee>>({});
 
   // Warning modal state
@@ -102,15 +40,47 @@ const EmployeesList = () => {
   const [warningDate, setWarningDate] = useState('');
   const [warningReason, setWarningReason] = useState('');
 
+  const roleNameById = (roleId: string) => roles.find(r => r.id === roleId)?.name ?? '(cargo inativo)';
+
+  const loadList = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [items, activeRoles] = await Promise.all([api.listEmployees(), api.listActiveRoles()]);
+      setEmployeeItems(items);
+      setRoles(activeRoles);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os funcionários.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadList();
+  }, [loadList]);
+
+  const openEmployeeDetail = async (id: string) => {
+    setIsDrawerLoading(true);
+    setActionError(null);
+    try {
+      const [detail, warnings] = await Promise.all([api.getEmployee(id), api.listWarnings(id)]);
+      setSelectedEmployee({ ...detail, warnings });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível carregar o funcionário.');
+    } finally {
+      setIsDrawerLoading(false);
+    }
+  };
+
   useEscapeKey(() => {
     setSelectedEmployee(null);
-    setFinanceEmployee(null);
+    setFinanceEmployeeId(null);
     setWarningModalOpen(false);
   });
 
-  // Prevent background scrolling when Drawer/Modal is open
   useEffect(() => {
-    if (selectedEmployee || warningModalOpen || financeEmployee) {
+    if (selectedEmployee || warningModalOpen || financeEmployeeId || isDrawerLoading) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -118,20 +88,17 @@ const EmployeesList = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [selectedEmployee, warningModalOpen, financeEmployee]);
+  }, [selectedEmployee, warningModalOpen, financeEmployeeId, isDrawerLoading]);
 
-  // Reset editing mode when employee changes
   useEffect(() => {
-    if (!selectedEmployee) {
-      setIsEditing(false);
-    }
+    if (!selectedEmployee) setIsEditing(false);
   }, [selectedEmployee]);
 
-  const filteredEmployees = employees.filter(emp => {
+  const filteredEmployees = employeeItems.filter(emp => {
     if (!searchQuery) return true;
     const lowerQuery = searchQuery.toLowerCase().trim();
-    return emp.name.toLowerCase().includes(lowerQuery) ||
-      emp.role.toLowerCase().includes(lowerQuery) ||
+    return emp.fullName.toLowerCase().includes(lowerQuery) ||
+      roleNameById(emp.roleId).toLowerCase().includes(lowerQuery) ||
       emp.department.toLowerCase().includes(lowerQuery);
   });
 
@@ -140,86 +107,99 @@ const EmployeesList = () => {
     setIsEditing(true);
   };
 
-  const handleCancelEdit = () => {
-    setIsEditing(false);
-  };
+  const handleCancelEdit = () => setIsEditing(false);
 
-  const handleSaveEdit = () => {
-    if (!editForm.name || !editForm.cpf || !editForm.role) return; // basic validation
-    const updatedEmployee = editForm as Employee;
+  const handleSaveEdit = async () => {
+    if (!selectedEmployee || !editForm.fullName || !editForm.cpf || !editForm.roleId || isSaving) return;
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const updated = await api.updateEmployee(selectedEmployee.id, {
+        fullName: editForm.fullName, cpf: editForm.cpf, roleId: editForm.roleId,
+        email: editForm.email, phone: editForm.phone, address: editForm.address,
+        department: editForm.department, contractType: editForm.contractType,
+        admissionDate: editForm.admissionDate, baseValue: editForm.baseValue,
+        paymentDay: editForm.paymentDay, bankDetails: editForm.bankDetails,
+        salaryRecurrenceEnabled: editForm.salaryRecurrenceEnabled,
+      });
 
-    setEmployees(employees.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp));
-    setSelectedEmployee(null);
-    setIsEditing(false);
-  };
-
-  const handleMarkAsPaid = (paymentId: string) => {
-    if (!financeEmployee) return;
-
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === financeEmployee.id) {
-        const updatedPayments = emp.payments.map(p => p.id === paymentId ? { ...p, status: 'paid' as const } : p);
-        const updatedEmp = { ...emp, payments: updatedPayments };
-        setFinanceEmployee(updatedEmp);
-        return updatedEmp;
+      // Ligar/desligar a recorrência automática de salário nesta edição.
+      if (editForm.salaryRecurrenceEnabled !== selectedEmployee.salaryRecurrenceEnabled) {
+        const recurrences = await api.listEmployeeRecurringPayments(selectedEmployee.id);
+        const salaryRecurrence = recurrences.filter(r => r.description === 'Salário').pop();
+        if (editForm.salaryRecurrenceEnabled && !salaryRecurrence) {
+          await api.createEmployeeRecurringPayment(selectedEmployee.id, {
+            description: 'Salário', amount: updated.baseValue,
+            dueDay: updated.paymentDay === 'last' ? 31 : Number(updated.paymentDay),
+          });
+        } else if (!editForm.salaryRecurrenceEnabled && salaryRecurrence?.status === 'active') {
+          await api.deactivateEmployeeRecurringPayment(salaryRecurrence.id);
+        }
       }
-      return emp;
-    });
-    setEmployees(updatedEmployees);
+
+      const warnings = await api.listWarnings(selectedEmployee.id);
+      setSelectedEmployee({ ...updated, warnings });
+      setEmployeeItems(prev => prev.map(e => e.id === updated.id
+        ? { id: updated.id, fullName: updated.fullName, roleId: updated.roleId, department: updated.department, contractType: updated.contractType, status: updated.status, cpfMasked: e.cpfMasked, baseValue: updated.baseValue }
+        : e));
+      setIsEditing(false);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível salvar o funcionário.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleScheduleVacation = (days: number) => {
-    if (!financeEmployee) return;
+  const handleDeactivateEmployee = async () => {
+    if (!selectedEmployee || isSaving) return;
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const updated = await api.deactivateEmployee(selectedEmployee.id);
+      setSelectedEmployee(prev => prev ? { ...prev, ...updated } : prev);
+      setEmployeeItems(prev => prev.map(e => e.id === updated.id ? { ...e, status: updated.status } : e));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível inativar o funcionário.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === financeEmployee.id) {
-        const updatedEmp = {
-          ...emp,
-          vacation: {
-            daysTaken: emp.vacation.daysTaken + days,
-            history: [
-              ...emp.vacation.history,
-              { startDate: new Date().toISOString(), endDate: new Date(Date.now() + days * 86400000).toISOString() }
-            ]
-          }
-        };
-        setFinanceEmployee(updatedEmp);
-        return updatedEmp;
-      }
-      return emp;
-    });
-    setEmployees(updatedEmployees);
+  const handleReactivateEmployee = async () => {
+    if (!selectedEmployee || isSaving) return;
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const updated = await api.reactivateEmployee(selectedEmployee.id);
+      setSelectedEmployee(prev => prev ? { ...prev, ...updated } : prev);
+      setEmployeeItems(prev => prev.map(e => e.id === updated.id ? { ...e, status: updated.status } : e));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível reativar o funcionário.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const openWarning = () => {
-    setWarningDate(new Date().toISOString().split('T')[0]); // default to today
+    setWarningDate(new Date().toISOString().split('T')[0]);
     setWarningReason('');
     setWarningModalOpen(true);
   };
 
-  const handleAddWarning = (e: React.FormEvent) => {
+  const handleAddWarning = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEmployee || !warningDate || !warningReason) return;
-
-    const newWarning: Warning = {
-      id: crypto.randomUUID(),
-      date: warningDate,
-      reason: warningReason
-    };
-
-    setEmployees(employees.map(emp => {
-      if (emp.id === selectedEmployee.id) {
-        return { ...emp, warnings: [...emp.warnings, newWarning] };
-      }
-      return emp;
-    }));
-
-    setSelectedEmployee({
-      ...selectedEmployee,
-      warnings: [...selectedEmployee.warnings, newWarning]
-    });
-
-    setWarningModalOpen(false);
+    if (!selectedEmployee || !warningDate || !warningReason || isSaving) return;
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const created = await api.createWarning(selectedEmployee.id, { occurredAt: warningDate, reason: warningReason });
+      setSelectedEmployee({ ...selectedEmployee, warnings: [...selectedEmployee.warnings, created] });
+      setWarningModalOpen(false);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível registrar a advertência.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -271,9 +251,20 @@ const EmployeesList = () => {
           </button>
         </div>
 
+        {/* Load error */}
+        {loadError && (
+          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm">
+            {loadError}
+          </div>
+        )}
+
         {/* Data Grid */}
         <div className="glass-panel rounded-3xl border border-border/60 overflow-hidden shadow-sm">
-          {filteredEmployees.length > 0 ? (
+          {isLoading ? (
+            <div className="py-24 flex items-center justify-center text-muted">
+              <Loader2 className="animate-spin" size={28} />
+            </div>
+          ) : filteredEmployees.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead>
@@ -295,35 +286,24 @@ const EmployeesList = () => {
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2, delay: index * 0.03 }}
-                        onClick={() => setFinanceEmployee(emp)}
-                        onDoubleClick={() => setSelectedEmployee(emp)}
+                        onClick={() => setFinanceEmployeeId(emp.id)}
+                        onDoubleClick={() => openEmployeeDetail(emp.id)}
                         className="hover:bg-secondary/40 transition-colors group cursor-pointer"
                       >
                         <td className="px-8 py-6">
                           <div className="flex items-center gap-4">
                             <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-bold text-sm shadow-sm shrink-0 group-hover:scale-105 transition-transform">
-                              {emp.name.charAt(0)}
+                              {emp.fullName.charAt(0)}
                             </div>
                             <span className="text-base font-heading font-medium text-foreground group-hover:text-primary transition-colors">
-                              {emp.name}
+                              {emp.fullName}
                             </span>
                           </div>
                         </td>
-                        <td className="px-8 py-6 text-muted font-medium">{emp.role}</td>
+                        <td className="px-8 py-6 text-muted font-medium">{roleNameById(emp.roleId)}</td>
                         <td className="px-8 py-6 text-muted font-medium">{emp.department}</td>
                         <td className="px-8 py-6">
-                          <div className="flex flex-col gap-1.5">
-                            <span className="text-sm font-bold text-foreground">{emp.salary}</span>
-                            {emp.salaryRecurrence !== false ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full w-fit">
-                                <RefreshCw size={10} /> Recorrente
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-muted bg-secondary px-2 py-0.5 rounded-full w-fit border border-border/50">
-                                <X size={10} /> Manual
-                              </span>
-                            )}
-                          </div>
+                          <span className="text-sm font-bold text-foreground">{formatCurrency(emp.baseValue)}</span>
                         </td>
                         <td className="px-8 py-6">
                           {emp.status === 'active' ? (
@@ -342,7 +322,7 @@ const EmployeesList = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedEmployee(emp);
+                              openEmployeeDetail(emp.id);
                             }}
                             className="inline-flex items-center gap-1 text-sm font-medium text-muted group-hover:text-primary transition-colors hover:bg-secondary px-4 py-2 rounded-xl"
                           >
@@ -373,7 +353,7 @@ const EmployeesList = () => {
       {/* PORTALS FOR DRAWER AND MODAL */}
 
       {/* 1. Drawer: Detalhes do Funcionário */}
-      {selectedEmployee && createPortal(
+      {(selectedEmployee || isDrawerLoading) && createPortal(
         <AnimatePresence>
           <>
             <motion.div
@@ -391,42 +371,38 @@ const EmployeesList = () => {
                 transition={{ type: "spring", damping: 30, stiffness: 300 }}
                 className="bg-background border-l border-border/60 w-full max-w-lg h-full shadow-2xl pointer-events-auto flex flex-col"
               >
+                {isDrawerLoading || !selectedEmployee ? (
+                  <div className="flex-1 flex items-center justify-center text-muted">
+                    <Loader2 className="animate-spin" size={28} />
+                  </div>
+                ) : (
+                <>
                 {/* Drawer Header */}
                 <div className="p-6 md:p-8 border-b border-border/40 flex flex-col gap-2 relative overflow-hidden shrink-0">
                   <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
                   <div className="flex items-start justify-between mt-2">
                     <div className="flex items-center gap-4 flex-1 mr-4">
                       <div className="w-14 h-14 rounded-full bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-bold text-2xl shadow-sm shrink-0">
-                        {isEditing && editForm.name ? editForm.name.charAt(0) : selectedEmployee.name.charAt(0)}
+                        {isEditing && editForm.fullName ? editForm.fullName.charAt(0) : selectedEmployee.fullName.charAt(0)}
                       </div>
                       <div className="flex-1 w-full min-w-0">
                         {isEditing ? (
                           <input
                             type="text"
-                            value={editForm.name || ''}
-                            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                            value={editForm.fullName || ''}
+                            onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
                             className="w-full bg-background border border-border/80 rounded-lg px-3 py-1.5 text-2xl font-heading font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
                             placeholder="Nome Completo"
                           />
                         ) : (
                           <h2 className="text-2xl font-heading font-bold text-foreground truncate">
-                            {selectedEmployee.name}
+                            {selectedEmployee.fullName}
                           </h2>
                         )}
 
-                        {isEditing ? (
-                          <div className="mt-2">
-                            <input
-                              type="text"
-                              value={editForm.role || ''}
-                              onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                              className="w-full bg-background border border-border/80 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
-                              placeholder="Cargo"
-                            />
-                          </div>
-                        ) : (
+                        {!isEditing && (
                           <span className="text-muted text-sm font-medium flex items-center gap-1.5 mt-1 truncate">
-                            <Briefcase size={14} className="text-primary/70 shrink-0" /> {selectedEmployee.role}
+                            <Briefcase size={14} className="text-primary/70 shrink-0" /> {roleNameById(selectedEmployee.roleId)}
                           </span>
                         )}
                       </div>
@@ -456,6 +432,12 @@ const EmployeesList = () => {
                 <div className="p-6 md:p-8 flex-1 overflow-y-auto custom-scrollbar">
                   <div className="space-y-8 pb-10">
 
+                    {actionError && (
+                      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-red-600 dark:text-red-400 text-sm">
+                        {actionError}
+                      </div>
+                    )}
+
                     {/* Status Section */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-secondary/20 rounded-2xl border border-border/40 gap-4">
                       <div>
@@ -463,28 +445,27 @@ const EmployeesList = () => {
                         <p className="text-sm font-medium text-foreground">Condição do vínculo</p>
                       </div>
 
-                      {isEditing ? (
-                        <div className="w-40">
-                          <CustomSelect
-                            value={editForm.status || 'active'}
-                            onChange={(val) => setEditForm({ ...editForm, status: val as 'active' | 'inactive' })}
-                            options={[
-                              { value: 'active', label: 'ATIVO' },
-                              { value: 'inactive', label: 'INATIVO' }
-                            ]}
-                            className="!py-2 !px-4 !rounded-xl font-bold"
-                          />
+                      {!isEditing && (
+                        <div className="flex items-center">
+                          {selectedEmployee.status === 'active' ? (
+                            <span className="px-4 py-2 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 whitespace-nowrap">
+                              ATIVO
+                            </span>
+                          ) : (
+                            <span className="px-4 py-2 rounded-full text-xs font-bold bg-secondary text-foreground/60 border border-border/60 whitespace-nowrap">
+                              INATIVO
+                            </span>
+                          )}
+                          {selectedEmployee.status === 'active' ? (
+                            <button onClick={handleDeactivateEmployee} disabled={isSaving} className="ml-3 text-xs font-bold text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 disabled:opacity-60">
+                              <Ban size={12} /> Inativar
+                            </button>
+                          ) : (
+                            <button onClick={handleReactivateEmployee} disabled={isSaving} className="ml-3 text-xs font-bold text-primary hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 disabled:opacity-60">
+                              <RotateCcw size={12} /> Reativar
+                            </button>
+                          )}
                         </div>
-                      ) : (
-                        selectedEmployee.status === 'active' ? (
-                          <span className="px-4 py-2 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 whitespace-nowrap">
-                            ATIVO
-                          </span>
-                        ) : (
-                          <span className="px-4 py-2 rounded-full text-xs font-bold bg-secondary text-foreground/60 border border-border/60 whitespace-nowrap">
-                            INATIVO
-                          </span>
-                        )
                       )}
                     </div>
 
@@ -548,7 +529,7 @@ const EmployeesList = () => {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="bg-background border border-border/60 rounded-xl p-4 shadow-sm hover:border-primary/30 transition-colors">
                               <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Salário Base</p>
-                              <p className="text-sm font-medium text-foreground">{selectedEmployee.salary || 'Não informado'}</p>
+                              <p className="text-sm font-medium text-foreground">{formatCurrency(selectedEmployee.baseValue)}</p>
                             </div>
                             <div className="bg-background border border-border/60 rounded-xl p-4 shadow-sm hover:border-primary/30 transition-colors">
                               <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Dia de Pagamento</p>
@@ -564,10 +545,10 @@ const EmployeesList = () => {
                               <div>
                                 <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Recorrência Automática</p>
                                 <p className="text-sm font-medium text-foreground">
-                                  {selectedEmployee.salaryRecurrence !== false ? 'Ativada (Mensal)' : 'Desativada'}
+                                  {selectedEmployee.salaryRecurrenceEnabled ? 'Ativada (Mensal)' : 'Desativada'}
                                 </p>
                               </div>
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${selectedEmployee.salaryRecurrence !== false ? 'bg-primary/10 text-primary' : 'bg-secondary text-muted'}`}>
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${selectedEmployee.salaryRecurrenceEnabled ? 'bg-primary/10 text-primary' : 'bg-secondary text-muted'}`}>
                                 <DollarSign size={16} />
                               </div>
                             </div>
@@ -598,7 +579,7 @@ const EmployeesList = () => {
                                   </div>
                                   <div>
                                     <p className="font-bold text-foreground text-sm">Advertência Registrada</p>
-                                    <p className="text-xs text-muted mt-1">{new Date(warning.date).toLocaleDateString('pt-BR')}</p>
+                                    <p className="text-xs text-muted mt-1">{new Date(warning.occurredAt).toLocaleDateString('pt-BR')}</p>
                                     <p className="text-sm text-foreground/80 mt-2 bg-background p-3 rounded-xl border border-border/50 shadow-sm leading-relaxed">
                                       {warning.reason}
                                     </p>
@@ -653,7 +634,19 @@ const EmployeesList = () => {
                               <Briefcase size={16} className="text-primary/70" /> Cargo & Vínculo
                             </h4>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div className="sm:col-span-2">
+                              <div>
+                                <label className="block text-xs font-medium text-foreground/80 mb-1.5">Cargo</label>
+                                <CustomSelect
+                                  value={editForm.roleId || ''}
+                                  onChange={(val) => {
+                                    const role = roles.find(r => r.id === val);
+                                    setEditForm({ ...editForm, roleId: val, department: role?.department ?? editForm.department });
+                                  }}
+                                  options={roles.map(r => ({ value: r.id, label: `${r.name} (${r.department})` }))}
+                                  className="!py-2.5 !px-3"
+                                />
+                              </div>
+                              <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Departamento</label>
                                 <input type="text" value={editForm.department || ''} onChange={(e) => setEditForm({ ...editForm, department: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                               </div>
@@ -665,7 +658,7 @@ const EmployeesList = () => {
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Tipo de Contrato</label>
                                 <CustomSelect
                                   value={editForm.contractType || ''}
-                                  onChange={(val) => setEditForm({ ...editForm, contractType: val })}
+                                  onChange={(val) => setEditForm({ ...editForm, contractType: val as Employee['contractType'] })}
                                   options={[
                                     { value: 'clt', label: 'CLT' },
                                     { value: 'pj', label: 'PJ' },
@@ -685,13 +678,13 @@ const EmployeesList = () => {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Salário Base</label>
-                                <input type="text" value={editForm.salary || ''} onChange={(e) => setEditForm({ ...editForm, salary: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" placeholder="R$ 0,00" />
+                                <input type="number" value={editForm.baseValue ?? ''} onChange={(e) => setEditForm({ ...editForm, baseValue: Number(e.target.value) })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" placeholder="0,00" />
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Dia de Pagamento</label>
                                 <CustomSelect
                                   value={editForm.paymentDay || ''}
-                                  onChange={(val) => setEditForm({ ...editForm, paymentDay: val })}
+                                  onChange={(val) => setEditForm({ ...editForm, paymentDay: val as Employee['paymentDay'] })}
                                   options={[
                                     { value: '5', label: 'Dia 5 útil' },
                                     { value: '15', label: 'Dia 15' },
@@ -708,8 +701,8 @@ const EmployeesList = () => {
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Recorrência Automática</label>
                                 <CustomSelect
-                                  value={editForm.salaryRecurrence !== false ? 'yes' : 'no'}
-                                  onChange={(val) => setEditForm({ ...editForm, salaryRecurrence: val === 'yes' })}
+                                  value={editForm.salaryRecurrenceEnabled ? 'yes' : 'no'}
+                                  onChange={(val) => setEditForm({ ...editForm, salaryRecurrenceEnabled: val === 'yes' })}
                                   options={[
                                     { value: 'yes', label: 'Sim (Gerar despesa mensal)' },
                                     { value: 'no', label: 'Não' }
@@ -742,14 +735,17 @@ const EmployeesList = () => {
                       </button>
                       <button
                         onClick={handleSaveEdit}
-                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                        disabled={isSaving}
+                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2 disabled:opacity-60"
                       >
                         <Save size={18} />
-                        Salvar Alterações
+                        {isSaving ? 'Salvando...' : 'Salvar Alterações'}
                       </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
+                </>
+                )}
 
               </motion.div>
             </div>
@@ -791,14 +787,20 @@ const EmployeesList = () => {
                   </button>
                 </div>
 
+                {actionError && (
+                  <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
+                    {actionError}
+                  </div>
+                )}
+
                 <form onSubmit={handleAddWarning} className="space-y-6">
                   <div className="bg-secondary/20 border border-border/40 p-4 rounded-2xl flex items-center gap-4">
                     <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">
-                      {selectedEmployee.name.charAt(0)}
+                      {selectedEmployee.fullName.charAt(0)}
                     </div>
                     <div>
-                      <p className="text-base font-bold text-foreground">{selectedEmployee.name}</p>
-                      <p className="text-sm text-muted font-medium">{selectedEmployee.role}</p>
+                      <p className="text-base font-bold text-foreground">{selectedEmployee.fullName}</p>
+                      <p className="text-sm text-muted font-medium">{roleNameById(selectedEmployee.roleId)}</p>
                     </div>
                   </div>
 
@@ -841,10 +843,10 @@ const EmployeesList = () => {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       type="submit"
-                      disabled={!warningDate || !warningReason.trim()}
+                      disabled={!warningDate || !warningReason.trim() || isSaving}
                       className="flex-1 py-4 bg-red-500 hover:bg-red-600 text-white rounded-xl text-base font-bold transition-colors shadow-lg shadow-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Registrar
+                      {isSaving ? 'Registrando...' : 'Registrar'}
                     </motion.button>
                   </div>
                 </form>
@@ -856,12 +858,10 @@ const EmployeesList = () => {
       )}
 
       {/* 3. Modal: Gestão Financeira e Férias */}
-      {financeEmployee && createPortal(
+      {financeEmployeeId && createPortal(
         <FinanceAndVacationModal
-          employee={financeEmployee}
-          onClose={() => setFinanceEmployee(null)}
-          onMarkAsPaid={handleMarkAsPaid}
-          onScheduleVacation={handleScheduleVacation}
+          employeeId={financeEmployeeId}
+          onClose={() => setFinanceEmployeeId(null)}
         />,
         document.body
       )}
