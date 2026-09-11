@@ -611,7 +611,7 @@ const EmployeesList = () => {
                                   </div>
                                   <div>
                                     <p className="font-bold text-foreground text-sm">Advertência Registrada</p>
-                                    <p className="text-xs text-muted mt-1">{new Date(warning.occurredAt).toLocaleDateString('pt-BR')}</p>
+                                    <p className="text-xs text-muted mt-1">{formatDateOnly(warning.occurredAt)}</p>
                                     <p className="text-sm text-foreground/80 mt-2 bg-background p-3 rounded-xl border border-border/50 shadow-sm leading-relaxed">
                                       {warning.reason}
                                     </p>
