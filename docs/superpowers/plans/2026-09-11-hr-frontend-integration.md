@@ -1502,7 +1502,114 @@ git commit -m "feat(frontend): connect FinanceAndVacationModal vacation tab to t
 
 ---
 
-## Task 7: Validação final + documentação
+## Task 7: Limpar erros de TypeScript pré-existentes fora do escopo de RH
+
+**Contexto (descoberto durante a implementação, fora do escopo original desta spec):** `npm run build`
+já falhava antes desta etapa — `tsc -b` rejeita ~30 importações/parâmetros não usados espalhados por
+~15 arquivos não relacionados a RH (Landing Page, Overview, Analytics, etc.), mais dois bugs de tipo
+reais e pequenos. As Tasks 2-6 já removem as importações não usadas dos arquivos de RH que elas
+reescrevem (`Roles.tsx`, `EmployeesList.tsx`, `EmployeeForm.tsx`, `FinanceAndVacationModal.tsx`) como
+efeito colateral natural da reescrita — esta task cobre só o que sobra. Decisão do usuário: limpar
+tudo agora, mudança puramente mecânica (remover código morto), sem alterar nenhum comportamento.
+
+**Files:**
+- Modify: `src/components/analytics/ChartRenderer.tsx`, `src/components/analytics/WidgetCanvas.tsx`,
+  `src/components/ClientFinanceDrawer.tsx`, `src/components/Hero3DProduct.tsx`,
+  `src/components/Navbar.tsx`, `src/layouts/AppLayout.tsx`, `src/pages/analytics/DashboardBuilder.tsx`,
+  `src/pages/analytics/DashboardHub.tsx`, `src/pages/app/FinancesSaaS.tsx`,
+  `src/pages/app/InventoryList.tsx`, `src/pages/app/Overview.tsx`, `src/pages/app/PurchasingList.tsx`,
+  `src/pages/app/QuotesList.tsx`, `src/pages/app/UsersManagement.tsx`, `src/pages/LandingPage.tsx`
+
+- [ ] **Step 1: Remover as importações/parâmetros não usados (mudança mecânica, um item por arquivo)**
+
+Cada item abaixo é `npx tsc --noEmit -p .` reportando um identificador declarado e nunca lido —
+remover cada um da lista de imports (ou do parâmetro, nos dois casos de `index`) sem tocar em mais
+nada no arquivo:
+
+| Arquivo | Remover |
+|---|---|
+| `src/components/analytics/ChartRenderer.tsx:26` | parâmetro `title` (não usado no corpo da função) |
+| `src/components/analytics/ChartRenderer.tsx:72` | parâmetro `entry` (não usado no corpo do callback) |
+| `src/components/ClientFinanceDrawer.tsx:3` | `AlertCircle`, `Clock` do import de `lucide-react` |
+| `src/components/Hero3DProduct.tsx:1` | import `React` (JSX automático não precisa mais dele) |
+| `src/components/Navbar.tsx:1` | import `React` |
+| `src/layouts/AppLayout.tsx:1` | import `React` |
+| `src/layouts/AppLayout.tsx:7` | `Briefcase`, `Settings`, `LogOut`, `Moon`, `Sun` do import de `lucide-react` |
+| `src/pages/analytics/DashboardBuilder.tsx:1` | import `React` |
+| `src/pages/analytics/DashboardHub.tsx:1` | import `React` |
+| `src/pages/app/FinancesSaaS.tsx:10` | `CheckCircle2` do import de `lucide-react` |
+| `src/pages/app/InventoryList.tsx:4` | `ArrowDown` do import de `lucide-react` |
+| `src/pages/app/Overview.tsx:1` | import `React` |
+| `src/pages/app/Overview.tsx:3` | `Users`, `FileText` do import de `lucide-react` |
+| `src/pages/app/PurchasingList.tsx:1` | `useMemo` do import de `react` |
+| `src/pages/app/QuotesList.tsx:4` | `FileText`, `DollarSign` do import de `lucide-react` |
+| `src/pages/app/QuotesList.tsx:240` | parâmetro `index` do `.map((..., index) => ...)` (remover só o parâmetro, manter o resto) |
+| `src/pages/app/QuotesList.tsx:317` | parâmetro `index` do outro `.map((..., index) => ...)` |
+| `src/pages/app/UsersManagement.tsx:4` | `Plus`, `AlertCircle` do import de `lucide-react` |
+| `src/pages/LandingPage.tsx:1` | import `React` |
+
+Para cada arquivo, confirmar visualmente antes de remover que o identificador realmente não aparece
+em nenhum outro lugar do arquivo (o `tsc` já garante isso, mas vale conferir se não há um uso dentro
+de um comentário JSX ou string que confundiria uma busca ingênua).
+
+- [ ] **Step 2: Corrigir a comparação sempre-verdadeira em `ClientFinanceDrawer.tsx`**
+
+Na linha 133, `newRec.status` é tipado como o literal `'pending'` (via `useState({ ..., status:
+'pending' as const })`) — comparar com `'paid'` nunca pode ser falso, e o TypeScript está certo em
+sinalizar isso. O comportamento pretendido (novo lançamento nunca nasce "pago", então só o
+vencimento importa) já é exatamente o que a expressão simplificada abaixo produz — não há bug de
+comportamento a corrigir, só o comparativo morto:
+
+```tsx
+const isOverdue = new Date(newRec.dueDate) < new Date() && newRec.status !== 'paid';
+```
+
+vira:
+
+```tsx
+const isOverdue = new Date(newRec.dueDate) < new Date();
+```
+
+- [ ] **Step 3: Corrigir a anotação de tipo incompatível em `WidgetCanvas.tsx`**
+
+Na linha 67, `(newLayout: any[]) => ...` está anotado com um tipo (`any[]`, mutável) incompatível com
+o tipo `Layout` (somente-leitura) que `react-grid-layout` realmente passa para `onLayoutChange`.
+Remover a anotação explícita deixa o TypeScript inferir o tipo correto a partir do próprio prop da
+biblioteca, sem mudar nenhum comportamento em runtime:
+
+```tsx
+onLayoutChange={(newLayout: any[]) => onLayoutChange && onLayoutChange(newLayout)}
+```
+
+vira:
+
+```tsx
+onLayoutChange={(newLayout) => onLayoutChange && onLayoutChange(newLayout)}
+```
+
+- [ ] **Step 4: Verificar que o projeto compila limpo**
+
+Run: `cd /c/Users/cadus/Desktop/product && npx tsc --noEmit -p .`
+Expected: **zero erros** — nenhum resquício dos ~30 erros listados acima, e nenhum erro novo introduzido pelas Tasks 1-6 já commitadas até aqui.
+
+- [ ] **Step 5: Verificação manual rápida no navegador**
+
+Como essas mudanças são só remoção de código morto e duas correções de tipo sem efeito em runtime,
+uma checagem rápida basta: abrir `/app` (Overview), `/` (Landing Page), `/app/analytics` (Dashboard
+Hub/Builder), `/app/estoque` (Inventory), `/app/orcamentos` (Quotes), `/app/usuarios` (Users
+Management) e `/app/clientes` (ClientFinanceDrawer) — confirmar que cada tela ainda renderiza
+normalmente, sem tela em branco nem erro no console do navegador.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/components/analytics/ChartRenderer.tsx src/components/analytics/WidgetCanvas.tsx src/components/ClientFinanceDrawer.tsx src/components/Hero3DProduct.tsx src/components/Navbar.tsx src/layouts/AppLayout.tsx src/pages/analytics/DashboardBuilder.tsx src/pages/analytics/DashboardHub.tsx src/pages/app/FinancesSaaS.tsx src/pages/app/InventoryList.tsx src/pages/app/Overview.tsx src/pages/app/PurchasingList.tsx src/pages/app/QuotesList.tsx src/pages/app/UsersManagement.tsx src/pages/LandingPage.tsx
+git commit -m "fix(frontend): remove unused imports/params and fix two pre-existing type errors, unblocking npm run build"
+```
+
+---
+
+## Task 8: Validação final + documentação
 
 **Files:**
 - Modify: `CLAUDE.md`
