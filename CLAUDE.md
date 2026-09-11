@@ -99,14 +99,22 @@ derivado) e Férias.
   **Fora de escopo, de propósito** (não aproximado): faltas injustificadas, abono pecuniário,
   adiantamento de 13º, INSS/IRRF, férias em dobro/vencidas, fracionamento em períodos. Disponível
   só para `contractType = CLT` — outros vínculos recebem `422` explícito.
-- **Frontend de RH continua 100% mockado:** `src/pages/app/Roles.tsx`, `EmployeesList.tsx`,
-  `EmployeeForm.tsx` e `src/components/FinanceAndVacationModal.tsx` **não foram tocados nem
-  integrados** a este backend nesta etapa — só o backend foi construído. Essa integração é
-  trabalho futuro.
+- **Frontend de RH integrado ao backend real:** `src/pages/app/Roles.tsx`, `EmployeesList.tsx`,
+  `EmployeeForm.tsx` e `src/components/FinanceAndVacationModal.tsx` consomem o backend de verdade —
+  mesmo padrão já usado em Clientes/`ClientsList.tsx`: tipos brutos `Api*` → funções `map*` →
+  tipos de UI → funções assíncronas (`listRoles`, `createEmployee`, `getVacationStatus`, etc.) em
+  `src/lib/api.ts`. Mudanças de comportamento notáveis: "excluir" cargo/funcionário virou
+  inativação lógica (nunca `DELETE`); o cargo do funcionário deixou de ser texto livre e virou uma
+  FK real (`roleId`) resolvida contra `GET /roles`/`GET /roles/active`. Ver `[[Roles]]`,
+  `[[EmployeesList]]`, `[[EmployeeForm]]` e `[[FinanceAndVacationModal]]` no vault para o detalhe
+  de cada tela.
 - Outras pendências conhecidas (ver `[[DECISOES-TECNICAS]]` seção 8): sem histórico de mudança de
   cargo (só o `roleId` atual é rastreado); checagem de CPF único é TOCTOU (não captura violação de
   constraint); `EmployeeRecurringPaymentsService.generateCharge` só verifica o status do
-  funcionário, não o da própria recorrência.
+  funcionário, não o da própria recorrência; `oneThirdBonus` retornado por
+  `GET .../vacation/status` e `POST .../vacation/simulate` não escala de forma linear com a
+  quantidade de dias do período solicitado entre chamadas diferentes (achado ao testar o frontend
+  na Task 8) — merece um olhar dedicado de quem mexer em `VacationCalculationService` a seguir.
 
 **Exclusão de cliente é sempre lógica, nunca física:** `PATCH /clients/:id/deactivate` marca o
 cliente como `INACTIVE` mas nunca apaga o registro nem seus lançamentos. O flag

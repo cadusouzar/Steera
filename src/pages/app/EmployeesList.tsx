@@ -15,6 +15,14 @@ export interface Employee extends EmployeeDetail {
 
 const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
+// Formata uma data-only string (ex.: "2026-09-01" ou "2026-09-01T00:00:00.000Z") sem
+// passar por `Date`/`toLocaleDateString`, que converteriam para o fuso horário local do
+// navegador e podem exibir o dia anterior em fusos com offset negativo (ex.: Brasil, UTC-3).
+const formatDateOnly = (dateStr: string) => {
+  const [year, month, day] = dateStr.slice(0, 10).split('-');
+  return `${day}/${month}/${year}`;
+};
+
 const EmployeesList = () => {
   const [employeeItems, setEmployeeItems] = useState<EmployeeListItem[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -539,7 +547,7 @@ const EmployeesList = () => {
                             <div className="bg-background border border-border/60 rounded-xl p-4 shadow-sm hover:border-primary/30 transition-colors sm:col-span-2">
                               <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Admissão</p>
                               <p className="text-sm font-medium text-foreground">
-                                {new Date(selectedEmployee.admissionDate).toLocaleDateString('pt-BR')}
+                                {formatDateOnly(selectedEmployee.admissionDate)}
                               </p>
                             </div>
                           </div>
