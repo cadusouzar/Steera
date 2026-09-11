@@ -71,6 +71,12 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   const [isDeactivating, setIsDeactivating] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
 
+  // "Assinaturas Ativas" deve mostrar só o que ainda está ativo — uma assinatura
+  // pausada (ex.: cliente inativado, que pausa as assinaturas dele) não deve
+  // continuar aparecendo com botão de gerar fatura/cancelar como se estivesse
+  // em vigor.
+  const activeSubscriptions = client.subscriptions?.filter((sub) => sub.status === 'active') ?? [];
+
   const handleEditClick = () => {
     setEditForm({ name: client.name, category: client.category, contact: client.contact, email: client.email ?? '' });
     setIsEditing(true);
@@ -387,13 +393,13 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
             </AnimatePresence>
 
             {/* Subscriptions Section */}
-            {!isLoading && client.subscriptions && client.subscriptions.length > 0 && (
+            {!isLoading && activeSubscriptions.length > 0 && (
               <div>
                 <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2 mb-4">
                   <Repeat size={18} className="text-accent" /> Assinaturas Ativas
                 </h3>
                 <div className="space-y-3">
-                  {client.subscriptions.map((sub) => (
+                  {activeSubscriptions.map((sub) => (
                     <div key={sub.id} className="flex flex-col p-4 bg-accent/5 border border-accent/20 rounded-2xl relative overflow-hidden transition-colors hover:border-accent/40">
                       <div className="absolute top-0 left-0 bottom-0 w-1 bg-accent"></div>
                       
