@@ -12,6 +12,7 @@ const EmployeeForm = () => {
   const [roles, setRoles] = useState<Role[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Dados Pessoais
   const [fullName, setFullName] = useState('');
@@ -33,7 +34,10 @@ const EmployeeForm = () => {
   const [salaryRecurrenceEnabled, setSalaryRecurrenceEnabled] = useState(true);
 
   useEffect(() => {
-    api.listActiveRoles().then(setRoles).catch(() => setRoles([]));
+    api.listActiveRoles().then(setRoles).catch(() => {
+      setRoles([]);
+      setLoadError('Não foi possível carregar a lista de cargos. Recarregue a página para tentar novamente.');
+    });
   }, []);
 
   const tabs = [
@@ -45,7 +49,20 @@ const EmployeeForm = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !cpf || !roleId || !admissionDate || !department || !baseValue || isSaving) return;
+    if (isSaving) return;
+
+    const missingFields: string[] = [];
+    if (!fullName) missingFields.push('Nome Completo');
+    if (!cpf) missingFields.push('CPF');
+    if (!roleId) missingFields.push('Cargo');
+    if (!admissionDate) missingFields.push('Data de Admissão');
+    if (!department) missingFields.push('Departamento');
+    if (!baseValue) missingFields.push('Salário Base');
+    if (missingFields.length > 0) {
+      setSaveError(`Preencha os campos obrigatórios: ${missingFields.join(', ')}.`);
+      return;
+    }
+
     setIsSaving(true);
     setSaveError(null);
     try {
@@ -56,6 +73,7 @@ const EmployeeForm = () => {
         salaryRecurrenceEnabled,
       });
 
+      let recurrenceWarning = false;
       if (salaryRecurrenceEnabled) {
         try {
           await api.createEmployeeRecurringPayment(created.id, {
@@ -64,10 +82,11 @@ const EmployeeForm = () => {
           });
         } catch {
           // Funcionário já foi criado — a recorrência pode ser configurada depois na aba de pagamentos.
+          recurrenceWarning = true;
         }
       }
 
-      navigate('/app/funcionarios');
+      navigate('/app/funcionarios', recurrenceWarning ? { state: { recurrenceWarning: true } } : undefined);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar o funcionário.');
     } finally {
@@ -177,6 +196,11 @@ const EmployeeForm = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Cargo</label>
+                    {loadError && (
+                      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-3 text-red-600 dark:text-red-400 text-xs">
+                        {loadError}
+                      </div>
+                    )}
                     <CustomSelect
                       value={roleId}
                       onChange={(val) => {

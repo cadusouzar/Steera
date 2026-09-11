@@ -228,7 +228,7 @@ const Roles = () => {
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2, delay: index * 0.03 }}
-                        onClick={() => setSelectedRole(role)}
+                        onClick={() => { setActionError(null); setSelectedRole(role); }}
                         className="hover:bg-secondary/40 transition-colors group cursor-pointer"
                       >
                         <td className="px-8 py-6">
@@ -260,7 +260,7 @@ const Roles = () => {
                         </td>
                         <td className="px-8 py-6 text-right">
                           <button
-                            onClick={() => setSelectedRole(role)}
+                            onClick={() => { setActionError(null); setSelectedRole(role); }}
                             className="inline-flex items-center gap-1 text-sm font-medium text-muted group-hover:text-primary transition-colors hover:bg-secondary px-4 py-2 rounded-xl"
                           >
                             Detalhes

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, Filter, X, AlertCircle, Briefcase, ChevronRight, Edit2, Save, DollarSign, Loader2, Ban, RotateCcw, User, Activity } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
 import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
@@ -24,11 +24,14 @@ const formatDateOnly = (dateStr: string) => {
 };
 
 const EmployeesList = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [employeeItems, setEmployeeItems] = useState<EmployeeListItem[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [recurrenceWarning, setRecurrenceWarning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Drawer state
@@ -67,6 +70,17 @@ const EmployeesList = () => {
   useEffect(() => {
     loadList();
   }, [loadList]);
+
+  // Aviso vindo do EmployeeForm quando o funcionário foi criado mas a recorrência de
+  // salário não pôde ser configurada — mostrado uma única vez e limpo do history state
+  // para não reaparecer num refresh.
+  useEffect(() => {
+    const state = location.state as { recurrenceWarning?: boolean } | null;
+    if (state?.recurrenceWarning) {
+      setRecurrenceWarning(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location, navigate]);
 
   const openEmployeeDetail = async (id: string) => {
     setIsDrawerLoading(true);
@@ -271,6 +285,19 @@ const EmployeesList = () => {
         {loadError && (
           <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm">
             {loadError}
+          </div>
+        )}
+
+        {/* Aviso: funcionário criado, mas recorrência de salário não pôde ser configurada */}
+        {recurrenceWarning && (
+          <div className="glass-panel rounded-3xl border border-orange-500/30 bg-orange-500/5 p-6 mb-6 text-orange-600 dark:text-orange-400 text-sm flex items-start justify-between gap-4">
+            <span>Funcionário criado, mas não foi possível configurar a recorrência automática do salário — configure manualmente na aba Pagamentos.</span>
+            <button
+              onClick={() => setRecurrenceWarning(false)}
+              className="p-1.5 rounded-full hover:bg-orange-500/10 text-orange-600 dark:text-orange-400 transition-colors shrink-0"
+            >
+              <X size={16} />
+            </button>
           </div>
         )}
 

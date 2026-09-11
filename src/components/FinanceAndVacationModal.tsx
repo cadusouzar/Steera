@@ -203,8 +203,22 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
           <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
 
           {isLoading || !employee ? (
-            <div className="p-16 flex items-center justify-center text-muted flex-1">
-              {loadError ? loadError : <Loader2 className="animate-spin" size={32} />}
+            <div className="p-16 flex flex-col items-center justify-center gap-4 text-center flex-1">
+              {loadError ? (
+                <>
+                  <div className="w-full max-w-md rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-red-600 dark:text-red-400 text-sm">
+                    {loadError}
+                  </div>
+                  <button
+                    onClick={onClose}
+                    className="px-5 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
+                  >
+                    Fechar
+                  </button>
+                </>
+              ) : (
+                <Loader2 className="animate-spin text-muted" size={32} />
+              )}
             </div>
           ) : (
             <>

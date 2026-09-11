@@ -634,6 +634,15 @@ export async function createEmployee(input: EmployeeFormInput): Promise<Employee
 export async function updateEmployee(id: string, input: Partial<EmployeeFormInput>): Promise<EmployeeDetail> {
   const dto: Record<string, unknown> = { ...input };
   if (input.cpf !== undefined) dto.cpf = stripCpf(input.cpf);
+  // Mesma normalização que toEmployeeDto já aplica no create: campos de texto opcionais
+  // viram `undefined` (omitidos do JSON) quando vazios, em vez de "" — o backend valida
+  // email/admissionDate/department com @IsOptional(), que só pula null/undefined, não "".
+  if (input.email !== undefined) dto.email = input.email || undefined;
+  if (input.phone !== undefined) dto.phone = input.phone || undefined;
+  if (input.address !== undefined) dto.address = input.address || undefined;
+  if (input.department !== undefined) dto.department = input.department || undefined;
+  if (input.admissionDate !== undefined) dto.admissionDate = input.admissionDate || undefined;
+  if (input.bankDetails !== undefined) dto.bankDetails = input.bankDetails || undefined;
   if (input.contractType !== undefined) dto.contractType = input.contractType.toUpperCase();
   if (input.paymentDay !== undefined) {
     const { paymentDueDay, payOnLastBusinessDay } = fromPaymentDay(input.paymentDay);
