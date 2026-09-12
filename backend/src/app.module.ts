@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { CompanyModule } from './company/company.module';
 import { RolesModule } from './roles/roles.module';
 import { EmployeesModule } from './employees/employees.module';
@@ -44,6 +46,11 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     ReceivablesModule,
     SubscriptionsModule,
     ReportsModule,
+  ],
+  providers: [
+    // JwtAuthGuard já respeita @Public() (Task 3) — nega por padrão em toda
+    // rota nova ou existente, sem precisar visitar/anotar cada controller.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })
 export class AppModule {}

@@ -1,29 +1,18 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Inject, Injectable, Scope } from '@nestjs/common';
+import { REQUEST } from '@nestjs/core';
+import { Request } from 'express';
 
-// Substituto temporário para autenticação real — o projeto ainda não tem
-// login/sessão em lugar nenhum (ver DECISOES-TECNICAS.md). Todo service de RH
-// pede a este serviço "qual é a empresa atual" em vez de confiar num
-// companyId enviado pelo cliente. Quando a autenticação existir de verdade,
-// só este método precisa mudar (ler req.user.companyId) — toda query/checagem
-// de propriedade nos módulos de RH já está escrita como se a auth fosse real.
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class CompanyContextService {
-  private cachedCompanyId: string | null = null;
-
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(REQUEST) private readonly request: Request) {}
 
   async getCurrentCompanyId(): Promise<string> {
-    if (this.cachedCompanyId) return this.cachedCompanyId;
-
-    const existing = await this.prisma.company.findFirst({ orderBy: { createdAt: 'asc' } });
-    if (existing) {
-      this.cachedCompanyId = existing.id;
-      return existing.id;
+    // `req.user` é populado pelo JwtAuthGuard (ver AuthModule) — nunca aceito
+    // de nenhum campo enviado pelo cliente.
+    const user = (this.request as any).user;
+    if (!user?.companyId) {
+      throw new Error('CompanyContextService chamado fora de uma requisição autenticada');
     }
-
-    const created = await this.prisma.company.create({ data: { name: 'Empresa Padrão' } });
-    this.cachedCompanyId = created.id;
-    return created.id;
+    return user.companyId;
   }
 }
