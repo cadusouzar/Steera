@@ -15,10 +15,13 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 // próxima (o guard global só existe depois que app.module.ts for
 // atualizado). Redundante depois da Task 4, nunca incorreto.
 //
-// ThrottlerGuard é aplicado aqui, no controller, e não como APP_GUARD
-// global (ver app.module.ts) — só as rotas de auth precisam de rate
-// limiting; RH/Financeiro não ganham esse limite sem necessidade.
-@UseGuards(ThrottlerGuard)
+// ThrottlerGuard é aplicado só nos 3 métodos abaixo (register/login/refresh),
+// não na classe inteira — aplicar na classe também limitaria /auth/me,
+// /auth/me/password e /auth/logout ao mesmo bucket de 5/15min, e /auth/me em
+// especial é chamado a cada carregamento de página/restauração de sessão
+// pelo frontend; num cenário de IP compartilhado (NAT), isso poderia
+// bloquear usuários legítimos sem necessidade — nada no brief/spec pediu
+// throttling pra essas 3 rotas.
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -27,6 +30,7 @@ export class AuthController {
   // de logar/registrar, e logout precisa funcionar mesmo com um access
   // token já expirado (só o cookie de refresh importa pra ele).
   @Public()
+  @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
   @Post('register')
   register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
@@ -34,6 +38,7 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
   @Post('login')
   login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
@@ -41,6 +46,7 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
   @Post('refresh')
   refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
