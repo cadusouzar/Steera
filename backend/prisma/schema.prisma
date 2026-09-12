@@ -103,11 +103,70 @@ model Subscription {
   @@index([clientId])
 }
 
+enum AppModule {
+  DASHBOARD
+  CLIENTES
+  RH
+  COMERCIAL
+  OPERACOES
+  FINANCAS
+}
+
+enum CompanyPlanTier {
+  BASICO
+  PRO
+  EMPRESARIAL
+}
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+model User {
+  id            String         @id @default(cuid())
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email         String         @unique
+  passwordHash  String
+  role          UserRole
+  employeeId    String?        @unique
+  employee      Employee?      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  modules       AppModule[]
+  status        UserStatus     @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+
+  @@index([companyId])
+}
+
+model RefreshToken {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash         String    @unique
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  createdAt         DateTime  @default(now())
+
+  @@index([userId])
+}
+
 model Company {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String          @id @default(cuid())
+  name              String
+  planTier          CompanyPlanTier @default(BASICO)
+  maxEmployeeLogins Int             @default(10)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  users             User[]
 }
 
 model Role {
@@ -164,6 +223,7 @@ model Employee {
   payments                EmployeePayment[]
   vacationSchedules       VacationSchedule[]
   leaveSchedules          LeaveSchedule[]
+  user                    User?
 
   @@unique([companyId, cpf])
   @@index([companyId])
