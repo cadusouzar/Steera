@@ -252,13 +252,16 @@ git commit -m "feat(backend): add password hashing and refresh-token utilities"
 - Create: `backend/src/auth/strategies/jwt.strategy.ts`
 - Create: `backend/src/auth/guards/jwt-auth.guard.ts`
 - Create: `backend/src/auth/decorators/current-user.decorator.ts`
+- Create: `backend/src/auth/decorators/public.decorator.ts`
 - Create: `backend/src/auth/auth.module.ts`
 - Modify: `backend/src/app.module.ts`
 - Modify: `backend/src/main.ts`
 
 **Interfaces:**
 - Consumes: `hashPassword`/`verifyPassword`/`generateRefreshTokenValue`/`hashRefreshToken` (Task 2), `PrismaService` (já existente).
-- Produces: `AuthService` com `register`, `login`, `refresh`, `logout`, `changePassword`; `JwtAuthGuard`; decorator `@CurrentUser()` retornando `{ userId, companyId, role, modules }`; rotas `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `PATCH /auth/me/password`.
+- Produces: `AuthService` com `register`, `login`, `refresh`, `logout`, `changePassword`; `JwtAuthGuard` (já preparado pra virar guard global na Task 4, respeitando `@Public()`); decorator `@CurrentUser()` retornando `{ userId, companyId, role, modules }`; decorator `@Public()`; rotas `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` (as 4 marcadas `@Public()` — não exigem token, óbvio, ninguém tem token antes de logar), `GET /auth/me`, `PATCH /auth/me/password`.
+
+**Ruling de pré-voo (registrado no ledger):** o plano original não tinha rota "quem sou eu" nenhuma — `Task 7` (frontend) dependia de decodificar o JWT no cliente ou inventar uma chamada a `/companies/me/users`, e ficou marcado como "ressalva a resolver durante a implementação". Resolvido agora, antes de qualquer dispatch: adicionada `GET /auth/me` aqui mesmo, e o texto da Task 7 foi ajustado pra usá-la — sem ambiguidade sobrando pro implementador decidir sozinho.
 
 **Contexto importante:** `POST /auth/register` cria uma `Company` nova + o primeiro `User` (`role=ADMIN`, todos os módulos, sem `employeeId`) numa transação. **Isso é um substituto temporário e documentado** para o que, quando o pagamento real existir, ficará atrás de uma confirmação de cobrança — hoje qualquer um que chame essa rota cria uma empresa nova de graça. Isso é aceitável nesta etapa (mesmo espírito do stub de empresa única que já existia) mas precisa ficar bem documentado como pendência, não como omissão.
 
@@ -329,13 +332,36 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 }
 ```
 
-`backend/src/auth/guards/jwt-auth.guard.ts`:
+`backend/src/auth/decorators/public.decorator.ts`:
 ```ts
-import { Injectable } from '@nestjs/common';
+import { SetMetadata } from '@nestjs/common';
+
+export const IS_PUBLIC_KEY = 'isPublic';
+export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
+```
+
+`backend/src/auth/guards/jwt-auth.guard.ts` — já preparado pra ser registrado como guard **global** na Task 4 (nenhuma rota do projeto, existente ou nova, fica acessível sem token por padrão, exceto as marcadas `@Public()` explicitamente — "nega por padrão" é mais seguro do que ter que lembrar de aplicar o guard rota por rota):
+```ts
+import { ExecutionContext, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
-export class JwtAuthGuard extends AuthGuard('jwt') {}
+export class JwtAuthGuard extends AuthGuard('jwt') {
+  constructor(private readonly reflector: Reflector) {
+    super();
+  }
+
+  canActivate(context: ExecutionContext) {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+    return super.canActivate(context);
+  }
+}
 ```
 
 `backend/src/auth/decorators/current-user.decorator.ts`:
@@ -480,6 +506,16 @@ export class AuthService {
     const passwordHash = await hashPassword(dto.newPassword);
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
   }
+
+  // Usado por GET /auth/me — devolve o MESMO formato de `user` que
+  // login()/register() já devolvem ({ id, email, role, modules }), não os
+  // claims crus do JWT (que não carregam `email`). Mantém o frontend com um
+  // único formato de perfil pra lidar, venha ele de login ou de uma
+  // renovação de sessão após reload.
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    return { id: user.id, email: user.email, role: user.role, modules: user.modules };
+  }
 }
 ```
 
@@ -575,37 +611,59 @@ describe('AuthService', () => {
 - [ ] **Passo 5: `AuthController`**
 
 ```ts
-import { Body, Controller, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
+import { Public } from './decorators/public.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
+// `me`/`me/password` levam @UseGuards(JwtAuthGuard) explícito aqui, mesmo
+// sabendo que a Task 4 vai registrar esse mesmo guard globalmente — sem
+// isso, ficariam sem nenhuma proteção no intervalo entre esta task e a
+// próxima (o guard global só existe depois que app.module.ts for
+// atualizado). Redundante depois da Task 4, nunca incorreto.
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  // As 4 rotas abaixo são @Public() de propósito — ninguém tem token antes
+  // de logar/registrar, e logout precisa funcionar mesmo com um access
+  // token já expirado (só o cookie de refresh importa pra ele).
+  @Public()
   @Post('register')
   register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     return this.auth.register(dto, res);
   }
 
+  @Public()
   @Post('login')
   login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     return this.auth.login(dto, res);
   }
 
+  @Public()
   @Post('refresh')
   refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.auth.refresh(req.cookies?.rt, res);
   }
 
+  @Public()
   @Post('logout')
   logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.auth.logout(req.cookies?.rt, res);
+  }
+
+  // Busca o perfil completo (com email, que o JWT não carrega) — o frontend
+  // usa isso pra saber quem está logado depois de uma renovação silenciosa
+  // (F5), já que POST /auth/refresh só devolve o accessToken, não o perfil.
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  me(@CurrentUser() user: AuthenticatedUser) {
+    return this.auth.getProfile(user.userId);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -680,18 +738,21 @@ git commit -m "feat(backend): add AuthModule (register/login/refresh/logout/chan
 
 ---
 
-### Task 4: `CompanyContextService` real + `RolesGuard`
+### Task 4: `CompanyContextService` real + `RolesGuard` + guard global
 
 **Files:**
 - Modify: `backend/src/company/company-context.service.ts`
+- Modify: `backend/src/app.module.ts`
 - Create: `backend/src/auth/guards/roles.guard.ts`
 - Create: `backend/src/auth/decorators/roles.decorator.ts`
 
 **Interfaces:**
 - Consumes: `AuthenticatedUser`/`JwtAuthGuard` (Task 3).
-- Produces: `CompanyContextService.getCurrentCompanyId()` com a MESMA assinatura pública de antes (nenhum outro service do projeto precisa mudar); `@Roles('ADMIN')` + `RolesGuard` pra restringir rotas.
+- Produces: `CompanyContextService.getCurrentCompanyId()` com a MESMA assinatura pública de antes (nenhum outro service do projeto precisa mudar); `@Roles('ADMIN')` + `RolesGuard` pra restringir rotas; `JwtAuthGuard` passa a ser exigido em **toda** rota do backend por padrão (exceto as marcadas `@Public()` na Task 3).
 
 **Contexto:** todo service de RH/Financeiro já injeta `CompanyContextService` e chama só `getCurrentCompanyId()`. Trocar o corpo do método (de "stub de empresa única" pra "ler do usuário autenticado da requisição atual") não muda nenhum chamador — é exatamente o que o comentário original já previa.
+
+**Ruling de pré-voo (registrado no ledger):** o plano original mudava `CompanyContextService` pra exigir `req.user`, mas nenhuma task aplicava `JwtAuthGuard` a nenhum controller já existente (Clientes, Funcionários, Cargos, Férias, Afastamento, Pagamentos, Relatórios) — sem isso, toda rota de RH/Financeiro quebraria com "chamado fora de uma requisição autenticada" assim que esta task terminasse, e nenhuma delas jamais teria como funcionar de novo. Resolvido registrando `JwtAuthGuard` (já preparado na Task 3 pra respeitar `@Public()`) como guard **global** (`APP_GUARD`) nesta task — nega por padrão em toda rota nova ou existente, sem precisar visitar e anotar cada controller do projeto um por um.
 
 - [ ] **Passo 1: Tornar `CompanyContextService` request-scoped**
 
@@ -745,7 +806,20 @@ export class RolesGuard implements CanActivate {
 }
 ```
 
-- [ ] **Passo 3: Rodar a suíte inteira do backend pra confirmar que nada quebrou**
+- [ ] **Passo 3: Registrar `JwtAuthGuard` como guard global em `app.module.ts`**
+
+```ts
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+// ... dentro de @Module({ providers: [...] }):
+providers: [
+  // ... providers já existentes,
+  { provide: APP_GUARD, useClass: JwtAuthGuard },
+],
+```
+A partir daqui, **toda** rota do backend — nova ou já existente — exige um access token válido, exceto as 4 marcadas `@Public()` no `AuthController` (Task 3). Isso é intencional: nenhuma rota de Clientes/RH/Financeiro precisa de nenhuma anotação nova, elas simplesmente passam a exigir login, que é exatamente o objetivo desta etapa.
+
+- [ ] **Passo 4: Rodar a suíte inteira do backend pra confirmar que nada quebrou**
 
 ```bash
 cd backend
@@ -753,13 +827,13 @@ npm test
 npm run build
 npm run lint
 ```
-Esperado: 100% dos testes já existentes continuam passando sem nenhuma mudança neles — só `CompanyContextService` mudou de implementação, mantendo a mesma interface pública.
+Esperado: 100% dos testes unitários (`*.spec.ts` dentro de `src/`) continuam passando sem nenhuma mudança neles — eles instanciam services diretamente via `Test.createTestingModule` com providers mockados, nunca passam pela camada HTTP/guards de verdade, então um guard global não os afeta. (`backend/test/app.e2e-spec.ts`, que SIM faz chamadas HTTP reais, é endereçado separadamente na Task 6 — não faz parte deste `npm test`.)
 
-- [ ] **Passo 4: Commit**
+- [ ] **Passo 5: Commit**
 
 ```bash
-git add src/company/company-context.service.ts src/auth/decorators/roles.decorator.ts src/auth/guards/roles.guard.ts
-git commit -m "feat(backend): make CompanyContextService read from the authenticated request"
+git add src/company/company-context.service.ts src/auth/decorators/roles.decorator.ts src/auth/guards/roles.guard.ts src/app.module.ts
+git commit -m "feat(backend): make CompanyContextService read from the authenticated request; require auth globally"
 ```
 
 ---
@@ -1076,9 +1150,42 @@ git commit -m "feat(backend): add UsersModule (create/list/block/unblock logins,
 
 ### Task 6: Validação final do backend
 
-**Files:** nenhum arquivo novo — só verificação.
+**Files:**
+- Modify: `backend/test/app.e2e-spec.ts`
 
-- [ ] **Passo 1: Suíte completa**
+**Ruling de pré-voo (registrado no ledger):** o guard global da Task 4 quebra `backend/test/app.e2e-spec.ts` — esse arquivo faz chamadas HTTP reais (`supertest`) contra `/clients`, `/receivables`, `/reports/financial-summary` etc. sem nenhum cabeçalho de autenticação, e passaria a receber `401` em tudo. Esse arquivo não roda automaticamente (precisa de um Postgres de teste dedicado, `npm run test:e2e`, fora do `npm test` normal — mesmo padrão já documentado no projeto), então nenhuma das tasks anteriores detectaria a quebra sozinha. Consertado aqui, explicitamente, em vez de deixado pra alguém descobrir depois.
+
+- [ ] **Passo 1: Autenticar `app.e2e-spec.ts`**
+
+No `beforeAll` já existente (depois de `await app.init()`), registrar uma empresa/admin de teste e guardar o token:
+```ts
+const registerRes = await request(app.getHttpServer())
+  .post('/auth/register')
+  .send({ companyName: 'E2E Test Co', email: 'e2e@test.com', password: 'senha-de-teste-12345' })
+  .expect(201);
+authHeader = `Bearer ${registerRes.body.accessToken}`;
+```
+(declarar `let authHeader: string;` junto de `let app: INestApplication;` no topo do `describe`).
+
+Cada chamada existente no arquivo (`request(server).get(...)`, `.post(...)`, `.patch(...)`, `request(app.getHttpServer())...`) precisa de `.set('Authorization', authHeader)` encadeado antes do `.expect(...)`/`.send(...)`. Ex., a chamada existente:
+```ts
+const beforeRes = await request(server).get('/reports/financial-summary').expect(200);
+```
+vira:
+```ts
+const beforeRes = await request(server).get('/reports/financial-summary').set('Authorization', authHeader).expect(200);
+```
+Aplicar o mesmo padrão em toda chamada do arquivo — é uma mudança mecânica, idêntica em cada ponto, sem lógica de teste nenhuma mudando.
+
+- [ ] **Passo 2: Confirmar que roda (se houver um Postgres de teste disponível localmente)**
+
+```bash
+cd backend
+npm run test:e2e
+```
+Se não houver `quickflow_test` disponível no ambiente, documentar isso no relatório da task em vez de pular o Passo 1 — a mudança no arquivo é necessária de qualquer forma, mesmo que a verificação de execução real fique pendente.
+
+- [ ] **Passo 3: Suíte completa**
 
 ```bash
 cd backend
@@ -1088,7 +1195,7 @@ npm run lint
 ```
 Esperado: tudo passa, incluindo os testes já existentes de RH/Financeiro (nada deveria ter quebrado, já que `CompanyContextService` manteve a mesma interface pública).
 
-- [ ] **Passo 2: Fumaça manual ponta-a-ponta via `curl`**
+- [ ] **Passo 4: Fumaça manual ponta-a-ponta via `curl`**
 
 Com o backend rodando (`npm run start:dev`):
 1. `POST /auth/register` com um e-mail/senha/companyName novos → confirma `201` com `accessToken` e um cookie `rt` na resposta.
@@ -1102,7 +1209,7 @@ Com o backend rodando (`npm run start:dev`):
 9. `POST /auth/refresh` normal (cookie válido, nunca usado) → sucesso, novo `accessToken` e novo cookie.
 10. Reusar o cookie **antigo** (de antes do passo 9) em `/auth/refresh` → confirma que falha E que uma tentativa de refresh com o cookie NOVO (emitido no passo 9) **também** passa a falhar (a família inteira foi revogada).
 
-- [ ] **Passo 3: Commit (se qualquer ajuste foi necessário durante a fumaça manual)**
+- [ ] **Passo 5: Commit**
 
 ---
 
@@ -1113,7 +1220,7 @@ Com o backend rodando (`npm run start:dev`):
 - Modify: `src/lib/api.ts`
 
 **Interfaces:**
-- Consumes: `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` (Task 3).
+- Consumes: `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` (Task 3).
 - Produces: `login(email, password): Promise<CurrentUser>`, `logout(): Promise<void>`, `getAccessToken(): string | null`, `getCurrentUser(): CurrentUser | null`, `restoreSession(): Promise<CurrentUser | null>`, tipo `CurrentUser = { id: string; email: string; role: 'admin' | 'employee'; modules: string[] }`.
 
 - [ ] **Passo 1: `src/lib/auth.ts`**
@@ -1169,25 +1276,29 @@ export async function logout(): Promise<void> {
 }
 
 // Chamado uma vez ao carregar o app (ex.: F5) — tenta renovar usando o
-// cookie httpOnly, que sobrevive a um reload mesmo sem o token em memória.
+// cookie httpOnly, que sobrevive a um reload mesmo sem o token em memória,
+// depois busca o perfil via GET /auth/me (POST /auth/refresh só devolve o
+// accessToken, não quem é o usuário).
 export async function restoreSession(): Promise<CurrentUser | null> {
-  const res = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' });
-  if (!res.ok) {
+  const refreshRes = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' });
+  if (!refreshRes.ok) {
     accessToken = null;
     currentUser = null;
     return null;
   }
-  const data = await res.json();
-  accessToken = data.accessToken;
-  // /auth/refresh não devolve o perfil completo — busca separado.
-  const meRes = await fetch(`${API_URL}/companies/me/users`, {
+  accessToken = (await refreshRes.json()).accessToken;
+
+  const meRes = await fetch(`${API_URL}/auth/me`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     credentials: 'include',
   });
-  // Nota pro implementador: se não existir uma forma simples de "quem sou
-  // eu" ainda, o jeito mais direto é decodificar os claims não-sensíveis do
-  // próprio accessToken (sub/role/modules já estão nele) em vez de uma
-  // chamada de rede extra — ver ressalva na Task 8.
+  if (!meRes.ok) {
+    accessToken = null;
+    currentUser = null;
+    return null;
+  }
+  const user = await meRes.json();
+  currentUser = { id: user.id, email: user.email, role: user.role.toLowerCase() as 'admin' | 'employee', modules: user.modules };
   return currentUser;
 }
 
