@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { AuthModule } from './auth/auth.module';
 import { CompanyModule } from './company/company.module';
 import { RolesModule } from './roles/roles.module';
 import { EmployeesModule } from './employees/employees.module';
@@ -22,7 +24,13 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     // (and anything else reading DATABASE_URL) is instantiated.
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    // Limite padrão de 5 requisições a cada 15 min. Não é registrado como
+    // APP_GUARD global — só o AuthController aplica ThrottlerGuard
+    // explicitamente (ver auth.controller.ts), pra não limitar rotas de
+    // RH/Financeiro sem necessidade.
+    ThrottlerModule.forRoot([{ ttl: 900_000, limit: 5 }]),
     PrismaModule,
+    AuthModule,
     CompanyModule,
     RolesModule,
     EmployeesModule,
