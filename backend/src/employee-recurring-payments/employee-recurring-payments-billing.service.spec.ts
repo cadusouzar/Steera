@@ -41,6 +41,46 @@ describe('EmployeeRecurringPaymentsBillingService', () => {
     });
   });
 
+  it.each([
+    ['fevereiro (28 dias)', '2026-02-28T12:00:00Z', 2026, 2],
+    ['fevereiro bissexto (29 dias)', '2028-02-29T12:00:00Z', 2028, 2],
+    ['abril (30 dias)', '2026-04-30T12:00:00Z', 2026, 4],
+  ])(
+    'treats the last day of %s as day 31, so a dueDay of 29-31 is still selected that month',
+    async (_label, systemTime, referenceYear, referenceMonth) => {
+      jest.useFakeTimers().setSystemTime(new Date(systemTime));
+      prisma.employeeRecurringPayment.findMany.mockResolvedValue([]);
+
+      await service.generateDueCharges();
+
+      expect(prisma.employeeRecurringPayment.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'ACTIVE',
+          dueDay: { lte: 31 },
+          employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true },
+          payments: { none: { referenceYear, referenceMonth } },
+        },
+      });
+    },
+  );
+
+  it('does NOT widen the dueDay filter before the last day of a short month', async () => {
+    // 27 de fevereiro: ainda não é o último dia, então dueDay 28-31 continua de fora.
+    jest.useFakeTimers().setSystemTime(new Date('2026-02-27T12:00:00Z'));
+    prisma.employeeRecurringPayment.findMany.mockResolvedValue([]);
+
+    await service.generateDueCharges();
+
+    expect(prisma.employeeRecurringPayment.findMany).toHaveBeenCalledWith({
+      where: {
+        status: 'ACTIVE',
+        dueDay: { lte: 27 },
+        employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true },
+        payments: { none: { referenceYear: 2026, referenceMonth: 2 } },
+      },
+    });
+  });
+
   it('generates a payment for a recurring payment with no charge this month', async () => {
     prisma.employeeRecurringPayment.findMany.mockResolvedValue([
       { id: 'rec-1', companyId: 'company-1', employeeId: 'employee-1', description: 'Salário', amount: 5000, dueDay: 5, status: 'ACTIVE' },

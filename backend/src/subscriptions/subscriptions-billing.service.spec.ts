@@ -41,6 +41,46 @@ describe('SubscriptionsBillingService', () => {
     });
   });
 
+  it.each([
+    ['fevereiro (28 dias)', '2026-02-28T12:00:00Z', 2026, 2],
+    ['fevereiro bissexto (29 dias)', '2028-02-29T12:00:00Z', 2028, 2],
+    ['abril (30 dias)', '2026-04-30T12:00:00Z', 2026, 4],
+  ])(
+    'treats the last day of %s as day 31, so a dueDay of 29-31 is still selected that month',
+    async (_label, systemTime, referenceYear, referenceMonth) => {
+      jest.useFakeTimers().setSystemTime(new Date(systemTime));
+      prisma.subscription.findMany.mockResolvedValue([]);
+
+      await service.generateDueCharges();
+
+      expect(prisma.subscription.findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'ACTIVE',
+          dueDay: { lte: 31 },
+          client: { status: { not: 'INACTIVE' } },
+          receivables: { none: { referenceYear, referenceMonth } },
+        },
+      });
+    },
+  );
+
+  it('does NOT widen the dueDay filter before the last day of a short month', async () => {
+    // 27 de fevereiro: ainda não é o último dia, então dueDay 28-31 continua de fora.
+    jest.useFakeTimers().setSystemTime(new Date('2026-02-27T12:00:00Z'));
+    prisma.subscription.findMany.mockResolvedValue([]);
+
+    await service.generateDueCharges();
+
+    expect(prisma.subscription.findMany).toHaveBeenCalledWith({
+      where: {
+        status: 'ACTIVE',
+        dueDay: { lte: 27 },
+        client: { status: { not: 'INACTIVE' } },
+        receivables: { none: { referenceYear: 2026, referenceMonth: 2 } },
+      },
+    });
+  });
+
   it('generates a charge for a subscription with no receivable this month', async () => {
     prisma.subscription.findMany.mockResolvedValue([
       { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
