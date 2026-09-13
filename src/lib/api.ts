@@ -786,6 +786,67 @@ export async function resumeLeaveSchedule(id: string): Promise<void> {
   await request(`/leave-schedules/${id}/resume`, { method: 'PATCH' });
 }
 
+// ---- System Users (Usuários e Acessos) ----
+interface ApiSystemUser {
+  id: string;
+  email: string;
+  role: 'ADMIN' | 'EMPLOYEE';
+  employeeId: string | null;
+  modules: string[];
+  status: 'ACTIVE' | 'BLOCKED';
+}
+
+export interface SystemUser {
+  id: string;
+  email: string;
+  role: 'admin' | 'employee';
+  employeeId: string | null;
+  modules: string[];
+  status: 'active' | 'blocked';
+}
+
+function mapSystemUser(u: ApiSystemUser): SystemUser {
+  return {
+    id: u.id,
+    email: u.email,
+    role: u.role.toLowerCase() as SystemUser['role'],
+    employeeId: u.employeeId ?? null,
+    modules: u.modules,
+    status: u.status.toLowerCase() as SystemUser['status'],
+  };
+}
+
+export async function listSystemUsers(): Promise<SystemUser[]> {
+  const items = await request<ApiSystemUser[]>(`/companies/me/users`);
+  return items.map(mapSystemUser);
+}
+
+export async function createSystemUser(dto: {
+  email: string;
+  role: 'admin' | 'employee';
+  employeeId?: string;
+  modules: string[];
+}): Promise<{ user: SystemUser; temporaryPassword: string }> {
+  const res = await request<{ user: ApiSystemUser; temporaryPassword: string }>('/companies/me/users', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: dto.email,
+      role: dto.role.toUpperCase(),
+      employeeId: dto.role === 'employee' ? dto.employeeId : undefined,
+      modules: dto.modules,
+    }),
+  });
+  return { user: mapSystemUser(res.user), temporaryPassword: res.temporaryPassword };
+}
+
+export async function blockSystemUser(id: string): Promise<void> {
+  await request(`/companies/me/users/${id}/block`, { method: 'PATCH' });
+}
+
+export async function unblockSystemUser(id: string): Promise<void> {
+  await request(`/companies/me/users/${id}/unblock`, { method: 'PATCH' });
+}
+
 // ---- Reports ----
 export async function getFinancialSummary(): Promise<FinancialSummary> {
   const res = await request<ApiFinancialSummary>(`/reports/financial-summary`);

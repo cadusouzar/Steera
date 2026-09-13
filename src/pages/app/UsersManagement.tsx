@@ -1,64 +1,91 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Search, X, Edit, Trash2, UserPlus, Key, FileQuestion, LayoutDashboard, HeartHandshake, Users, TrendingUp, Package, BarChart3 } from 'lucide-react';
+import {
+  Shield, Search, X, UserPlus, FileQuestion, LayoutDashboard, HeartHandshake, Users,
+  TrendingUp, Package, BarChart3, Loader2, KeyRound, Copy, Check, ShieldOff, ShieldCheck,
+} from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
+import { getCurrentUser } from '../../lib/auth';
+import * as api from '../../lib/api';
+import type { SystemUser, EmployeeListItem } from '../../lib/api';
 
-interface SystemUser {
-  id: string;
-  name: string;
+const ROLE_OPTIONS = [
+  { value: 'admin', label: 'Administrador' },
+  { value: 'employee', label: 'Funcionário' },
+];
+
+// Ids em maiúsculo pra bater 1:1 com o enum `AppModule` do backend
+// (backend/prisma/schema.prisma) — módulos valem igualmente pra login
+// ADMIN e EMPLOYEE, então o mesmo conjunto de checkboxes aparece nos dois casos.
+const AVAILABLE_MODULES = [
+  { id: 'DASHBOARD', label: 'Visão Geral', icon: <LayoutDashboard size={16}/> },
+  { id: 'CLIENTES', label: 'Clientes', icon: <HeartHandshake size={16}/> },
+  { id: 'RH', label: 'Recursos Humanos', icon: <Users size={16}/> },
+  { id: 'COMERCIAL', label: 'Comercial', icon: <TrendingUp size={16}/> },
+  { id: 'OPERACOES', label: 'Operações', icon: <Package size={16}/> },
+  { id: 'FINANCAS', label: 'Finanças', icon: <BarChart3 size={16}/> },
+];
+
+const moduleLabel = (id: string) => AVAILABLE_MODULES.find(m => m.id === id)?.label ?? id;
+
+interface UserFormState {
   email: string;
-  role: string;
+  role: 'admin' | 'employee';
+  employeeId: string;
   modules: string[];
-  status: 'active' | 'blocked';
-  lastLogin: string;
 }
 
-const mockUsers: SystemUser[] = [
-  { id: '1', name: 'Carlos Eduardo', email: 'carlos@exemplo.com', role: 'Administrador', modules: ['dashboard', 'clientes', 'rh', 'comercial', 'operacoes', 'financas'], status: 'active', lastLogin: 'Hoje, 10:45' },
-  { id: '2', name: 'Mariana Silva', email: 'mariana@exemplo.com', role: 'Gerente de Vendas', modules: ['dashboard', 'clientes', 'comercial'], status: 'active', lastLogin: 'Ontem, 16:30' },
-  { id: '3', name: 'João Souza', email: 'joao@exemplo.com', role: 'Analista de RH', modules: ['dashboard', 'rh'], status: 'active', lastLogin: '12/08/2023' },
-  { id: '4', name: 'Fernanda Costa', email: 'fernanda@exemplo.com', role: 'Estoque', modules: ['dashboard', 'operacoes'], status: 'blocked', lastLogin: 'Nunca' },
-];
-
-const AVAILABLE_ROLES = [
-  { value: 'Administrador', label: 'Administrador' },
-  { value: 'Gerente de Vendas', label: 'Gerente de Vendas' },
-  { value: 'Analista de RH', label: 'Analista de RH' },
-  { value: 'Desenvolvedor Front-end', label: 'Desenvolvedor Front-end' },
-  { value: 'Estoque', label: 'Estoque' },
-  { value: 'Visualizador', label: 'Visualizador' }
-];
-
-const AVAILABLE_MODULES = [
-  { id: 'dashboard', label: 'Visão Geral', icon: <LayoutDashboard size={16}/> },
-  { id: 'clientes', label: 'Clientes', icon: <HeartHandshake size={16}/> },
-  { id: 'rh', label: 'Recursos Humanos', icon: <Users size={16}/> },
-  { id: 'comercial', label: 'Comercial', icon: <TrendingUp size={16}/> },
-  { id: 'operacoes', label: 'Operações', icon: <Package size={16}/> },
-  { id: 'financas', label: 'Finanças', icon: <BarChart3 size={16}/> },
-];
+const emptyForm: UserFormState = { email: '', role: 'admin', employeeId: '', modules: ['DASHBOARD'] };
 
 const UsersManagement = () => {
-  const [users, setUsers] = useState<SystemUser[]>(mockUsers);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // For Editing/Deleting
-  const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState<string | null>(null);
+  const isAdmin = getCurrentUser()?.role === 'admin';
 
-  // New User Form State
-  const [formData, setFormData] = useState({ name: '', email: '', role: 'Visualizador', password: '', modules: ['dashboard'] as string[] });
+  const [users, setUsers] = useState<SystemUser[]>([]);
+  const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formData, setFormData] = useState<UserFormState>(emptyForm);
+
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+
+  // Senha temporária devolvida pela criação — só existe nessa única resposta,
+  // nunca mais recuperável depois. Fica num banner que só some com ação
+  // explícita do admin (nunca no backdrop/Escape), pra garantir que ele
+  // realmente copiou/anotou antes de perder o valor.
+  const [createdCredential, setCreatedCredential] = useState<{ email: string; temporaryPassword: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [systemUsers, employeeItems] = await Promise.all([api.listSystemUsers(), api.listEmployees()]);
+      setUsers(systemUsers);
+      setEmployees(employeeItems);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os usuários.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   useEscapeKey(() => {
     if (isModalOpen) setIsModalOpen(false);
-    if (editingUser) setEditingUser(null);
   });
 
   useEffect(() => {
-    if (isModalOpen || editingUser) {
+    if (isModalOpen || createdCredential) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -66,62 +93,40 @@ const UsersManagement = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isModalOpen, editingUser]);
+  }, [isModalOpen, createdCredential]);
+
+  const employeeById = useMemo(() => {
+    const map = new Map<string, EmployeeListItem>();
+    employees.forEach(e => map.set(e.id, e));
+    return map;
+  }, [employees]);
+
+  // Funcionários que ainda não têm login vinculado — cruza a lista de
+  // funcionários com os employeeId já presentes em `users`. Filtro
+  // proativo de UX: o backend já rejeita com 400 criar um segundo login
+  // pro mesmo funcionário, isso só evita a pessoa escolher e bater no erro.
+  const linkedEmployeeIds = useMemo(
+    () => new Set(users.filter(u => u.employeeId).map(u => u.employeeId as string)),
+    [users],
+  );
+  const availableEmployees = useMemo(
+    () => employees.filter(e => !linkedEmployeeIds.has(e.id)),
+    [employees, linkedEmployeeIds],
+  );
 
   const filteredUsers = useMemo(() => {
     const lowerQuery = searchQuery.toLowerCase().trim();
     if (!lowerQuery) return users;
-    return users.filter(
-      u => u.name.toLowerCase().includes(lowerQuery) || u.email.toLowerCase().includes(lowerQuery) || u.role.toLowerCase().includes(lowerQuery)
-    );
-  }, [users, searchQuery]);
-
-  const handleSaveUser = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingUser) {
-      // Update
-      setUsers(users.map(u => u.id === editingUser.id ? { ...u, ...formData } : u));
-      setEditingUser(null);
-    } else {
-      // Create
-      const newUser: SystemUser = {
-        id: crypto.randomUUID(),
-        name: formData.name,
-        email: formData.email,
-        role: formData.role,
-        modules: formData.modules,
-        status: 'active',
-        lastLogin: 'Nunca'
-      };
-      setUsers([...users, newUser]);
-      setIsModalOpen(false);
-    }
-    setFormData({ name: '', email: '', role: 'Visualizador', password: '', modules: ['dashboard'] });
-  };
-
-  const openNewModal = () => {
-    setFormData({ name: '', email: '', role: 'Visualizador', password: '', modules: ['dashboard'] });
-    setIsModalOpen(true);
-  };
-
-  const openEditModal = (user: SystemUser) => {
-    setFormData({ name: user.name, email: user.email, role: user.role, password: '', modules: user.modules || ['dashboard'] });
-    setEditingUser(user);
-  };
-
-  const handleDelete = (id: string) => {
-    setUsers(users.filter(u => u.id !== id));
-    setIsConfirmingDelete(null);
-  };
-
-  const toggleStatus = (id: string) => {
-    setUsers(users.map(u => {
-      if (u.id === id) {
-        return { ...u, status: u.status === 'active' ? 'blocked' : 'active' };
-      }
-      return u;
-    }));
-  };
+    return users.filter(u => {
+      const employeeName = u.employeeId ? employeeById.get(u.employeeId)?.fullName ?? '' : '';
+      const roleLabel = u.role === 'admin' ? 'administrador' : 'funcionário';
+      return (
+        u.email.toLowerCase().includes(lowerQuery) ||
+        employeeName.toLowerCase().includes(lowerQuery) ||
+        roleLabel.includes(lowerQuery)
+      );
+    });
+  }, [users, searchQuery, employeeById]);
 
   const toggleModule = (moduleId: string) => {
     setFormData(prev => {
@@ -133,7 +138,83 @@ const UsersManagement = () => {
     });
   };
 
-  const isFormValid = formData.name.trim() && formData.email.trim() && (editingUser || formData.password.trim());
+  const openNewModal = () => {
+    setFormData(emptyForm);
+    setActionError(null);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setActionError(null);
+  };
+
+  const isFormValid =
+    formData.email.trim() !== '' &&
+    (formData.role === 'admin' || formData.employeeId !== '');
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSaving || !isFormValid) return;
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      // Sempre chama o endpoint real e deixa o backend ser a autoridade —
+      // o limite de logins do plano e a checagem de funcionário já vinculado
+      // são validados lá (com dados em tempo real, sem depender de uma
+      // contagem cacheada no cliente que outro admin pode ter invalidado).
+      const result = await api.createSystemUser({
+        email: formData.email.trim(),
+        role: formData.role,
+        employeeId: formData.role === 'employee' ? formData.employeeId : undefined,
+        modules: formData.modules,
+      });
+      setUsers(prev => [...prev, result.user]);
+      setCreatedCredential({ email: result.user.email, temporaryPassword: result.temporaryPassword });
+      setIsModalOpen(false);
+      setFormData(emptyForm);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível criar o acesso.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleStatus = async (user: SystemUser) => {
+    if (pendingUserId) return;
+    setPendingUserId(user.id);
+    setActionError(null);
+    try {
+      if (user.status === 'active') {
+        await api.blockSystemUser(user.id);
+      } else {
+        await api.unblockSystemUser(user.id);
+      }
+      setUsers(prev => prev.map(u => u.id === user.id
+        ? { ...u, status: u.status === 'active' ? 'blocked' : 'active' }
+        : u));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar o status deste usuário.');
+    } finally {
+      setPendingUserId(null);
+    }
+  };
+
+  const closeCredentialBanner = () => {
+    setCreatedCredential(null);
+    setCopied(false);
+  };
+
+  const handleCopyPassword = async () => {
+    if (!createdCredential) return;
+    try {
+      await navigator.clipboard.writeText(createdCredential.temporaryPassword);
+      setCopied(true);
+    } catch {
+      // Sem acesso à área de transferência (navegador/permite) — o admin
+      // ainda pode selecionar e copiar manualmente o texto exibido.
+    }
+  };
 
   return (
     <div className="p-6 md:p-8 relative">
@@ -153,18 +234,20 @@ const UsersManagement = () => {
               <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Usuários e Acessos</h1>
             </div>
             <p className="text-muted mt-1 max-w-lg">
-              Gerencie quem tem acesso ao sistema, crie novas contas e defina os cargos para restringir a visualização de módulos.
+              Gerencie quem tem acesso ao sistema, crie novos logins e defina os módulos que cada um pode visualizar.
             </p>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={openNewModal}
-            className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
-          >
-            <UserPlus size={18} />
-            Novo Acesso
-          </motion.button>
+          {isAdmin && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={openNewModal}
+              className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
+            >
+              <UserPlus size={18} />
+              Novo Acesso
+            </motion.button>
+          )}
         </div>
 
         {/* Action Bar (Search) */}
@@ -175,7 +258,7 @@ const UsersManagement = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar usuários por nome, email ou cargo..."
+              placeholder="Buscar usuários por email, funcionário ou tipo de acesso..."
               className="w-full bg-transparent border-none px-4 py-3 text-base text-foreground placeholder:text-muted focus:outline-none focus:ring-0"
             />
             {searchQuery && (
@@ -189,119 +272,143 @@ const UsersManagement = () => {
           </div>
         </div>
 
+        {loadError && (
+          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm">
+            {loadError}
+          </div>
+        )}
+
+        {!isModalOpen && actionError && (
+          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm flex items-start justify-between gap-4">
+            <span>{actionError}</span>
+            <button
+              onClick={() => setActionError(null)}
+              className="p-1.5 rounded-full hover:bg-red-500/10 text-red-600 dark:text-red-400 transition-colors shrink-0"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         {/* Data Grid or Empty State */}
         <div className="glass-panel rounded-3xl border border-border/60 overflow-hidden shadow-sm">
-          {filteredUsers.length > 0 ? (
+          {isLoading ? (
+            <div className="py-24 flex items-center justify-center text-muted">
+              <Loader2 className="animate-spin" size={28} />
+            </div>
+          ) : filteredUsers.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left border-collapse min-w-[900px]">
                 <thead>
                   <tr className="border-b-2 border-border/60 bg-secondary/10">
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Usuário
+                      Login
                     </th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Cargo / Acesso
+                      Vínculo
+                    </th>
+                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
+                      Módulos
                     </th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Último Login
-                    </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">
-                      Ações
-                    </th>
+                    {isAdmin && (
+                      <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">
+                        Ações
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
                   <AnimatePresence>
-                    {filteredUsers.map((user, index) => (
-                      <motion.tr
-                        key={user.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.2, delay: index * 0.03 }}
-                        className="hover:bg-secondary/40 transition-colors group"
-                      >
-                        <td className="px-8 py-5">
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background shadow-sm flex items-center justify-center text-white font-bold text-sm shrink-0">
-                              {user.name.charAt(0)}
+                    {filteredUsers.map((user, index) => {
+                      const linkedEmployee = user.employeeId ? employeeById.get(user.employeeId) : undefined;
+                      return (
+                        <motion.tr
+                          key={user.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ duration: 0.2, delay: index * 0.03 }}
+                          className="hover:bg-secondary/40 transition-colors group"
+                        >
+                          <td className="px-8 py-5">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background shadow-sm flex items-center justify-center text-white font-bold text-sm shrink-0">
+                                {user.email.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="text-base font-heading font-bold text-foreground">
+                                  {user.email}
+                                </p>
+                                <p className="text-sm text-muted">
+                                  {user.role === 'admin' ? 'Administrador' : 'Funcionário'}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-base font-heading font-bold text-foreground">
-                                {user.name}
-                              </p>
-                              <p className="text-sm text-muted">
-                                {user.email}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-8 py-5">
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-accent/10 text-accent border border-accent/20">
-                            {user.role}
-                          </span>
-                        </td>
-                        <td className="px-8 py-5">
-                          {user.status === 'active' ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
-                              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                              Ativo
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
-                              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                              Bloqueado
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-8 py-5 text-sm font-medium text-foreground/80">
-                          {user.lastLogin}
-                        </td>
-                        <td className="px-8 py-5 text-right w-48">
-                          <div className="flex items-center justify-end gap-2">
-                            <button 
-                              onClick={() => toggleStatus(user.id)}
-                              className="p-2 text-muted hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors"
-                              title={user.status === 'active' ? 'Bloquear Acesso' : 'Desbloquear Acesso'}
-                            >
-                              <Shield size={16} />
-                            </button>
-                            <button 
-                              onClick={() => openEditModal(user)}
-                              className="p-2 text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                              title="Editar Usuário"
-                            >
-                              <Edit size={16} />
-                            </button>
-                            
-                            <div className="relative flex items-center justify-end min-w-[32px] min-h-[32px]">
-                              {isConfirmingDelete === user.id ? (
-                                <motion.button 
-                                  initial={{ opacity: 0, scale: 0.9 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  onClick={() => handleDelete(user.id)}
-                                  onMouseLeave={() => setIsConfirmingDelete(null)}
-                                  className="absolute right-0 px-3 py-1.5 bg-red-500 text-white text-xs font-bold rounded-lg shadow-sm whitespace-nowrap z-10"
+                          </td>
+                          <td className="px-8 py-5 text-sm font-medium text-foreground/80">
+                            {user.role === 'employee'
+                              ? (linkedEmployee ? linkedEmployee.fullName : '(funcionário não encontrado)')
+                              : 'Login administrativo'}
+                          </td>
+                          <td className="px-8 py-5">
+                            {user.modules.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5 max-w-xs">
+                                {user.modules.map(m => (
+                                  <span
+                                    key={m}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-accent/10 text-accent border border-accent/20"
+                                  >
+                                    {moduleLabel(m)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted">Nenhum módulo</span>
+                            )}
+                          </td>
+                          <td className="px-8 py-5">
+                            {user.status === 'active' ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                Ativo
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                Bloqueado
+                              </span>
+                            )}
+                          </td>
+                          {isAdmin && (
+                            <td className="px-8 py-5 text-right w-40">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleToggleStatus(user)}
+                                  disabled={pendingUserId === user.id}
+                                  className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
+                                    user.status === 'active'
+                                      ? 'text-muted hover:text-orange-500 hover:bg-orange-500/10'
+                                      : 'text-muted hover:text-green-600 hover:bg-green-500/10'
+                                  }`}
+                                  title={user.status === 'active' ? 'Bloquear Acesso' : 'Desbloquear Acesso'}
                                 >
-                                  Excluir?
-                                </motion.button>
-                              ) : (
-                                <button 
-                                  onClick={() => setIsConfirmingDelete(user.id)}
-                                  className="p-2 text-muted hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors absolute right-0"
-                                  title="Excluir Usuário"
-                                >
-                                  <Trash2 size={16} />
+                                  {pendingUserId === user.id ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                  ) : user.status === 'active' ? (
+                                    <ShieldOff size={16} />
+                                  ) : (
+                                    <ShieldCheck size={16} />
+                                  )}
                                 </button>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                      </motion.tr>
-                    ))}
+                              </div>
+                            </td>
+                          )}
+                        </motion.tr>
+                      );
+                    })}
                   </AnimatePresence>
                 </tbody>
               </table>
@@ -325,14 +432,14 @@ const UsersManagement = () => {
         </div>
       </motion.div>
 
-      {/* Modal de Criação / Edição */}
-      {(isModalOpen || editingUser) && createPortal(
+      {/* Modal de Criação */}
+      {isModalOpen && createPortal(
         <AnimatePresence>
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => { setIsModalOpen(false); setEditingUser(null); }}
+            onClick={closeModal}
             className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
           />
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
@@ -341,40 +448,31 @@ const UsersManagement = () => {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl pointer-events-auto relative overflow-hidden"
+              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
               <div className="flex items-center justify-between mb-6 mt-2">
                 <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-                  {editingUser ? <Edit size={24} className="text-primary"/> : <UserPlus size={24} className="text-primary"/>}
-                  {editingUser ? 'Editar Usuário' : 'Novo Acesso'}
+                  <UserPlus size={24} className="text-primary"/>
+                  Novo Acesso
                 </h2>
                 <button
-                  onClick={() => { setIsModalOpen(false); setEditingUser(null); }}
+                  onClick={closeModal}
                   className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors"
                 >
                   <X size={20} />
                 </button>
               </div>
-              
-              <form onSubmit={handleSaveUser} className="space-y-6">
-                
+
+              {actionError && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
+                  {actionError}
+                </div>
+              )}
+
+              <form onSubmit={handleCreateUser} className="space-y-6">
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      Nome Completo <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      autoFocus
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
-                      placeholder="Ex: João Silva"
-                    />
-                  </div>
-                  
                   <div>
                     <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
                       E-mail (Login) <span className="text-red-500">*</span>
@@ -382,6 +480,7 @@ const UsersManagement = () => {
                     <input
                       type="email"
                       required
+                      autoFocus
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
@@ -391,33 +490,34 @@ const UsersManagement = () => {
 
                   <div>
                     <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      Cargo / Nível de Acesso <span className="text-red-500">*</span>
+                      Tipo de Acesso <span className="text-red-500">*</span>
                     </label>
                     <CustomSelect
                       value={formData.role}
-                      onChange={(val) => setFormData({ ...formData, role: val })}
-                      options={AVAILABLE_ROLES}
+                      onChange={(val) => setFormData({ ...formData, role: val as UserFormState['role'], employeeId: '' })}
+                      options={ROLE_OPTIONS}
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      {editingUser ? 'Nova Senha (opcional)' : 'Senha Temporária'} {!editingUser && <span className="text-red-500">*</span>}
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted">
-                        <Key size={16} />
-                      </div>
-                      <input
-                        type="password"
-                        required={!editingUser}
-                        value={formData.password}
-                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        className="w-full bg-background border border-border/80 rounded-xl pl-10 pr-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
-                        placeholder="••••••••"
-                      />
+                  {formData.role === 'employee' && (
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
+                        Funcionário <span className="text-red-500">*</span>
+                      </label>
+                      {availableEmployees.length > 0 ? (
+                        <CustomSelect
+                          value={formData.employeeId}
+                          onChange={(val) => setFormData({ ...formData, employeeId: val })}
+                          options={availableEmployees.map(e => ({ value: e.id, label: `${e.fullName} — ${e.department}` }))}
+                          placeholder="Selecione um funcionário sem login..."
+                        />
+                      ) : (
+                        <p className="text-sm text-muted bg-secondary/30 border border-border/40 rounded-xl px-4 py-3">
+                          Todos os funcionários já possuem um login. Cadastre um novo funcionário primeiro.
+                        </p>
+                      )}
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 <div className="pt-2 border-t border-border/40 mt-4">
@@ -428,7 +528,7 @@ const UsersManagement = () => {
                   <p className="text-xs text-muted mb-4">
                     Selecione quais áreas do sistema este usuário poderá visualizar e editar.
                   </p>
-                  
+
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
                     {AVAILABLE_MODULES.map(mod => {
                       const isSelected = formData.modules.includes(mod.id);
@@ -439,8 +539,8 @@ const UsersManagement = () => {
                           key={mod.id}
                           onClick={() => toggleModule(mod.id)}
                           className={`relative flex flex-col items-start p-4 rounded-xl border transition-all duration-200 h-full overflow-hidden w-full ${
-                            isSelected 
-                              ? 'border-primary bg-primary/5 shadow-sm' 
+                            isSelected
+                              ? 'border-primary bg-primary/5 shadow-sm'
                               : 'border-border/60 bg-background hover:border-border hover:bg-secondary/30'
                           }`}
                         >
@@ -450,7 +550,7 @@ const UsersManagement = () => {
                             }`}>
                               {mod.icon}
                             </div>
-                            
+
                             {/* Check Circle */}
                             <div className={`shrink-0 w-5 h-5 mt-1 rounded-full border-2 flex items-center justify-center transition-all ${
                               isSelected ? 'border-primary bg-primary text-white' : 'border-border/80 bg-transparent'
@@ -473,10 +573,15 @@ const UsersManagement = () => {
                   </div>
                 </div>
 
+                <p className="text-xs text-muted bg-secondary/20 border border-border/40 rounded-xl px-4 py-3 flex items-center gap-2">
+                  <KeyRound size={14} className="shrink-0" />
+                  Uma senha temporária será gerada automaticamente e exibida uma única vez após a criação.
+                </p>
+
                 <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
                   <button
                     type="button"
-                    onClick={() => { setIsModalOpen(false); setEditingUser(null); }}
+                    onClick={closeModal}
                     className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
                   >
                     Cancelar
@@ -485,13 +590,82 @@ const UsersManagement = () => {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     type="submit"
-                    disabled={!isFormValid}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                    disabled={!isFormValid || isSaving}
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
-                    {editingUser ? 'Salvar Alterações' : 'Criar Conta'}
+                    {isSaving && <Loader2 size={16} className="animate-spin" />}
+                    {isSaving ? 'Criando...' : 'Criar Acesso'}
                   </motion.button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* Banner: senha temporária (uma única exibição, fecha só por ação explícita) */}
+      {createdCredential && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-sm"
+          />
+          <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-background border border-primary/30 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
+              <div className="flex items-center gap-3 mb-4 mt-2">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <KeyRound size={20} />
+                </div>
+                <h2 className="text-xl font-heading font-bold text-foreground">
+                  Acesso criado com sucesso
+                </h2>
+              </div>
+
+              <p className="text-sm text-muted mb-4">
+                Copie a senha temporária abaixo agora — ela não pode ser recuperada depois de fechar esta janela.
+                O usuário deve trocá-la no primeiro acesso.
+              </p>
+
+              <div className="bg-secondary/20 border border-border/40 rounded-xl p-4 mb-4">
+                <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Login</p>
+                <p className="text-sm font-medium text-foreground mb-3 break-all">{createdCredential.email}</p>
+                <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Senha Temporária</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-base font-bold text-foreground bg-background border border-border/60 rounded-lg px-3 py-2 break-all">
+                    {createdCredential.temporaryPassword}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={handleCopyPassword}
+                    className={`shrink-0 p-2.5 rounded-lg border transition-colors ${
+                      copied
+                        ? 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400'
+                        : 'border-border/60 text-muted hover:text-primary hover:border-primary/40'
+                    }`}
+                    title="Copiar senha"
+                  >
+                    {copied ? <Check size={16} /> : <Copy size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeCredentialBanner}
+                className="w-full py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm"
+              >
+                Já copiei, fechar
+              </button>
             </motion.div>
           </div>
         </AnimatePresence>,

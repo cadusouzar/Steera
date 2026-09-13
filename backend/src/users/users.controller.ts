@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -22,14 +22,21 @@ export class UsersController {
     return this.users.create(user.companyId, dto);
   }
 
+  // block()/unblock() no service não retornam corpo (ao contrário do resto do
+  // codebase, que sempre devolve o recurso atualizado) — sem @HttpCode(204),
+  // o Nest manda 200 com corpo vazio, e `res.json()` no frontend (src/lib/api.ts)
+  // quebra com "Unexpected end of JSON input" (descoberto durante verificação
+  // manual da Task 11). 204 é a resposta correta pra uma ação sem corpo.
   @Roles('ADMIN')
   @Patch(':id/block')
+  @HttpCode(204)
   block(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.users.block(user.companyId, id);
   }
 
   @Roles('ADMIN')
   @Patch(':id/unblock')
+  @HttpCode(204)
   unblock(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.users.unblock(user.companyId, id);
   }
