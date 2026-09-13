@@ -156,6 +156,20 @@ por LGPD — completo só em `GET /employees/:id`), Advertências (sempre aninha
   `AuthService.changePassword()` limpa a flag. `GET /auth/me` e o `user` devolvido por
   `login()`/`register()` incluem o campo; `RequireAuth.tsx` mostra
   `src/components/ForcedPasswordChange.tsx` no lugar do app inteiro enquanto ele for `true`.
+  **Validação de boot de `JWT_ACCESS_SECRET` (fix pós-revisão final, 13/09/2026):**
+  `backend/.env.example` sempre trouxe `JWT_ACCESS_SECRET=troque-por-um-valor-aleatorio-longo-em-producao`
+  como valor literal, e nem `AuthService.signAccessToken` nem `JwtStrategy` validavam esse valor —
+  se o placeholder chegasse a rodar em qualquer ambiente real (ex.: `cp .env.example .env` sem
+  trocar essa linha), o backend subia normalmente com um segredo de assinatura HMAC-SHA256 público
+  (está no repositório), permitindo forjar um JWT válido de `role: 'ADMIN'` de qualquer empresa —
+  derrubando por completo o isolamento multi-tenant. Isso **agora tem checagem ativa**, não só
+  documentação da lacuna: `validateJwtSecret()` (`backend/src/common/jwt-secret.util.ts`) roda no
+  início de `bootstrap()` (`backend/src/main.ts`), antes de `app.listen()`, e lança (impedindo o
+  boot) se `JWT_ACCESS_SECRET` estiver ausente/vazio, tiver menos de 32 caracteres, ou for igual a
+  (ou começar com `troque-por-`) o placeholder — com mensagem explicando o que corrigir e como
+  gerar um valor real (`openssl rand -hex 32`). Testado com unit tests
+  (`backend/src/common/jwt-secret.util.spec.ts`) e verificação manual (placeholder → boot falha com
+  a mensagem; segredo real → boot normal).
   Ver `[[DECISOES-TECNICAS]]`, seção "Autenticação real (auth-multitenant, Task 12, 13/09/2026)" e a
   seção de fixes pós-revisão final logo depois dela, para o detalhe completo (incluindo o histórico
   do stub de empresa única que essa implementação substituiu, antes descrito na seção 8).
