@@ -125,8 +125,9 @@ por LGPD — completo só em `GET /employees/:id`), Advertências (sempre aninha
   spec desta etapa (o objetivo era ter autenticação/multi-tenant reais primeiro), não um
   esquecimento — mas precisa ser endereçada antes de expor o registro publicamente em produção.
   Também fora do escopo, deliberadamente: recuperação de senha por e-mail e MFA. Ver
-  `[[DECISOES-TECNICAS]]` seção 10 para o detalhe completo (incluindo o histórico do stub de
-  empresa única que essa implementação substituiu, antes descrito na seção 8).
+  `[[DECISOES-TECNICAS]]`, seção "Autenticação real (auth-multitenant, Task 12, 13/09/2026)", para
+  o detalhe completo (incluindo o histórico do stub de empresa única que essa implementação
+  substituiu, antes descrito na seção 8).
 - **Férias — sem cálculo de saldo, com teto flat de 30 dias (decisão revertida em 11/09/2026):** o
   projeto não tem, e nunca teve no escopo pretendido, o conceito de "saldo de férias". A calculadora
   de saldo/dias/adicional de 1/3 (`VacationCalculationService`, que existiu por um curto período)
