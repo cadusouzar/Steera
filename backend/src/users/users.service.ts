@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPassword } from '../auth/password.util';
 import { generateRefreshTokenValue } from '../auth/refresh-token.util';
@@ -56,7 +56,11 @@ export class UsersService {
 
   async block(companyId: string, userId: string) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
-    if (!user) throw new BadRequestException(`Login ${userId} não encontrado nesta empresa`);
+    // NotFoundException (404), not BadRequestException — consistente com o
+    // padrão já usado em RolesService/ReceivablesService para "registro não
+    // encontrado nesta empresa" (nunca vaza pra um admin de outra empresa se
+    // o id existe em outro tenant).
+    if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     await this.prisma.$transaction([
       this.prisma.user.update({ where: { id: userId }, data: { status: 'BLOCKED' } }),
       this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
@@ -65,7 +69,7 @@ export class UsersService {
 
   async unblock(companyId: string, userId: string) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
-    if (!user) throw new BadRequestException(`Login ${userId} não encontrado nesta empresa`);
+    if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } });
   }
 

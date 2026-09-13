@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
@@ -77,6 +77,11 @@ describe('UsersService', () => {
 
   it('block 404s for a user from another company', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
-    await expect(service.block('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.block('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('unblock 404s for a user from another company', async () => {
+    prisma.user.findFirst.mockResolvedValue(null);
+    await expect(service.unblock('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
   });
 });
