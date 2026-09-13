@@ -6,6 +6,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
+import { AllowDuringForcedPasswordChange } from './decorators/allow-during-forced-password-change.decorator';
 import { Public } from './decorators/public.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { loginEmailTracker } from './login-throttle.util';
@@ -89,6 +90,11 @@ export class AuthController {
   // Busca o perfil completo (com email, que o JWT não carrega) — o frontend
   // usa isso pra saber quem está logado depois de uma renovação silenciosa
   // (F5), já que POST /auth/refresh só devolve o accessToken, não o perfil.
+  // @AllowDuringForcedPasswordChange(): sem isso, um login com
+  // mustChangePassword: true nunca conseguiria nem descobrir essa flag via
+  // GET /auth/me (JwtAuthGuard bloquearia a própria rota que existe pra
+  // informar isso ao frontend).
+  @AllowDuringForcedPasswordChange()
   @UseGuards(JwtAuthGuard)
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
@@ -101,6 +107,11 @@ export class AuthController {
   // permitiria brute-force ilimitado contra a senha atual de verdade sem
   // isso. Limite generoso o bastante pra nunca travar um usuário legítimo
   // reeditando um typo algumas vezes.
+  // @AllowDuringForcedPasswordChange(): esta é exatamente a rota que um
+  // login com mustChangePassword: true precisa conseguir chamar pra sair
+  // desse estado — bloqueá-la junto do resto das rotas de negócio deixaria o
+  // usuário travado sem saída (ver JwtAuthGuard).
+  @AllowDuringForcedPasswordChange()
   @UseGuards(JwtAuthGuard, ThrottlerGuard)
   @SkipThrottle({ 'login-email': true })
   @Throttle({ default: { limit: 10, ttl: 900_000 } })

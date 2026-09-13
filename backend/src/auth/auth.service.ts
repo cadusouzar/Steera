@@ -17,9 +17,21 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  private signAccessToken(user: { id: string; companyId: string; role: string; modules: string[] }) {
+  private signAccessToken(user: {
+    id: string;
+    companyId: string;
+    role: string;
+    modules: string[];
+    mustChangePassword: boolean;
+  }) {
     return this.jwt.sign(
-      { sub: user.id, companyId: user.companyId, role: user.role, modules: user.modules },
+      {
+        sub: user.id,
+        companyId: user.companyId,
+        role: user.role,
+        modules: user.modules,
+        mustChangePassword: user.mustChangePassword,
+      },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m', algorithm: 'HS256' },
     );
   }
@@ -148,6 +160,16 @@ export class AuthService {
       this.prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false } }),
       this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
     ]);
+    // JwtAuthGuard agora bloqueia qualquer rota de negócio enquanto o access
+    // token carregar mustChangePassword: true (ver esse guard) — o token
+    // emitido no login/refresh anterior a esta troca ainda carrega esse
+    // claim e só perderia isso naturalmente em até 15min (expiração) ou num
+    // próximo /auth/refresh. Sem emitir um token novo aqui, a UX já validada
+    // de "acesso imediato ao app logo após a troca forçada, sem precisar
+    // logar de novo" quebraria. `user` já foi buscado (com companyId/role/
+    // modules) antes da troca — só o valor de mustChangePassword muda.
+    const accessToken = this.signAccessToken({ ...user, mustChangePassword: false });
+    return { accessToken };
   }
 
   // Usado por GET /auth/me — devolve o MESMO formato de `user` que

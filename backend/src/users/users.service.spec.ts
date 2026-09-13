@@ -69,15 +69,28 @@ describe('UsersService', () => {
       .rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('creates an EMPLOYEE login under the plan limit and returns a one-time temporary password', async () => {
+  it('creates an EMPLOYEE login under the plan limit and returns the fixed temporary password', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.company.findUniqueOrThrow.mockResolvedValue({ maxEmployeeLogins: 10 });
     prisma.user.count.mockResolvedValue(9);
     prisma.user.create.mockResolvedValue({ id: 'u1', email: 'a@a.com', role: 'EMPLOYEE' });
     const result = await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', modules: ['RH'] } as any);
-    expect(result.temporaryPassword).toHaveLength(16);
+    // Decisão de produto: senha temporária FIXA e conhecida ('Mudar@123'),
+    // não mais aleatória — o bloqueio de acesso até a troca fica a cargo de
+    // mustChangePassword (ver JwtAuthGuard), não da imprevisibilidade da
+    // senha em si.
+    expect(result.temporaryPassword).toBe('Mudar@123');
     expect(result.user.id).toBe('u1');
+  });
+
+  it('hashes the fixed temporary password instead of persisting it in plaintext', async () => {
+    prisma.user.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'u9', email: data.email, role: data.role }));
+    const result = await service.create('c1', { email: 'admin9@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+    const createCall = prisma.user.create.mock.calls[0][0];
+    expect(createCall.data.passwordHash).not.toBe('Mudar@123');
+    expect(createCall.data.mustChangePassword).toBe(true);
+    expect(result.temporaryPassword).toBe('Mudar@123');
   });
 
   it('rejects creating a login with an e-mail already used by ANY company with a clean 409 instead of an unhandled 500', async () => {

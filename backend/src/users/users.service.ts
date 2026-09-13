@@ -2,7 +2,6 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPassword } from '../auth/password.util';
-import { generateRefreshTokenValue } from '../auth/refresh-token.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 
@@ -57,11 +56,17 @@ export class UsersService {
       }
     }
 
-    // Senha temporária de alta entropia — devolvida uma única vez na resposta;
-    // o hash é o que persiste. O login troca no primeiro acesso via
+    // Senha temporária FIXA (decisão explícita do produto, não mais gerada
+    // aleatoriamente) — devolvida uma única vez na resposta; o hash é o que
+    // persiste. Todo login novo criado por um admin nasce com esta mesma
+    // senha conhecida e é bloqueado de usar o sistema (JwtAuthGuard, ver
+    // esse arquivo) até trocá-la no primeiro acesso via
     // PATCH /auth/me/password (mustChangePassword força esse fluxo — ver
-    // abaixo e AuthService.changePassword()).
-    const temporaryPassword = generateRefreshTokenValue().slice(0, 16);
+    // abaixo e AuthService.changePassword()). 'Mudar@123' satisfaz o
+    // @MinLength(8) que ChangePasswordDto exige de newPassword numa troca
+    // voluntária futura, mas isso é incidental — essa validação nunca é
+    // aplicada à própria senha temporária, só a uma troca posterior.
+    const temporaryPassword = 'Mudar@123';
     const passwordHash = await hashPassword(temporaryPassword);
 
     let user;

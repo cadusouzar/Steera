@@ -39,7 +39,13 @@ describe('EmployeesController#findOne', () => {
   });
 
   it('allows an ADMIN to see full employee detail', async () => {
-    const result = await controller.findOne('e1', { userId: 'u1', companyId: 'c1', role: 'ADMIN', modules: [] });
+    const result = await controller.findOne('e1', {
+      userId: 'u1',
+      companyId: 'c1',
+      role: 'ADMIN',
+      modules: [],
+      mustChangePassword: false,
+    });
     expect(result.cpf).toBe('12345678900');
     expect(result.bankDetails).toBe('segredo-bancario');
   });
@@ -50,13 +56,20 @@ describe('EmployeesController#findOne', () => {
       companyId: 'c1',
       role: 'EMPLOYEE',
       modules: ['RH'],
+      mustChangePassword: false,
     });
     expect(result.cpf).toBe('12345678900');
   });
 
   it('rejects an EMPLOYEE login without RH in modules with a 403', async () => {
     await expect(
-      controller.findOne('e1', { userId: 'u3', companyId: 'c1', role: 'EMPLOYEE', modules: ['DASHBOARD'] }),
+      controller.findOne('e1', {
+        userId: 'u3',
+        companyId: 'c1',
+        role: 'EMPLOYEE',
+        modules: ['DASHBOARD'],
+        mustChangePassword: false,
+      }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(service.findOne).not.toHaveBeenCalled();
   });

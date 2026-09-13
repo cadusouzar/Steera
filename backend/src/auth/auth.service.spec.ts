@@ -98,10 +98,12 @@ describe('AuthService', () => {
     await expect(service.changePassword('1', { currentPassword: 'errada', newPassword: 'nova12345' })).rejects.toThrow('Senha atual incorreta');
   });
 
-  it('changePassword revokes every active refresh token and clears mustChangePassword on success', async () => {
-    prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', passwordHash: 'h', mustChangePassword: true });
+  it('changePassword revokes every active refresh token, clears mustChangePassword, and returns a fresh access token', async () => {
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      id: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['DASHBOARD'], passwordHash: 'h', mustChangePassword: true,
+    });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
-    await service.changePassword('u1', { currentPassword: 'antiga12345', newPassword: 'nova12345' });
+    const result = await service.changePassword('u1', { currentPassword: 'antiga12345', newPassword: 'nova12345' });
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
       data: { passwordHash: expect.any(String), mustChangePassword: false },
@@ -110,5 +112,10 @@ describe('AuthService', () => {
       where: { userId: 'u1', revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
+    // O access token ANTIGO (ainda em memória no frontend até este ponto)
+    // continuaria carregando mustChangePassword: true por até 15min — sem
+    // devolver um token novo aqui, JwtAuthGuard bloquearia o resto da sessão
+    // logo após uma troca de senha bem-sucedida (ver esse guard).
+    expect(result.accessToken).toBe('signed.jwt.token');
   });
 });

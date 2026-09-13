@@ -91,9 +91,17 @@ export async function logout(): Promise<void> {
 // Usado pela troca de senha voluntária (futura tela de conta) e pelo fluxo
 // forçado de RequireAuth/ForcedPasswordChange (mustChangePassword). Fica
 // aqui, não em src/lib/api.ts, porque — como login/register/logout acima —
-// mexe diretamente no `currentUser` em memória deste módulo (limpa
-// mustChangePassword no sucesso, sem precisar de um round-trip extra pra
-// GET /auth/me).
+// mexe diretamente no `accessToken`/`currentUser` em memória deste módulo.
+//
+// O backend agora devolve um accessToken NOVO no corpo da resposta (com
+// mustChangePassword: false já embutido no claim do JWT) — o token antigo,
+// ainda em memória até este ponto, continuaria carregando
+// mustChangePassword: true por até 15min (JwtAuthGuard lê isso do próprio
+// JWT, não faz round-trip no banco a cada request). Sem aplicar esse token
+// novo aqui, toda chamada de API seguinte nesta mesma sessão (inclusive
+// navegar pro app logo após ForcedPasswordChange.onDone()) seria barrada
+// com 403 até o token antigo expirar — quebraria a UX já validada de
+// "acesso imediato ao app, sem precisar logar de novo".
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   const res = await fetch(`${API_URL}/auth/me/password`, {
     method: 'PATCH',
@@ -108,6 +116,8 @@ export async function changePassword(currentPassword: string, newPassword: strin
     const body = await res.json().catch(() => ({}) as { message?: string });
     throw new Error(body.message || 'Não foi possível trocar a senha');
   }
+  const data = (await res.json()) as { accessToken: string };
+  accessToken = data.accessToken;
   if (currentUser) {
     currentUser = { ...currentUser, mustChangePassword: false };
   }

@@ -7,6 +7,7 @@ export interface JwtPayload {
   companyId: string;
   role: 'ADMIN' | 'EMPLOYEE';
   modules: string[];
+  mustChangePassword: boolean;
 }
 
 @Injectable()
@@ -23,6 +24,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   validate(payload: JwtPayload) {
-    return { userId: payload.sub, companyId: payload.companyId, role: payload.role, modules: payload.modules };
+    return {
+      userId: payload.sub,
+      companyId: payload.companyId,
+      role: payload.role,
+      modules: payload.modules,
+      mustChangePassword: payload.mustChangePassword,
+    };
   }
 }

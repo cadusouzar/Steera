@@ -5,6 +5,7 @@ export interface AuthenticatedUser {
   companyId: string;
   role: 'ADMIN' | 'EMPLOYEE';
   modules: string[];
+  mustChangePassword: boolean;
 }
 
 export const CurrentUser = createParamDecorator(
