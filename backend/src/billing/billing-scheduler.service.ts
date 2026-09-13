@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { EmployeeRecurringPaymentsService } from '../employee-recurring-payments/employee-recurring-payments.service';
-import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { EmployeeRecurringPaymentsBillingService } from '../employee-recurring-payments/employee-recurring-payments-billing.service';
+import { SubscriptionsBillingService } from '../subscriptions/subscriptions-billing.service';
 
 interface DueChargesResult {
   checked: number;
@@ -13,13 +13,10 @@ export class BillingSchedulerService implements OnApplicationBootstrap {
   private readonly logger = new Logger(BillingSchedulerService.name);
 
   constructor(
-    private readonly subscriptionsService: SubscriptionsService,
-    private readonly employeeRecurringPaymentsService: EmployeeRecurringPaymentsService,
+    private readonly subscriptionsBilling: SubscriptionsBillingService,
+    private readonly employeeRecurringPaymentsBilling: EmployeeRecurringPaymentsBillingService,
   ) {}
 
-  // Cobre o caso do processo ter ficado fora do ar quando o cron deveria ter
-  // rodado (queda, restart, deploy, ambiente local desligado) — a checagem
-  // roda de novo assim que a aplicação sobe, sem esperar o próximo 3h.
   async onApplicationBootstrap() {
     await this.runCatchUp('inicialização');
   }
@@ -30,15 +27,13 @@ export class BillingSchedulerService implements OnApplicationBootstrap {
   }
 
   private async runCatchUp(trigger: string) {
-    // Cada serviço tem seu próprio try/catch — uma falha em um nunca deve
-    // impedir a execução do outro.
     const subs = await this.safeGenerate(
-      () => this.subscriptionsService.generateDueCharges(),
+      () => this.subscriptionsBilling.generateDueCharges(),
       'assinaturas de clientes',
       trigger,
     );
     const employees = await this.safeGenerate(
-      () => this.employeeRecurringPaymentsService.generateDueCharges(),
+      () => this.employeeRecurringPaymentsBilling.generateDueCharges(),
       'recorrências de funcionário',
       trigger,
     );

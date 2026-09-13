@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ClientStatus, Receivable, ReceivableStatus } from '@prisma/client';
+import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { parseDateOnly, startOfToday } from '../common/date.util';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
@@ -21,16 +22,21 @@ function toResponse(receivable: Receivable) {
 
 @Injectable()
 export class ReceivablesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyContext: CompanyContextService,
+  ) {}
 
   private async ensureClientExists(clientId: string) {
-    const client = await this.prisma.client.findUnique({ where: { id: clientId } });
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const client = await this.prisma.client.findFirst({ where: { id: clientId, companyId } });
     if (!client) throw new NotFoundException(`Cliente ${clientId} não encontrado`);
     return client;
   }
 
   private async assertExists(id: string): Promise<Receivable> {
-    const found = await this.prisma.receivable.findUnique({ where: { id } });
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const found = await this.prisma.receivable.findFirst({ where: { id, client: { companyId } } });
     if (!found) throw new NotFoundException(`Lançamento ${id} não encontrado`);
     return found;
   }

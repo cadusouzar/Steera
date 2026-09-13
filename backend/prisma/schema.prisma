@@ -40,6 +40,8 @@ model Client {
   // this timestamp (see ClientsService.purgeExpiredTrash) — clients kept in
   // the report (includeInRevenueReport=true) stay inactive forever, never purged.
   deactivatedAt DateTime?
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   receivables   Receivable[]
@@ -47,6 +49,7 @@ model Client {
 
   @@index([status])
   @@index([deactivatedAt])
+  @@index([companyId])
 }
 
 model Receivable {
@@ -167,6 +170,7 @@ model Company {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   users             User[]
+  clients           Client[]
 }
 
 model Role {

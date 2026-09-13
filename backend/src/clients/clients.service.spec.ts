@@ -1,6 +1,8 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ClientTrashService } from './client-trash.service';
 import { ClientsService } from './clients.service';
 
 describe('ClientsService', () => {
@@ -11,6 +13,7 @@ describe('ClientsService', () => {
     subscription: Record<string, jest.Mock>;
     $transaction: jest.Mock;
   };
+  let clientTrash: { purgeExpiredTrash: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -18,9 +21,8 @@ describe('ClientsService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         count: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
-        deleteMany: jest.fn(),
       },
       receivable: {
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
@@ -32,22 +34,39 @@ describe('ClientsService', () => {
       // operation (already a promise from the mocked calls above) in order.
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
+    clientTrash = { purgeExpiredTrash: jest.fn().mockResolvedValue(0) };
 
     const module = await Test.createTestingModule({
-      providers: [ClientsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ClientsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: CompanyContextService, useValue: { getCurrentCompanyId: jest.fn().mockResolvedValue('company-1') } },
+        { provide: ClientTrashService, useValue: clientTrash },
+      ],
     }).compile();
 
     service = module.get(ClientsService);
   });
 
+  it('creates a client scoped to the current company', async () => {
+    prisma.client.create.mockResolvedValue({ id: '1', name: 'Ana', companyId: 'company-1' });
+
+    await service.create({ name: 'Ana', contact: 'x' } as any);
+
+    expect(prisma.client.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: 'Ana', contact: 'x', companyId: 'company-1' }),
+    });
+  });
+
   it('throws NotFoundException when client does not exist', async () => {
-    prisma.client.findUnique.mockResolvedValue(null);
+    prisma.client.findFirst.mockResolvedValue(null);
     await expect(service.findOne('missing-id')).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.client.findFirst).toHaveBeenCalledWith({ where: { id: 'missing-id', companyId: 'company-1' } });
   });
 
   it('returns the client when found, with zeroed totals when it has no receivables', async () => {
     const client = { id: '1', name: 'Ana', status: 'ACTIVE' };
-    prisma.client.findUnique.mockResolvedValue(client);
+    prisma.client.findFirst.mockResolvedValue(client);
     await expect(service.findOne('1')).resolves.toEqual({
       ...client,
       totalPaid: 0,
@@ -58,7 +77,7 @@ describe('ClientsService', () => {
 
   it('includes paid/pending/overdue totals scoped to the client', async () => {
     const client = { id: '1', name: 'Ana', status: 'ACTIVE' };
-    prisma.client.findUnique.mockResolvedValue(client);
+    prisma.client.findFirst.mockResolvedValue(client);
     prisma.receivable.aggregate
       .mockResolvedValueOnce({ _sum: { amount: 1000 } }) // paid
       .mockResolvedValueOnce({ _sum: { amount: 250.5 } }) // pending
@@ -84,7 +103,7 @@ describe('ClientsService', () => {
   });
 
   it('updates only after confirming the client exists', async () => {
-    prisma.client.findUnique.mockResolvedValue({ id: '1' });
+    prisma.client.findFirst.mockResolvedValue({ id: '1' });
     prisma.client.update.mockResolvedValue({ id: '1', name: 'Ana Nova' });
 
     const result = await service.update('1', { name: 'Ana Nova' });
@@ -97,6 +116,20 @@ describe('ClientsService', () => {
   });
 
   describe('findAll', () => {
+    it('scopes the listing to the current company', async () => {
+      prisma.client.findMany.mockResolvedValue([]);
+      prisma.client.count.mockResolvedValue(0);
+
+      await service.findAll({ page: 1, pageSize: 20 } as any);
+
+      expect(prisma.client.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ companyId: 'company-1' }) }),
+      );
+      expect(prisma.client.count).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ companyId: 'company-1' }) }),
+      );
+    });
+
     it('filters by status when explicitly provided (e.g. status=ACTIVE for a strictly-active-only view)', async () => {
       prisma.client.findMany.mockResolvedValue([{ id: '1', status: 'ACTIVE' }]);
       prisma.client.count.mockResolvedValue(1);
@@ -104,10 +137,10 @@ describe('ClientsService', () => {
       await service.findAll({ status: 'ACTIVE' as any, page: 1, pageSize: 20 });
 
       expect(prisma.client.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ status: 'ACTIVE' }) }),
+        expect.objectContaining({ where: expect.objectContaining({ companyId: 'company-1', status: 'ACTIVE' }) }),
       );
       expect(prisma.client.count).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ status: 'ACTIVE' }) }),
+        expect.objectContaining({ where: expect.objectContaining({ companyId: 'company-1', status: 'ACTIVE' }) }),
       );
     });
 
@@ -117,7 +150,7 @@ describe('ClientsService', () => {
 
       await service.findAll({ excludeTrashed: true, page: 1, pageSize: 20 } as any);
 
-      const expectedWhere = { NOT: { status: 'INACTIVE', includeInRevenueReport: false } };
+      const expectedWhere = { companyId: 'company-1', NOT: { status: 'INACTIVE', includeInRevenueReport: false } };
       expect(prisma.client.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expectedWhere }),
       );
@@ -127,14 +160,14 @@ describe('ClientsService', () => {
 
   describe('deactivate', () => {
     it('throws NotFoundException when the client does not exist', async () => {
-      prisma.client.findUnique.mockResolvedValue(null);
+      prisma.client.findFirst.mockResolvedValue(null);
       await expect(
         service.deactivate('missing', { includeInRevenueReport: true }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('throws ConflictException when the client is already inactive', async () => {
-      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'INACTIVE' });
+      prisma.client.findFirst.mockResolvedValue({ id: '1', status: 'INACTIVE' });
       await expect(
         service.deactivate('1', { includeInRevenueReport: true }),
       ).rejects.toBeInstanceOf(ConflictException);
@@ -142,7 +175,7 @@ describe('ClientsService', () => {
     });
 
     it('deactivates the client and pauses its active subscriptions in one transaction, storing the chosen revenue flag', async () => {
-      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE' });
+      prisma.client.findFirst.mockResolvedValue({ id: '1', status: 'ACTIVE' });
       prisma.client.update.mockResolvedValue({ id: '1', status: 'INACTIVE', includeInRevenueReport: false });
       prisma.subscription.updateMany.mockResolvedValue({ count: 2 });
 
@@ -161,7 +194,7 @@ describe('ClientsService', () => {
     });
 
     it('preserves includeInRevenueReport=true when that is the chosen option', async () => {
-      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE' });
+      prisma.client.findFirst.mockResolvedValue({ id: '1', status: 'ACTIVE' });
       prisma.client.update.mockResolvedValue({ id: '1', status: 'INACTIVE', includeInRevenueReport: true });
       prisma.subscription.updateMany.mockResolvedValue({ count: 0 });
 
@@ -174,7 +207,7 @@ describe('ClientsService', () => {
     });
 
     it('records deactivatedAt as the current time', async () => {
-      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE' });
+      prisma.client.findFirst.mockResolvedValue({ id: '1', status: 'ACTIVE' });
       prisma.client.update.mockResolvedValue({ id: '1', status: 'INACTIVE', includeInRevenueReport: false, deactivatedAt: new Date() });
       prisma.subscription.updateMany.mockResolvedValue({ count: 0 });
 
@@ -190,18 +223,18 @@ describe('ClientsService', () => {
 
   describe('restore', () => {
     it('throws NotFoundException when the client does not exist', async () => {
-      prisma.client.findUnique.mockResolvedValue(null);
+      prisma.client.findFirst.mockResolvedValue(null);
       await expect(service.restore('missing')).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('throws ConflictException when the client is already active', async () => {
-      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE' });
+      prisma.client.findFirst.mockResolvedValue({ id: '1', status: 'ACTIVE' });
       await expect(service.restore('1')).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.client.update).not.toHaveBeenCalled();
     });
 
     it('reactivates the client and clears deactivatedAt, without touching includeInRevenueReport', async () => {
-      prisma.client.findUnique.mockResolvedValue({ id: '1', status: 'INACTIVE', includeInRevenueReport: false });
+      prisma.client.findFirst.mockResolvedValue({ id: '1', status: 'INACTIVE', includeInRevenueReport: false });
       prisma.client.update.mockResolvedValue({ id: '1', status: 'ACTIVE', includeInRevenueReport: false, deactivatedAt: null });
 
       const result = await service.restore('1');
@@ -214,45 +247,16 @@ describe('ClientsService', () => {
     });
   });
 
-  describe('purgeExpiredTrash', () => {
-    it('deletes only clients inactive for more than 30 days with includeInRevenueReport=false', async () => {
-      prisma.client.deleteMany.mockResolvedValue({ count: 2 });
-
-      const count = await service.purgeExpiredTrash();
-
-      expect(prisma.client.deleteMany).toHaveBeenCalledWith({
-        where: {
-          status: 'INACTIVE',
-          includeInRevenueReport: false,
-          deactivatedAt: { lt: expect.any(Date) },
-        },
-      });
-      expect(count).toBe(2);
-    });
-
-    it('the cutoff passed to Prisma is approximately 30 days in the past', async () => {
-      prisma.client.deleteMany.mockResolvedValue({ count: 0 });
-      const before = Date.now();
-
-      await service.purgeExpiredTrash();
-
-      const cutoff: Date = prisma.client.deleteMany.mock.calls[0][0].where.deactivatedAt.lt;
-      const expectedCutoff = before - 30 * 24 * 60 * 60 * 1000;
-      expect(Math.abs(cutoff.getTime() - expectedCutoff)).toBeLessThan(5000);
-    });
-  });
-
   describe('findTrash', () => {
-    it('purges expired entries first, then returns only INACTIVE clients with includeInRevenueReport=false, oldest deactivation first', async () => {
-      prisma.client.deleteMany.mockResolvedValue({ count: 0 });
+    it('purges expired entries first (via ClientTrashService), then returns only INACTIVE clients with includeInRevenueReport=false for the current company, oldest deactivation first', async () => {
       const trashed = [{ id: '1', status: 'INACTIVE', includeInRevenueReport: false, deactivatedAt: new Date('2026-09-01') }];
       prisma.client.findMany.mockResolvedValue(trashed);
 
       const result = await service.findTrash();
 
-      expect(prisma.client.deleteMany).toHaveBeenCalledTimes(1);
+      expect(clientTrash.purgeExpiredTrash).toHaveBeenCalledTimes(1);
       expect(prisma.client.findMany).toHaveBeenCalledWith({
-        where: { status: 'INACTIVE', includeInRevenueReport: false },
+        where: { companyId: 'company-1', status: 'INACTIVE', includeInRevenueReport: false },
         orderBy: { deactivatedAt: 'asc' },
       });
       expect(result).toEqual(trashed);

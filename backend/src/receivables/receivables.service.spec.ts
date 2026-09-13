@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ReceivableStatus } from '@prisma/client';
+import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { deriveReceivableStatus, ReceivablesService } from './receivables.service';
 
@@ -68,42 +69,55 @@ describe('ReceivablesService', () => {
 
   beforeEach(async () => {
     prisma = {
-      client: { findUnique: jest.fn() },
+      client: { findFirst: jest.fn() },
       receivable: {
         create: jest.fn(),
         findMany: jest.fn(),
         count: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
       },
     };
 
     const module = await Test.createTestingModule({
-      providers: [ReceivablesService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ReceivablesService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: CompanyContextService, useValue: { getCurrentCompanyId: jest.fn().mockResolvedValue('company-1') } },
+      ],
     }).compile();
 
     service = module.get(ReceivablesService);
   });
 
   it('throws NotFoundException when creating a receivable for a missing client', async () => {
-    prisma.client.findUnique.mockResolvedValue(null);
+    prisma.client.findFirst.mockResolvedValue(null);
     await expect(
       service.create('missing', { description: 'x', amount: 10, dueDate: '2026-01-01' }),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.receivable.create).not.toHaveBeenCalled();
+    expect(prisma.client.findFirst).toHaveBeenCalledWith({ where: { id: 'missing', companyId: 'company-1' } });
   });
 
   it('rejects creating a receivable for an inactive client', async () => {
-    prisma.client.findUnique.mockResolvedValue({ id: 'client1', status: 'INACTIVE' });
+    prisma.client.findFirst.mockResolvedValue({ id: 'client1', status: 'INACTIVE' });
     await expect(
       service.create('client1', { description: 'x', amount: 10, dueDate: '2026-01-01' }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.receivable.create).not.toHaveBeenCalled();
   });
 
+  it('scopes lookup by id to the current company, so a receivable from another company 404s', async () => {
+    prisma.receivable.findFirst.mockResolvedValue(null);
+    await expect(service.findOne('other-company-id')).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.receivable.findFirst).toHaveBeenCalledWith({
+      where: { id: 'other-company-id', client: { companyId: 'company-1' } },
+    });
+  });
+
   it('marks a receivable as paid and sets paidAt', async () => {
-    prisma.receivable.findUnique.mockResolvedValue({ id: '1' });
+    prisma.receivable.findFirst.mockResolvedValue({ id: '1' });
     prisma.receivable.update.mockResolvedValue({
       id: '1',
       status: ReceivableStatus.PAID,
@@ -121,7 +135,7 @@ describe('ReceivablesService', () => {
   });
 
   it('reverts payment on unpay', async () => {
-    prisma.receivable.findUnique.mockResolvedValue({ id: '1' });
+    prisma.receivable.findFirst.mockResolvedValue({ id: '1' });
     prisma.receivable.update.mockResolvedValue({
       id: '1',
       status: ReceivableStatus.PENDING,
@@ -139,7 +153,7 @@ describe('ReceivablesService', () => {
   });
 
   it('stores a "YYYY-MM-DD" dueDate as UTC midnight, matching how Prisma reads @db.Date back', async () => {
-    prisma.client.findUnique.mockResolvedValue({ id: 'client1' });
+    prisma.client.findFirst.mockResolvedValue({ id: 'client1' });
 
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');

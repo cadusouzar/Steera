@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportsService } from './reports.service';
 
@@ -13,7 +14,11 @@ describe('ReportsService', () => {
     };
 
     const module = await Test.createTestingModule({
-      providers: [ReportsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ReportsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: CompanyContextService, useValue: { getCurrentCompanyId: jest.fn().mockResolvedValue('company-1') } },
+      ],
     }).compile();
 
     service = module.get(ReportsService);
@@ -53,11 +58,12 @@ describe('ReportsService', () => {
     const [paidCall, pendingCall] = prisma.receivable.aggregate.mock.calls;
     // Deliberately NOT filtered by client.status — an inactive client with the
     // flag on must still count (rule: don't confuse active/inactive with the
-    // revenue-report flag).
-    expect(paidCall[0].where.client).toEqual({ includeInRevenueReport: true });
-    expect(pendingCall[0].where.client).toEqual({ includeInRevenueReport: true });
-    expect(prisma.receivable.findMany.mock.calls[0][0].where.client).toEqual({ includeInRevenueReport: true });
-    expect(prisma.subscription.aggregate.mock.calls[0][0].where.client).toEqual({ includeInRevenueReport: true });
+    // revenue-report flag). Scoped to the current company in every one of the
+    // four aggregates too.
+    expect(paidCall[0].where.client).toEqual({ companyId: 'company-1', includeInRevenueReport: true });
+    expect(pendingCall[0].where.client).toEqual({ companyId: 'company-1', includeInRevenueReport: true });
+    expect(prisma.receivable.findMany.mock.calls[0][0].where.client).toEqual({ companyId: 'company-1', includeInRevenueReport: true });
+    expect(prisma.subscription.aggregate.mock.calls[0][0].where.client).toEqual({ companyId: 'company-1', includeInRevenueReport: true });
   });
 
   it('uses a UTC-midnight boundary for the pending/overdue split', async () => {
