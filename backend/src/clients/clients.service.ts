@@ -135,10 +135,15 @@ export class ClientsService {
     });
   }
 
-  // A purga em si (ClientTrashService.purgeExpiredTrash) roda sem escopo de
-  // empresa — deleta de todas ao mesmo tempo, é seguro (mesmo critério
-  // absoluto pra todas). A listagem que este método devolve, sim, é
-  // escopada pra empresa autenticada.
+  // A purga em si (ClientTrashService.purgeExpiredTrash) roda escopada pra
+  // empresa desta própria requisição autenticada (TenantContextInterceptor
+  // já estabeleceu esse contexto de tenant antes deste método rodar — ver o
+  // backstop de RLS em prisma/tenant-rls.extension.ts) — só afeta clientes
+  // desta empresa, não de todas de uma vez. O cron diário
+  // (ClientTrashService.purgeExpiredTrashCron) é quem de fato varre todas as
+  // empresas, iterando cada uma explicitamente via runWithTenant (rodando
+  // fora de uma requisição HTTP, sem esse contexto automático). A listagem
+  // que este método devolve também é escopada pra empresa autenticada.
   async findTrash() {
     await this.clientTrash.purgeExpiredTrash();
     const companyId = await this.companyContext.getCurrentCompanyId();

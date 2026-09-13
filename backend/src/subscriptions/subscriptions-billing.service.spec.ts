@@ -81,22 +81,38 @@ describe('SubscriptionsBillingService', () => {
     });
   });
 
-  it('generates a charge for a subscription with no receivable this month', async () => {
+  it('generates a charge for a subscription with no receivable this month, propagating companyId', async () => {
     prisma.subscription.findMany.mockResolvedValue([
-      { id: 'sub-1', clientId: 'client-1', description: 'Plano A', amount: 100, dueDay: 5, status: 'ACTIVE' },
+      {
+        id: 'sub-1',
+        clientId: 'client-1',
+        companyId: 'company-1',
+        description: 'Plano A',
+        amount: 100,
+        dueDay: 5,
+        status: 'ACTIVE',
+      },
     ]);
     prisma.receivable.create.mockResolvedValue({ id: 'rec-1' });
 
     const result = await service.generateDueCharges();
 
+    // Exact match (not objectContaining) on the tenant-scoping fields so this
+    // test actually fails if companyId ever stops being propagated onto the
+    // generated Receivable — the RLS backstop's WITH CHECK would reject an
+    // insert with a missing/wrong companyId, so this propagation is load-bearing,
+    // not cosmetic.
     expect(prisma.receivable.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         clientId: 'client-1',
+        companyId: 'company-1',
         subscriptionId: 'sub-1',
         amount: 100,
         status: 'PENDING',
       }),
     });
+    const createdData = prisma.receivable.create.mock.calls[0][0].data;
+    expect(createdData.companyId).toBe('company-1');
     expect(result).toEqual({ checked: 1, generated: 1 });
   });
 

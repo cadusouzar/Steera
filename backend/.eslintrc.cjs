@@ -16,5 +16,30 @@ module.exports = {
     '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'off',
+    // runAsSystem (prisma/tenant-context.ts) is the RLS backstop's narrow
+    // cross-tenant bypass escape hatch — legitimate only for AuthService's
+    // pre-authentication lookups and this project's own e2e-test
+    // setup/teardown code. Restricted here structurally (not just by
+    // comment) to backend/src/auth/** and backend/test/** via the override
+    // below — importing it from any other module is a lint error.
+    'no-restricted-imports': [
+      'error',
+      {
+        patterns: [
+          {
+            group: ['**/prisma/tenant-context', '**/tenant-context'],
+            importNames: ['runAsSystem'],
+            message:
+              'runAsSystem is a narrow RLS bypass escape hatch — only backend/src/auth/** and backend/test/** may import it. See tenant-context.ts for why.',
+          },
+        ],
+      },
+    ],
   },
+  overrides: [
+    {
+      files: ['src/auth/**/*.ts', 'test/**/*.ts'],
+      rules: { 'no-restricted-imports': 'off' },
+    },
+  ],
 };

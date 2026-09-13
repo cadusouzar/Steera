@@ -249,17 +249,36 @@ relevantes:
 - ~~`Employee.salaryRecurrenceEnabled` não era lido por essa automação~~ — **resolvido**:
   `generateDueCharges()` do lado de funcionário agora exige `salaryRecurrenceEnabled: true` além do
   `status: 'ACTIVE'` da recorrência.
-- ~~O scheduler cobra só uma empresa por execução~~ — **resolvido como efeito colateral da
-  autenticação real (13/09/2026)**: `CompanyContextService` virou `@Injectable({ scope:
-  Scope.REQUEST })` (ver seção de RH acima), e um provider request-scoped não pode ser injetado
-  num serviço disparado por `@Cron`/`OnApplicationBootstrap` (não há requisição HTTP em voo). A
-  lógica de geração em lote foi por isso extraída para `SubscriptionsBillingService`/
+- ~~O scheduler cobra só uma empresa por execução~~ — **resolvido em duas etapas**. Primeiro
+  (13/09/2026, efeito colateral da autenticação real): `CompanyContextService` virou
+  `@Injectable({ scope: Scope.REQUEST })` (ver seção de RH acima), e um provider request-scoped não
+  pode ser injetado num serviço disparado por `@Cron`/`OnApplicationBootstrap` (não há requisição
+  HTTP em voo). A lógica de geração em lote foi por isso extraída para `SubscriptionsBillingService`/
   `EmployeeRecurringPaymentsBillingService` (`backend/src/subscriptions/` e
   `backend/src/employee-recurring-payments/`), singletons sem nenhuma dependência de
-  `CompanyContextService`/request — eles buscam `Subscription`/`EmployeeRecurringPayment`
-  vencidos em **todas** as empresas de uma vez (a FK até `Client`/`Employee` já basta pra isolar os
-  dados certos por empresa), então `BillingSchedulerService` cobre o banco inteiro numa única
-  execução, não mais uma empresa por vez.
+  `CompanyContextService`/request. Naquela etapa elas buscavam `Subscription`/
+  `EmployeeRecurringPayment` vencidos em todas as empresas **de uma vez só** (a FK até
+  `Client`/`Employee` bastava pra isolar os dados certos por empresa na ausência de RLS).
+  **Segundo (13/09/2026, backstop de RLS — ver `[[DECISOES-TECNICAS]]`):** com Row-Level Security
+  habilitado a nível de banco em todas as tabelas de tenant (incluindo `Subscription`/`Receivable`/
+  `EmployeeRecurringPayment`/`EmployeePayment`, todas agora com `FORCE ROW LEVEL SECURITY`), uma
+  query sem nenhum contexto de tenant ativo passou a devolver **zero linhas silenciosamente** (nem
+  erro, nem todas as linhas — esse é o comportamento seguro por padrão da política de RLS) em vez de
+  "todas as empresas de uma vez". `BillingSchedulerService.runCatchUp` foi por isso reescrito pra
+  buscar todas as `Company` (tabela sem RLS, é a raiz do isolamento — não uma tabela de tenant) e
+  chamar as duas `generateDueCharges()` **uma vez por empresa**, cada chamada envolvida em
+  `runWithTenant(company.id, ...)` (ver `backend/src/prisma/tenant-context.ts`), que estabelece o
+  `set_config('app.current_company_id', ...)` transacional que a política de RLS exige. Isso não é
+  uma regressão de performance sem motivo: é estritamente **mais correto** que a versão de uma
+  query só — cada escrita gerada (`Receivable`/`EmployeePayment`) agora é validada pelo `WITH CHECK`
+  da política de RLS sob o contexto da própria empresa, não só por um filtro de aplicação, fechando
+  exatamente a classe de bug (query sem filtro de `companyId`) que motivou o backstop de RLS em
+  primeiro lugar. Mesma correção replicada em `ClientTrashService.purgeExpiredTrashCron` (mesmo
+  cron das 3h), que tinha o mesmo problema: rodava sem contexto de tenant algum e, pós-RLS, virou um
+  no-op silencioso permanente (`deleteMany` retornando `count: 0` sem erro) — a purga de 30 dias da
+  lixeira de clientes parou de rodar de verdade até esse fix, sem nenhum log de erro indicando isso
+  (só loga quando `count > 0`). Corrigido com o mesmo padrão: itera todas as `Company` e chama
+  `purgeExpiredTrash()` uma vez por empresa dentro de `runWithTenant(...)`.
 - A checagem de bootstrap roda **de forma síncrona antes do app aceitar tráfego HTTP** (é
   `await`ada, não fire-and-forget); com uma base muito grande de recorrências isso pode atrasar o
   boot — tradeoff aceito por ora (mantém os testes simples), fica como otimização futura.

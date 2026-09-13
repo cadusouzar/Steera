@@ -70,11 +70,15 @@ export function runWithTenant<T>(companyId: string, fn: () => Promise<T>): Promi
  * code, which talks to the real Postgres database directly via
  * `PrismaService` outside of any HTTP request.
  *
- * This is intentionally NOT exported for general use — every call site that
- * uses it should be individually justified in a comment, the same way a raw
- * SQL escape hatch would be. It must never be reachable from a normal,
- * authenticated business-logic code path — that would silently defeat the
- * entire point of this RLS backstop.
+ * Importing this is restricted STRUCTURALLY, not just by convention: the
+ * project's `.eslintrc.cjs` has a `no-restricted-imports` rule blocking any
+ * import of `runAsSystem` from this module, with an override re-enabling it
+ * only for `backend/src/auth/**` and `backend/test/**` — `npm run lint`
+ * fails on any other call site. Every allowed call site is still
+ * individually justified in a comment, the same way a raw SQL escape hatch
+ * would be. It must never be reachable from a normal, authenticated
+ * business-logic code path — that would silently defeat the entire point of
+ * this RLS backstop.
  */
 export function runAsSystem<T>(fn: () => Promise<T>): Promise<T> {
   const current = tenantStorage.getStore();
