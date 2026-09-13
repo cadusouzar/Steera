@@ -4,11 +4,25 @@ import { useTheme } from '../components/ThemeProvider';
 import ThemeToggle from '../components/ThemeToggle';
 import UserProfileDropdown from '../components/UserProfileDropdown';
 import UserProfileDrawer from '../components/UserProfileDrawer';
+import { getCurrentUser } from '../lib/auth';
 import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield } from 'lucide-react';
+
+// Espelha o enum `AppModule` do backend (backend/prisma/schema.prisma) —
+// os valores já chegam em maiúsculo de getCurrentUser()?.modules (vindos
+// direto de /auth/login, /auth/me e do refresh), sem precisar de normalização.
+type AppModule = 'DASHBOARD' | 'CLIENTES' | 'RH' | 'COMERCIAL' | 'OPERACOES' | 'FINANCAS';
 
 const AppLayout = () => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+
+  // Filtro de navegação por módulo: convenção de UI apenas (esconde links
+  // que o usuário não tem em `modules`) — não é a fronteira de segurança
+  // real, que já é garantida pelo backend (Tasks 4-7) e pelo RequireAuth
+  // (Task 9). Regra deliberada do plano: módulos valem igualmente para
+  // ADMIN e EMPLOYEE — nenhum bypass aqui pra `role === 'ADMIN'`.
+  const userModules = getCurrentUser()?.modules ?? [];
+  const hasModule = (module: AppModule) => userModules.includes(module);
 
   const isActive = (path: string) => path === '/app' ? location.pathname === '/app' : (location.pathname === path || location.pathname.startsWith(`${path}/`));
 
@@ -48,26 +62,31 @@ const AppLayout = () => {
         <nav className="flex-1 px-4 py-6 space-y-1">
           <div className="text-xs font-semibold text-muted uppercase tracking-wider mb-4 px-2">Módulos</div>
           
-          <Link 
-            to="/app" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-              isActive('/app') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-            }`}
-          >
-            <LayoutDashboard size={18} />
-            Visão Geral
-          </Link>
-          <Link 
-            to="/app/clientes" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-              isActive('/app/clientes') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-            }`}
-          >
-            <HeartHandshake size={18} />
-            Clientes
-          </Link>
-          
+          {hasModule('DASHBOARD') && (
+            <Link
+              to="/app"
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
+                isActive('/app') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+              }`}
+            >
+              <LayoutDashboard size={18} />
+              Visão Geral
+            </Link>
+          )}
+          {hasModule('CLIENTES') && (
+            <Link
+              to="/app/clientes"
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
+                isActive('/app/clientes') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+              }`}
+            >
+              <HeartHandshake size={18} />
+              Clientes
+            </Link>
+          )}
+
           {/* Recursos Humanos Submenu */}
+          {hasModule('RH') && (
           <div className="space-y-1">
             <button 
               onClick={() => setIsHrOpen(!isHrOpen)}
@@ -113,10 +132,12 @@ const AppLayout = () => {
               </div>
             </div>
           </div>
+          )}
 
           {/* Comercial Submenu */}
+          {hasModule('COMERCIAL') && (
           <div className="space-y-1">
-            <button 
+            <button
               onClick={() => setIsCommercialOpen(!isCommercialOpen)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
                 (isActive('/app/orcamentos')) 
@@ -144,10 +165,12 @@ const AppLayout = () => {
               </div>
             </div>
           </div>
+          )}
 
           {/* Operações Submenu */}
+          {hasModule('OPERACOES') && (
           <div className="space-y-1">
-            <button 
+            <button
               onClick={() => setIsOperationsOpen(!isOperationsOpen)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
                 (isActive('/app/estoque') || isActive('/app/compras')) 
@@ -186,8 +209,10 @@ const AppLayout = () => {
               </div>
             </div>
           </div>
-          <Link 
-            to="/app/financas" 
+          )}
+          {hasModule('FINANCAS') && (
+          <Link
+            to="/app/financas"
             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
               isActive('/app/financas') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
             }`}
@@ -195,9 +220,11 @@ const AppLayout = () => {
             <BarChart3 size={18} />
             Finanças
           </Link>
+          )}
 
-          <Link 
-            to="/app/analytics" 
+          {hasModule('DASHBOARD') && (
+          <Link
+            to="/app/analytics"
             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
               isActive('/app/analytics') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
             }`}
@@ -205,6 +232,7 @@ const AppLayout = () => {
             <LayoutDashboard size={18} />
             Analytics e Dashboards
           </Link>
+          )}
 
           <div className="text-xs font-semibold text-muted uppercase tracking-wider mt-8 pt-6 border-t border-border/40 mb-4 px-2">Administração</div>
           

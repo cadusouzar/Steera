@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Settings, LogOut, ChevronDown } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { logout } from '../lib/auth';
 
 interface UserProfileDropdownProps {
   onOpenProfile: () => void;
@@ -10,6 +11,17 @@ interface UserProfileDropdownProps {
 const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+
+  // Chama o logout real (POST /auth/logout, limpa a sessão em memória) e só
+  // então navega pra /login — RequireAuth (Task 9) já garante que voltar
+  // pro /app depois disso (inclusive via botão "voltar" do navegador) falha
+  // a checagem de autenticação e redireciona de novo pro login.
+  const handleLogout = async () => {
+    setIsOpen(false);
+    await logout();
+    navigate('/login', { replace: true });
+  };
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -76,14 +88,14 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
             </div>
             
             <div className="p-2 border-t border-border/50">
-              <Link 
-                to="/"
-                onClick={() => setIsOpen(false)}
+              <button
+                type="button"
+                onClick={handleLogout}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:text-red-600 hover:bg-red-500/10 transition-colors text-left"
               >
                 <LogOut size={16} />
                 Sair
-              </Link>
+              </button>
             </div>
           </motion.div>
         )}
