@@ -88,12 +88,45 @@ por LGPD — completo só em `GET /employees/:id`), Advertências (sempre aninha
 `/employees/:employeeId/warnings`), Pagamentos avulsos e recorrentes (espelha o par
 `Receivable`/`Subscription`, mesma regra de overdue derivado), Férias e Afastamento.
 
-- **Stub de empresa única, não é autenticação real:** nenhuma rota de RH aceita `companyId` do
-  cliente — todo service resolve a "empresa atual" via `CompanyContextService
-  .getCurrentCompanyId()`, um stub documentado que sempre aponta para a única linha `Company` do
-  banco (criada sob demanda). **Autenticação/multi-tenant real não está implementada em lugar
-  nenhum do projeto** (frontend nem backend) — decisão explícita e pendência conhecida, não uma
-  omissão. Ver `[[DECISOES-TECNICAS]]` seção 8.
+- **Autenticação/multi-tenant real (implementada em 13/09/2026):** o stub de empresa única foi
+  substituído por autenticação de verdade. `AuthModule` (`backend/src/auth/`) expõe
+  `POST /auth/register` (cria `Company` + primeiro `User` com `role: ADMIN` e todos os módulos —
+  ver pendência de cobrança logo abaixo), `POST /auth/login`, `POST /auth/refresh`,
+  `POST /auth/logout` e `GET /auth/me`; `register`/`login`/`refresh` têm rate limiting
+  (`ThrottlerGuard`, 5 requisições/15min por rota). Sessão é access token JWT de vida curta (15min,
+  devolvido no corpo da resposta, guardado só em memória no frontend — nunca `localStorage`/
+  `sessionStorage`) + refresh token rotativo (30 dias, hash persistido em `RefreshToken`, valor
+  puro só em cookie `HttpOnly; Secure; SameSite=Strict; Path=/auth`), com detecção de reuso: um
+  refresh token já trocado (`replacedByTokenId` setado) sendo reapresentado revoga a família
+  inteira de tokens daquele usuário. `UsersModule` (`backend/src/users/`) cobre os logins da
+  empresa (`GET/POST /companies/me/users`, `PATCH .../block|unblock`) e o plano
+  (`PATCH /companies/me/plan`) — cada `Company` tem `planTier` (`BASICO`/`PRO`/`EMPRESARIAL`) e
+  `maxEmployeeLogins` (10/50/999999); criar um novo login com `role: EMPLOYEE` conta só logins
+  `EMPLOYEE` ativos contra esse teto (logins `ADMIN` não contam) e rejeita com `403` ao estourar.
+  `User.employeeId` é `@unique` — um funcionário nunca pode ter dois logins. `CompanyContextService`
+  (`backend/src/company/company-context.service.ts`) deixou de ser um stub fixo: agora é
+  `@Injectable({ scope: Scope.REQUEST })` e lê `companyId` de `req.user` (populado pelo
+  `JwtAuthGuard` a partir do JWT, nunca de um campo enviado pelo cliente) — toda rota de RH/
+  Clientes/Financeiro continua chamando `getCurrentCompanyId()` sem saber que a implementação
+  mudou. Essa mudança pra request-scoped teve uma consequência arquitetural: serviços chamados
+  fora de uma requisição HTTP (o `BillingSchedulerService`, disparado por `@Cron`/
+  `OnApplicationBootstrap`) não podem injetar um serviço request-scoped, então a lógica de geração
+  de cobrança em lote foi extraída para singletons sem dependência de request (ver
+  `SubscriptionsBillingService`/`EmployeeRecurringPaymentsBillingService`, que não injetam
+  `CompanyContextService` — cobrem todas as empresas de uma vez em cada execução, ver seção de
+  Cobrança automática abaixo).
+  No frontend, `src/lib/auth.ts` guarda o access token em uma variável de módulo (nunca storage),
+  `src/components/RequireAuth.tsx` protege todas as rotas sob `/app`, e a sidebar em
+  `src/layouts/AppLayout.tsx` é module-gated: só mostra os links dos módulos presentes em
+  `user.modules` (o mesmo array armazenado em `User.modules`, editável em Usuários e Acessos —
+  `src/pages/app/UsersManagement.tsx`). **Pendência explícita, com o mesmo destaque das outras
+  pendências desta seção: `POST /auth/register` não tem nenhum gate de cobrança/pagamento atrás —
+  qualquer pessoa pode criar uma empresa nova de graça hoje.** Isso é uma decisão deliberada da
+  spec desta etapa (o objetivo era ter autenticação/multi-tenant reais primeiro), não um
+  esquecimento — mas precisa ser endereçada antes de expor o registro publicamente em produção.
+  Também fora do escopo, deliberadamente: recuperação de senha por e-mail e MFA. Ver
+  `[[DECISOES-TECNICAS]]` seção 10 para o detalhe completo (incluindo o histórico do stub de
+  empresa única que essa implementação substituiu, antes descrito na seção 8).
 - **Férias — sem cálculo de saldo, com teto flat de 30 dias (decisão revertida em 11/09/2026):** o
   projeto não tem, e nunca teve no escopo pretendido, o conceito de "saldo de férias". A calculadora
   de saldo/dias/adicional de 1/3 (`VacationCalculationService`, que existiu por um curto período)
@@ -170,10 +203,17 @@ relevantes:
 - ~~`Employee.salaryRecurrenceEnabled` não era lido por essa automação~~ — **resolvido**:
   `generateDueCharges()` do lado de funcionário agora exige `salaryRecurrenceEnabled: true` além do
   `status: 'ACTIVE'` da recorrência.
-- O scheduler cobra **só uma empresa por execução** — `CompanyContextService.getCurrentCompanyId()`
-  é um stub de empresa única (ver seção de RH acima) e `BillingSchedulerService` não itera múltiplas
-  empresas; sem problema hoje, mas precisa ser endereçado quando multi-tenant/autenticação real
-  chegar.
+- ~~O scheduler cobra só uma empresa por execução~~ — **resolvido como efeito colateral da
+  autenticação real (13/09/2026)**: `CompanyContextService` virou `@Injectable({ scope:
+  Scope.REQUEST })` (ver seção de RH acima), e um provider request-scoped não pode ser injetado
+  num serviço disparado por `@Cron`/`OnApplicationBootstrap` (não há requisição HTTP em voo). A
+  lógica de geração em lote foi por isso extraída para `SubscriptionsBillingService`/
+  `EmployeeRecurringPaymentsBillingService` (`backend/src/subscriptions/` e
+  `backend/src/employee-recurring-payments/`), singletons sem nenhuma dependência de
+  `CompanyContextService`/request — eles buscam `Subscription`/`EmployeeRecurringPayment`
+  vencidos em **todas** as empresas de uma vez (a FK até `Client`/`Employee` já basta pra isolar os
+  dados certos por empresa), então `BillingSchedulerService` cobre o banco inteiro numa única
+  execução, não mais uma empresa por vez.
 - A checagem de bootstrap roda **de forma síncrona antes do app aceitar tráfego HTTP** (é
   `await`ada, não fire-and-forget); com uma base muito grande de recorrências isso pode atrasar o
   boot — tradeoff aceito por ora (mantém os testes simples), fica como otimização futura.

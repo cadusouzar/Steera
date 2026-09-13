@@ -57,6 +57,20 @@ export async function login(email: string, password: string): Promise<CurrentUse
   return applySession(await res.json());
 }
 
+export async function register(companyName: string, email: string, password: string): Promise<CurrentUser> {
+  const res = await fetch(`${API_URL}/auth/register`, {
+    method: 'POST',
+    credentials: 'include', // necessário pro cookie httpOnly do refresh token ir/voltar
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ companyName, email, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string });
+    throw new Error(body.message || 'Não foi possível criar a conta');
+  }
+  return applySession(await res.json());
+}
+
 export async function logout(): Promise<void> {
   await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => undefined);
   clearSession();

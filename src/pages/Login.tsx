@@ -104,7 +104,7 @@ const Login = () => {
           </form>
 
           <div className="mt-8 text-center text-sm text-foreground/60">
-            Ainda não tem uma conta? <a href="/#pricing" className="text-primary hover:underline">Veja nossos planos</a>
+            Ainda não tem uma conta? <Link to="/register" className="text-primary hover:underline">Criar conta</Link>
           </div>
         </motion.div>
       </div>

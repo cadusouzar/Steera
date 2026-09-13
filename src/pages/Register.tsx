@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import FlowBackground from '../components/FlowBackground';
+import { register } from '../lib/auth';
 
 const Register = () => {
   const [searchParams] = useSearchParams();
@@ -13,6 +14,12 @@ const Register = () => {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isCovering, setIsCovering] = useState(false);
 
+  const [companyName, setCompanyName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   useEffect(() => {
     const plan = searchParams.get('plan');
     if (plan) {
@@ -20,9 +27,18 @@ const Register = () => {
     }
   }, [searchParams]);
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate('/app');
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      await register(companyName, email, password);
+      navigate('/app');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível criar a conta.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -61,14 +77,22 @@ const Register = () => {
             )}
           </div>
 
+          {error && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
           <form className="space-y-4" onSubmit={handleRegister}>
             <div>
-              <label className="block text-sm font-medium text-foreground/80 mb-2">Nome Completo</label>
+              <label className="block text-sm font-medium text-foreground/80 mb-2">Nome da Empresa</label>
               <input
                 type="text"
                 required
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
                 className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                placeholder="Seu nome"
+                placeholder="Nome da sua empresa"
                 onFocus={() => setIsCovering(false)}
               />
             </div>
@@ -78,6 +102,8 @@ const Register = () => {
               <input
                 type="email"
                 required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                 placeholder="nome@empresa.com"
                 onFocus={() => setIsCovering(false)}
@@ -89,15 +115,22 @@ const Register = () => {
               <input
                 type="password"
                 required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                placeholder="Crie uma senha forte"
+                placeholder="Crie uma senha forte (mín. 8 caracteres)"
                 onFocus={() => setIsCovering(true)}
                 onBlur={() => setIsCovering(false)}
               />
             </div>
 
-            <button className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 mt-4">
-              Criar Conta
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 mt-4 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? 'Criando conta...' : 'Criar Conta'}
             </button>
           </form>
 
