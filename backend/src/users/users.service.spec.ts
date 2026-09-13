@@ -10,7 +10,10 @@ describe('UsersService', () => {
   beforeEach(async () => {
     prisma = {
       employee: { findFirst: jest.fn() },
-      user: { findUnique: jest.fn(), findFirst: jest.fn(), count: jest.fn(), create: jest.fn(), update: jest.fn() },
+      user: {
+        findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(),
+        create: jest.fn(), update: jest.fn(),
+      },
       company: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },
       $transaction: jest.fn((ops) => Promise.all(ops)),
@@ -19,6 +22,23 @@ describe('UsersService', () => {
       providers: [UsersService, { provide: PrismaService, useValue: prisma }],
     }).compile();
     service = module.get(UsersService);
+  });
+
+  it('findAllForCompany never selects passwordHash', async () => {
+    prisma.user.findMany.mockResolvedValue([]);
+    await service.findAllForCompany('c1');
+    const call = prisma.user.findMany.mock.calls[0][0];
+    expect(call.where).toEqual({ companyId: 'c1' });
+    expect(call.select).toBeDefined();
+    expect(call.select.passwordHash).toBeUndefined();
+  });
+
+  it('create never selects passwordHash back for the created user', async () => {
+    prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin3@a.com', role: 'ADMIN' });
+    await service.create('c1', { email: 'admin3@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+    const call = prisma.user.create.mock.calls[0][0];
+    expect(call.select).toBeDefined();
+    expect(call.select.passwordHash).toBeUndefined();
   });
 
   it('rejects creating an EMPLOYEE login without employeeId', async () => {

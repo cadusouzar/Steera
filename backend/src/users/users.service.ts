@@ -7,12 +7,33 @@ import { UpdatePlanDto } from './dto/update-plan.dto';
 
 const PLAN_LIMITS: Record<string, number> = { BASICO: 10, PRO: 50, EMPRESARIAL: 999_999 };
 
+// Nunca inclui passwordHash — espelha o padrão já usado em AuthService
+// (login/register/getProfile), que sempre devolve um objeto montado à mão em
+// vez do row cru do Prisma. GET /companies/me/users não tem @Roles('ADMIN')
+// (qualquer login autenticado da empresa pode listar), então isso vale tanto
+// pra não vazar hash pra admin quanto pra um login EMPLOYEE comum.
+const SAFE_USER_SELECT = {
+  id: true,
+  companyId: true,
+  email: true,
+  role: true,
+  employeeId: true,
+  modules: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   findAllForCompany(companyId: string) {
-    return this.prisma.user.findMany({ where: { companyId }, orderBy: { createdAt: 'asc' } });
+    return this.prisma.user.findMany({
+      where: { companyId },
+      orderBy: { createdAt: 'asc' },
+      select: SAFE_USER_SELECT,
+    });
   }
 
   async create(companyId: string, dto: CreateUserDto) {
@@ -49,6 +70,7 @@ export class UsersService {
         employeeId: dto.role === 'EMPLOYEE' ? dto.employeeId : null,
         modules: dto.modules,
       },
+      select: SAFE_USER_SELECT,
     });
 
     return { user, temporaryPassword };
