@@ -1,10 +1,26 @@
+import { getAccessToken, refreshOnce } from './auth';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
+  const token = getAccessToken();
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    credentials: 'include', // manda o cookie httpOnly do refresh token em toda chamada
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
   });
+
+  // 401 pode ser access token expirado — tenta renovar silenciosamente uma
+  // única vez (isRetry evita loop infinito se o refresh também falhar) antes
+  // de desistir e propagar o erro.
+  if (res.status === 401 && !isRetry) {
+    const renewed = await refreshOnce();
+    if (renewed) return request<T>(path, options, true);
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { message?: string });
