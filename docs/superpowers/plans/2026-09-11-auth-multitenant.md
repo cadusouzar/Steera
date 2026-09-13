@@ -261,7 +261,7 @@ git commit -m "feat(backend): add password hashing and refresh-token utilities"
 - Consumes: `hashPassword`/`verifyPassword`/`generateRefreshTokenValue`/`hashRefreshToken` (Task 2), `PrismaService` (já existente).
 - Produces: `AuthService` com `register`, `login`, `refresh`, `logout`, `changePassword`; `JwtAuthGuard` (já preparado pra virar guard global na Task 4, respeitando `@Public()`); decorator `@CurrentUser()` retornando `{ userId, companyId, role, modules }`; decorator `@Public()`; rotas `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` (as 4 marcadas `@Public()` — não exigem token, óbvio, ninguém tem token antes de logar), `GET /auth/me`, `PATCH /auth/me/password`.
 
-**Ruling de pré-voo (registrado no ledger):** o plano original não tinha rota "quem sou eu" nenhuma — `Task 7` (frontend) dependia de decodificar o JWT no cliente ou inventar uma chamada a `/companies/me/users`, e ficou marcado como "ressalva a resolver durante a implementação". Resolvido agora, antes de qualquer dispatch: adicionada `GET /auth/me` aqui mesmo, e o texto da Task 7 foi ajustado pra usá-la — sem ambiguidade sobrando pro implementador decidir sozinho.
+**Ruling de pré-voo (registrado no ledger):** o plano original não tinha rota "quem sou eu" nenhuma — `Task 8` (frontend, renumerada — era Task 7 na primeira versão do plano) dependia de decodificar o JWT no cliente ou inventar uma chamada a `/companies/me/users`, e ficou marcado como "ressalva a resolver durante a implementação". Resolvido agora, antes de qualquer dispatch: adicionada `GET /auth/me` aqui mesmo, e o texto da Task 8 foi ajustado pra usá-la — sem ambiguidade sobrando pro implementador decidir sozinho.
 
 **Contexto importante:** `POST /auth/register` cria uma `Company` nova + o primeiro `User` (`role=ADMIN`, todos os módulos, sem `employeeId`) numa transação. **Isso é um substituto temporário e documentado** para o que, quando o pagamento real existir, ficará atrás de uma confirmação de cobrança — hoje qualquer um que chame essa rota cria uma empresa nova de graça. Isso é aceitável nesta etapa (mesmo espírito do stub de empresa única que já existia) mas precisa ficar bem documentado como pendência, não como omissão.
 
@@ -827,7 +827,7 @@ npm test
 npm run build
 npm run lint
 ```
-Esperado: 100% dos testes unitários (`*.spec.ts` dentro de `src/`) continuam passando sem nenhuma mudança neles — eles instanciam services diretamente via `Test.createTestingModule` com providers mockados, nunca passam pela camada HTTP/guards de verdade, então um guard global não os afeta. (`backend/test/app.e2e-spec.ts`, que SIM faz chamadas HTTP reais, é endereçado separadamente na Task 6 — não faz parte deste `npm test`.)
+Esperado: 100% dos testes unitários (`*.spec.ts` dentro de `src/`) continuam passando sem nenhuma mudança neles — eles instanciam services diretamente via `Test.createTestingModule` com providers mockados, nunca passam pela camada HTTP/guards de verdade, então um guard global não os afeta. (`backend/test/app.e2e-spec.ts`, que SIM faz chamadas HTTP reais, é endereçado separadamente na Task 7 (renumerada — era Task 6 na primeira versão do plano) — não faz parte deste `npm test`.)
 
 - [ ] **Passo 5: Commit**
 
@@ -838,7 +838,677 @@ git commit -m "feat(backend): make CompanyContextService read from the authentic
 
 ---
 
-### Task 5: `UsersModule` — admin gerencia logins
+### Task 5: Financeiro ganha isolamento real de tenant + corrige quebra do cron de cobrança
+
+**Contexto (por que esta task existe, inserida depois do plano original):** a Task 4 tornou `CompanyContextService` request-scoped e o `JwtAuthGuard` global — ou seja, todo o backend passou a exigir autenticação de verdade. Ao verificar isso manualmente com duas empresas diferentes, ficou confirmado que `Client`/`Receivable`/`Subscription` (todo o módulo Financeiro) **nunca tiveram `companyId` nenhum** e `ClientsService`/`ReceivablesService`/`SubscriptionsService`/`ReportsService` nunca chamam `CompanyContextService` — ao contrário do módulo de RH, que já fazia isso certo (`RolesService` é o exemplo mais simples). Antes da Task 4, isso era invisível (só existia uma empresa no banco, stub). Agora que login real existe, **qualquer empresa que se cadastrar enxerga os clientes/lançamentos/assinaturas de todas as outras** — vazamento de dado financeiro entre inquilinos, confirmado ao vivo (duas empresas, mesmos 6 clientes visíveis pras duas). Esta task fecha esse buraco antes de qualquer outra parte do plano continuar.
+
+Verificado também nesta descoberta: ligar `CompanyContextService` a `ClientsService` (necessário pra corrigir o vazamento acima) teria o efeito colateral de quebrar o cron `purgeExpiredTrashCron` já existente — o mesmo mecanismo que **já quebrou silenciosamente**, ao vivo, o cron diário de cobrança automática (`BillingSchedulerService`) assim que a Task 4 foi mergeada (confirmado subindo o backend de verdade: `[Scheduler] Cannot register cron job "BillingSchedulerService@runDailyCron" because it is defined in a non static provider.` — o motivo é que `EmployeeRecurringPaymentsService`, que já injetava `CompanyContextService` desde antes desta etapa, virou `Scope.REQUEST` transitivamente, e `BillingSchedulerService` injeta esse service no construtor, ficando request-scoped por tabela — e o NestJS/`@nestjs/schedule` **não consegue** registrar um `@Cron`/`OnApplicationBootstrap` num provider que não seja singleton). Esta task corrige os dois problemas juntos, porque são a mesma causa raiz: nenhum código que roda fora de uma requisição HTTP (cron) pode depender, nem transitivamente, de `CompanyContextService`.
+
+**Files:**
+- Modify: `backend/prisma/schema.prisma` (`companyId` em `Client`, relação inversa `clients Client[]` em `Company`)
+- Create: nova migration em `backend/prisma/migrations/`
+- Modify: `backend/src/clients/clients.service.ts`, `backend/src/clients/clients.service.spec.ts`, `backend/src/clients/clients.module.ts`
+- Create: `backend/src/clients/client-trash.service.ts`, `backend/src/clients/client-trash.service.spec.ts`
+- Modify: `backend/src/receivables/receivables.service.ts`, `backend/src/receivables/receivables.service.spec.ts`, `backend/src/receivables/receivables.module.ts`
+- Modify: `backend/src/subscriptions/subscriptions.service.ts`, `backend/src/subscriptions/subscriptions.service.spec.ts`, `backend/src/subscriptions/subscriptions.module.ts`
+- Create: `backend/src/subscriptions/subscriptions-billing.service.ts`, `backend/src/subscriptions/subscriptions-billing.service.spec.ts`
+- Modify: `backend/src/employee-recurring-payments/employee-recurring-payments.service.ts`, `backend/src/employee-recurring-payments/employee-recurring-payments.service.spec.ts`, `backend/src/employee-recurring-payments/employee-recurring-payments.module.ts`
+- Create: `backend/src/employee-recurring-payments/charge.util.ts`, `backend/src/employee-recurring-payments/employee-recurring-payments-billing.service.ts`, `backend/src/employee-recurring-payments/employee-recurring-payments-billing.service.spec.ts`
+- Modify: `backend/src/reports/reports.service.ts`, `backend/src/reports/reports.service.spec.ts`, `backend/src/reports/reports.module.ts`
+- Modify: `backend/src/billing/billing-scheduler.service.ts`, `backend/src/billing/billing-scheduler.service.spec.ts`
+
+**Interfaces:**
+- Consumes: `CompanyContextService.getCurrentCompanyId()` (já existe, real desde a Task 4).
+- Produces: `ClientsService`/`ReceivablesService`/`SubscriptionsService`/`ReportsService` todos filtram por `companyId` da empresa autenticada; `ClientTrashService`, `SubscriptionsBillingService`, `EmployeeRecurringPaymentsBillingService` (novos, singleton, SEM `CompanyContextService`) — usados só por `BillingSchedulerService`, que volta a ser singleton de verdade (cron funcionando de novo).
+
+**Decisão deliberada (registrar, não é omissão):** `Receivable`/`Subscription` NÃO ganham coluna `companyId` própria nesta task — diferente do padrão de denormalização já usado no módulo de RH (`EmployeePayment`/`EmployeeRecurringPayment` carregam `companyId` direto). Aqui, filtrar via a relação (`client: { companyId }`) é suficiente pra fechar o mesmo buraco de segurança com uma migration bem mais simples (uma tabela só, `Client`, precisa de backfill) — se performance de índice em `Receivable`/`Subscription` por empresa virar um problema real medido, denormalizar depois é aditivo, não um retrabalho.
+
+- [ ] **Passo 1: Adicionar `companyId` a `Client` e migrar com segurança**
+
+Em `backend/prisma/schema.prisma`, no `model Client`, adicionar:
+```prisma
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+```
+(mantendo os campos/índices já existentes) e adicionar `@@index([companyId])` ao bloco de índices existente do modelo.
+
+No `model Company` já existente, adicionar dentro do bloco:
+```prisma
+  clients Client[]
+```
+
+Antes de gerar a migration, confirme no banco local que existe pelo menos uma linha em `Company` (rode `npx prisma studio` ou uma query direta) — se por algum motivo não existir nenhuma e houver `Client`s órfãos, crie manualmente uma `Company` de fallback antes do backfill abaixo (não deveria acontecer neste banco de dev, mas o passo de verificação é obrigatório, não opcional).
+
+Como este é um backfill (coluna nova `NOT NULL` numa tabela com dados existentes), gerar a migration manualmente em vez de deixar o `prisma migrate dev` interativo perguntar por um default:
+```bash
+cd backend
+mkdir -p prisma/migrations/$(date +%Y%m%d%H%M%S)_add_client_company_id
+```
+Nomeie a pasta com um timestamp maior que o da última migration existente (`ls prisma/migrations/` pra conferir). Dentro dela, crie `migration.sql`:
+```sql
+ALTER TABLE "Client" ADD COLUMN "companyId" TEXT;
+UPDATE "Client" SET "companyId" = (SELECT "id" FROM "Company" ORDER BY "createdAt" ASC LIMIT 1);
+ALTER TABLE "Client" ALTER COLUMN "companyId" SET NOT NULL;
+ALTER TABLE "Client" ADD CONSTRAINT "Client_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "Client_companyId_idx" ON "Client"("companyId");
+```
+Aplicar e verificar, seguindo o ritual já estabelecido neste projeto (nunca `db push --accept-data-loss`):
+```bash
+npx prisma migrate deploy
+npx prisma generate
+npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script
+```
+O último comando deve reportar "This is an empty migration." — confirma banco e schema realmente sincronizados.
+
+- [ ] **Passo 2: `ClientsService` — extrair a purga de lixeira pra um singleton sem `CompanyContextService`, e escopar o resto por empresa**
+
+`backend/src/clients/client-trash.service.ts` (novo arquivo — roda via `@Cron`, fora de qualquer requisição, por isso nunca injeta `CompanyContextService`; a purga em si não precisa de escopo de empresa, apaga o mesmo critério em todas):
+```ts
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { ClientStatus } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class ClientTrashService {
+  private readonly logger = new Logger(ClientTrashService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async purgeExpiredTrashCron() {
+    try {
+      const count = await this.purgeExpiredTrash();
+      if (count > 0) this.logger.log(`Purged ${count} client(s) from the trash`);
+    } catch (err) {
+      this.logger.error('Failed to purge expired client trash', err instanceof Error ? err.stack : String(err));
+    }
+  }
+
+  async purgeExpiredTrash(): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    const result = await this.prisma.client.deleteMany({
+      where: {
+        status: ClientStatus.INACTIVE,
+        includeInRevenueReport: false,
+        deactivatedAt: { lt: cutoff },
+      },
+    });
+    return result.count;
+  }
+}
+```
+
+`backend/src/clients/client-trash.service.spec.ts` (mesmo padrão de mock de `PrismaService` já usado em todo o backend):
+```ts
+import { Test } from '@nestjs/testing';
+import { PrismaService } from '../prisma/prisma.service';
+import { ClientTrashService } from './client-trash.service';
+
+describe('ClientTrashService', () => {
+  let service: ClientTrashService;
+  let prisma: { client: { deleteMany: jest.Mock } };
+
+  beforeEach(async () => {
+    prisma = { client: { deleteMany: jest.fn() } };
+    const module = await Test.createTestingModule({
+      providers: [ClientTrashService, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+    service = module.get(ClientTrashService);
+  });
+
+  it('deletes clients past the 30-day cutoff with includeInRevenueReport=false', async () => {
+    prisma.client.deleteMany.mockResolvedValue({ count: 3 });
+    const count = await service.purgeExpiredTrash();
+    expect(count).toBe(3);
+    expect(prisma.client.deleteMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ status: 'INACTIVE', includeInRevenueReport: false }),
+    });
+  });
+
+  it('purgeExpiredTrashCron never throws even when the purge fails', async () => {
+    prisma.client.deleteMany.mockRejectedValue(new Error('db down'));
+    await expect(service.purgeExpiredTrashCron()).resolves.toBeUndefined();
+  });
+});
+```
+
+Agora reescreva `backend/src/clients/clients.service.ts` inteiro:
+```ts
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ClientStatus, ReceivableStatus, SubscriptionStatus } from '@prisma/client';
+import { CompanyContextService } from '../company/company-context.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { startOfToday } from '../common/date.util';
+import { ClientTrashService } from './client-trash.service';
+import { CreateClientDto } from './dto/create-client.dto';
+import { DeactivateClientDto } from './dto/deactivate-client.dto';
+import { QueryClientsDto } from './dto/query-clients.dto';
+import { UpdateClientDto } from './dto/update-client.dto';
+
+@Injectable()
+export class ClientsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companyContext: CompanyContextService,
+    private readonly clientTrash: ClientTrashService,
+  ) {}
+
+  async create(dto: CreateClientDto) {
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    return this.prisma.client.create({ data: { ...dto, companyId } });
+  }
+
+  async findAll(query: QueryClientsDto) {
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    const where = {
+      companyId,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.excludeTrashed
+        ? { NOT: { status: ClientStatus.INACTIVE, includeInRevenueReport: false } }
+        : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { name: { contains: query.search, mode: 'insensitive' as const } },
+              { category: { contains: query.search, mode: 'insensitive' as const } },
+              { contact: { contains: query.search, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.client.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.client.count({ where }),
+    ]);
+
+    return { items, total, page, pageSize };
+  }
+
+  // Rota top-level (/clients/:id) — o único jeito de barrar acesso entre
+  // empresas aqui é filtrar por companyId diretamente nesta query (mesmo
+  // padrão de RolesService.assertExists).
+  private async assertExists(id: string) {
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const client = await this.prisma.client.findFirst({ where: { id, companyId } });
+    if (!client) throw new NotFoundException(`Cliente ${id} não encontrado`);
+    return client;
+  }
+
+  async findOne(id: string) {
+    const client = await this.assertExists(id);
+    const today = startOfToday();
+
+    const [paidAgg, pendingAgg, overdueAgg] = await Promise.all([
+      this.prisma.receivable.aggregate({
+        _sum: { amount: true },
+        where: { clientId: id, status: ReceivableStatus.PAID },
+      }),
+      this.prisma.receivable.aggregate({
+        _sum: { amount: true },
+        where: { clientId: id, status: ReceivableStatus.PENDING, dueDate: { gte: today } },
+      }),
+      this.prisma.receivable.aggregate({
+        _sum: { amount: true },
+        where: { clientId: id, status: ReceivableStatus.PENDING, dueDate: { lt: today } },
+      }),
+    ]);
+
+    return {
+      ...client,
+      totalPaid: Number(paidAgg._sum.amount ?? 0),
+      totalPending: Number(pendingAgg._sum.amount ?? 0),
+      totalOverdue: Number(overdueAgg._sum.amount ?? 0),
+    };
+  }
+
+  async update(id: string, dto: UpdateClientDto) {
+    await this.assertExists(id);
+    return this.prisma.client.update({ where: { id }, data: dto });
+  }
+
+  async deactivate(id: string, dto: DeactivateClientDto) {
+    const client = await this.assertExists(id);
+    if (client.status === ClientStatus.INACTIVE) {
+      throw new ConflictException(`Cliente ${id} já está inativo`);
+    }
+
+    const [updatedClient] = await this.prisma.$transaction([
+      this.prisma.client.update({
+        where: { id },
+        data: {
+          status: ClientStatus.INACTIVE,
+          includeInRevenueReport: dto.includeInRevenueReport,
+          deactivatedAt: new Date(),
+        },
+      }),
+      this.prisma.subscription.updateMany({
+        where: { clientId: id, status: SubscriptionStatus.ACTIVE },
+        data: { status: SubscriptionStatus.INACTIVE },
+      }),
+    ]);
+
+    return updatedClient;
+  }
+
+  async restore(id: string) {
+    const client = await this.assertExists(id);
+    if (client.status === ClientStatus.ACTIVE) {
+      throw new ConflictException(`Cliente ${id} já está ativo`);
+    }
+    return this.prisma.client.update({
+      where: { id },
+      data: { status: ClientStatus.ACTIVE, deactivatedAt: null },
+    });
+  }
+
+  // A purga em si (ClientTrashService.purgeExpiredTrash) roda sem escopo de
+  // empresa — deleta de todas ao mesmo tempo, é seguro (mesmo critério
+  // absoluto pra todas). A listagem que este método devolve, sim, é
+  // escopada pra empresa autenticada.
+  async findTrash() {
+    await this.clientTrash.purgeExpiredTrash();
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    return this.prisma.client.findMany({
+      where: { companyId, status: ClientStatus.INACTIVE, includeInRevenueReport: false },
+      orderBy: { deactivatedAt: 'asc' },
+    });
+  }
+}
+```
+
+Atualize `backend/src/clients/clients.service.spec.ts`: adicione `CompanyContextService` (mock `getCurrentCompanyId: jest.fn().mockResolvedValue('company-1')`, mesmo padrão de `roles.service.spec.ts`) e `ClientTrashService` (mock `purgeExpiredTrash: jest.fn().mockResolvedValue(0)`) aos providers do `Test.createTestingModule`; ajuste as expectativas de `findFirst`/`create`/`findMany` que já existirem pra incluir `companyId` no `where`/`data` esperado, e mova qualquer teste que hoje exercite `purgeExpiredTrashCron`/`purgeExpiredTrash` diretamente em `ClientsService` para o novo `client-trash.service.spec.ts` (já escrito acima).
+
+`backend/src/clients/clients.module.ts`:
+```ts
+import { Module } from '@nestjs/common';
+import { CompanyModule } from '../company/company.module';
+import { ClientsController } from './clients.controller';
+import { ClientsService } from './clients.service';
+import { ClientTrashService } from './client-trash.service';
+
+@Module({
+  imports: [CompanyModule],
+  controllers: [ClientsController],
+  providers: [ClientsService, ClientTrashService],
+  exports: [ClientsService],
+})
+export class ClientsModule {}
+```
+
+- [ ] **Passo 3: `ReceivablesService` — escopar por empresa via a relação com `Client`**
+
+Em `backend/src/receivables/receivables.service.ts`, injete `CompanyContextService` no construtor e escope `ensureClientExists`/`assertExists`/`findAllForClient` pela empresa atual:
+```ts
+constructor(
+  private readonly prisma: PrismaService,
+  private readonly companyContext: CompanyContextService,
+) {}
+
+private async ensureClientExists(clientId: string) {
+  const companyId = await this.companyContext.getCurrentCompanyId();
+  const client = await this.prisma.client.findFirst({ where: { id: clientId, companyId } });
+  if (!client) throw new NotFoundException(`Cliente ${clientId} não encontrado`);
+  return client;
+}
+
+private async assertExists(id: string): Promise<Receivable> {
+  const companyId = await this.companyContext.getCurrentCompanyId();
+  const found = await this.prisma.receivable.findFirst({ where: { id, client: { companyId } } });
+  if (!found) throw new NotFoundException(`Lançamento ${id} não encontrado`);
+  return found;
+}
+```
+`findAllForClient` já chama `ensureClientExists(clientId)` primeiro — nenhuma outra mudança necessária lá além da própria checagem ficar escopada. Adicione o import de `CompanyContextService` do módulo `../company/company-context.service`. Atualize `receivables.service.spec.ts` com o mesmo mock de `CompanyContextService` usado em `roles.service.spec.ts`/`clients.service.spec.ts`, ajustando os `where` esperados nos testes existentes de `findFirst`. Atualize `backend/src/receivables/receivables.module.ts` pra importar `CompanyModule` (mesmo formato do `ClientsModule` acima).
+
+- [ ] **Passo 4: `SubscriptionsService` — escopar CRUD por empresa; extrair `generateDueCharges` pra um singleton sem `CompanyContextService`**
+
+`backend/src/subscriptions/subscriptions-billing.service.ts` (novo arquivo — roda via `BillingSchedulerService`, fora de requisição HTTP, processa TODAS as empresas numa passada só, igual o comportamento que `generateDueCharges` já tinha antes de existir multi-tenant; por isso nunca injeta `CompanyContextService`):
+```ts
+import { Injectable, Logger } from '@nestjs/common';
+import { ClientStatus, Prisma, ReceivableStatus, SubscriptionStatus } from '@prisma/client';
+import { startOfToday } from '../common/date.util';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class SubscriptionsBillingService {
+  private readonly logger = new Logger(SubscriptionsBillingService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  private async createChargeForSubscription(subscription: {
+    id: string;
+    clientId: string;
+    description: string;
+    amount: Prisma.Decimal;
+    dueDay: number;
+  }) {
+    const now = new Date();
+    const dueDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), subscription.dueDay));
+    const monthLabel = now.toLocaleString('pt-BR', { month: 'long' });
+    return this.prisma.receivable.create({
+      data: {
+        clientId: subscription.clientId,
+        subscriptionId: subscription.id,
+        referenceYear: now.getFullYear(),
+        referenceMonth: now.getMonth() + 1,
+        description: `${subscription.description} (${monthLabel})`,
+        amount: subscription.amount,
+        dueDate,
+        status: ReceivableStatus.PENDING,
+      },
+    });
+  }
+
+  async generateDueCharges(): Promise<{ checked: number; generated: number }> {
+    const today = startOfToday();
+    const currentDay = today.getUTCDate();
+    const referenceYear = today.getUTCFullYear();
+    const referenceMonth = today.getUTCMonth() + 1;
+    const lastDayOfMonth = new Date(Date.UTC(referenceYear, referenceMonth, 0)).getUTCDate();
+    const effectiveDay = currentDay === lastDayOfMonth ? 31 : currentDay;
+
+    const dueSubscriptions = await this.prisma.subscription.findMany({
+      where: {
+        status: SubscriptionStatus.ACTIVE,
+        dueDay: { lte: effectiveDay },
+        client: { status: { not: ClientStatus.INACTIVE } },
+        receivables: { none: { referenceYear, referenceMonth } },
+      },
+    });
+
+    let generated = 0;
+    for (const subscription of dueSubscriptions) {
+      try {
+        await this.createChargeForSubscription(subscription);
+        generated++;
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          continue; // outra execução já gerou esta cobrança — esperado, ignorado.
+        }
+        this.logger.error(
+          `Falha ao gerar cobrança da assinatura ${subscription.id}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+    return { checked: dueSubscriptions.length, generated };
+  }
+}
+```
+
+`backend/src/subscriptions/subscriptions-billing.service.spec.ts` — mesmo padrão de mock de `PrismaService`, cobrindo pelo menos: gera cobrança para assinatura vencida sem lançamento do mês; ignora (não loga como erro) uma colisão `P2002`; loga erro em qualquer outra falha; conta `checked`/`generated` corretamente.
+
+Em `backend/src/subscriptions/subscriptions.service.ts`: **remova** o método `generateDueCharges` inteiro (movido acima). Injete `CompanyContextService` e escope `ensureClientExists`/`assertExists` como em `ReceivablesService` (mesmo padrão: `findFirst` com `{ id: clientId, companyId }` e `{ id, client: { companyId } }` respectivamente). `generateCharge(id)` continua igual (usado pelo botão manual "Gerar Fatura do Mês", chamado sempre dentro de uma requisição autenticada — sem mudança de comportamento aí, só herda o `assertExists` já escopado).
+
+Atualize `subscriptions.service.spec.ts`: adicione o mock de `CompanyContextService`, ajuste os `where` esperados, e mova qualquer teste de `generateDueCharges` pro novo spec file criado acima.
+
+`backend/src/subscriptions/subscriptions.module.ts`:
+```ts
+import { Module } from '@nestjs/common';
+import { CompanyModule } from '../company/company.module';
+import { SubscriptionsController } from './subscriptions.controller';
+import { SubscriptionsService } from './subscriptions.service';
+import { SubscriptionsBillingService } from './subscriptions-billing.service';
+
+@Module({
+  imports: [CompanyModule],
+  controllers: [SubscriptionsController],
+  providers: [SubscriptionsService, SubscriptionsBillingService],
+  exports: [SubscriptionsService, SubscriptionsBillingService],
+})
+export class SubscriptionsModule {}
+```
+
+- [ ] **Passo 5: `EmployeeRecurringPaymentsService` — extrair `generateDueCharges` pro mesmo tipo de singleton**
+
+`backend/src/employee-recurring-payments/charge.util.ts` (novo arquivo — função pura compartilhada entre o método usado pela rota HTTP manual e o novo singleton de cron, pra não duplicar o cálculo de data/label em dois lugares):
+```ts
+import { Prisma } from '@prisma/client';
+
+export interface RecurringChargeSource {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  description: string;
+  amount: Prisma.Decimal;
+  dueDay: number;
+}
+
+export function buildRecurringChargeData(recurring: RecurringChargeSource, now: Date) {
+  const dueDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), recurring.dueDay));
+  const monthLabel = now.toLocaleString('pt-BR', { month: 'long' });
+  return {
+    companyId: recurring.companyId,
+    employeeId: recurring.employeeId,
+    recurringPaymentId: recurring.id,
+    referenceYear: now.getFullYear(),
+    referenceMonth: now.getMonth() + 1,
+    description: `${recurring.description} (${monthLabel})`,
+    amount: recurring.amount,
+    dueDate,
+    status: 'PENDING' as const,
+  };
+}
+```
+
+`backend/src/employee-recurring-payments/employee-recurring-payments-billing.service.ts` (novo arquivo — mesmo raciocínio de `SubscriptionsBillingService`: roda fora de requisição, nunca injeta `CompanyContextService`, processa todas as empresas numa passada):
+```ts
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { startOfToday } from '../common/date.util';
+import { PrismaService } from '../prisma/prisma.service';
+import { buildRecurringChargeData } from './charge.util';
+
+@Injectable()
+export class EmployeeRecurringPaymentsBillingService {
+  private readonly logger = new Logger(EmployeeRecurringPaymentsBillingService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async generateDueCharges(): Promise<{ checked: number; generated: number }> {
+    const today = startOfToday();
+    const currentDay = today.getUTCDate();
+    const referenceYear = today.getUTCFullYear();
+    const referenceMonth = today.getUTCMonth() + 1;
+    const lastDayOfMonth = new Date(Date.UTC(referenceYear, referenceMonth, 0)).getUTCDate();
+    const effectiveDay = currentDay === lastDayOfMonth ? 31 : currentDay;
+
+    const dueRecurringPayments = await this.prisma.employeeRecurringPayment.findMany({
+      where: {
+        status: 'ACTIVE',
+        dueDay: { lte: effectiveDay },
+        employee: { status: { not: 'INACTIVE' }, salaryRecurrenceEnabled: true },
+        payments: { none: { referenceYear, referenceMonth } },
+      },
+    });
+
+    let generated = 0;
+    for (const recurring of dueRecurringPayments) {
+      try {
+        await this.prisma.employeePayment.create({ data: buildRecurringChargeData(recurring, new Date()) });
+        generated++;
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          continue;
+        }
+        this.logger.error(
+          `Falha ao gerar pagamento da recorrência ${recurring.id}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+    return { checked: dueRecurringPayments.length, generated };
+  }
+}
+```
+
+`backend/src/employee-recurring-payments/employee-recurring-payments-billing.service.spec.ts` — mesmo padrão de mock de `PrismaService`, mesmos casos mínimos do spec de `SubscriptionsBillingService` acima, adaptados pra `employeeRecurringPayment`/`employeePayment`.
+
+Em `backend/src/employee-recurring-payments/employee-recurring-payments.service.ts`:
+1. **Remova** o método `generateDueCharges` inteiro (movido acima).
+2. Reescreva `generateCharge` pra usar a função pura compartilhada:
+```ts
+async generateCharge(id: string) {
+  const recurring = await this.assertExists(id);
+  const employee = await this.employeesService.assertExists(recurring.employeeId);
+  if (employee.status === 'INACTIVE') {
+    throw new BadRequestException(`Não é possível gerar pagamento: funcionário ${recurring.employeeId} está inativo`);
+  }
+  try {
+    return await this.prisma.employeePayment.create({ data: buildRecurringChargeData(recurring, new Date()) });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new ConflictException('Já existe um pagamento gerado para esta recorrência neste mês.');
+    }
+    throw err;
+  }
+}
+```
+(adicione o import `import { buildRecurringChargeData } from './charge.util';`). O resto da classe (`create`, `findAllForEmployee`, `assertExists`, `findOne`, `update`, `remove`) não muda — já usa `CompanyContextService` corretamente desde antes desta task.
+
+Atualize `employee-recurring-payments.service.spec.ts`: remova os testes de `generateDueCharges` (movidos pro novo spec file) e ajuste o teste de `generateCharge` se ele verificava o formato exato do objeto passado pra `create` (deve continuar batendo, já que `buildRecurringChargeData` produz o mesmo formato de antes).
+
+`backend/src/employee-recurring-payments/employee-recurring-payments.module.ts`:
+```ts
+import { Module } from '@nestjs/common';
+import { CompanyModule } from '../company/company.module';
+import { EmployeesModule } from '../employees/employees.module';
+import { EmployeeRecurringPaymentsController } from './employee-recurring-payments.controller';
+import { EmployeeRecurringPaymentsService } from './employee-recurring-payments.service';
+import { EmployeeRecurringPaymentsBillingService } from './employee-recurring-payments-billing.service';
+
+@Module({
+  imports: [EmployeesModule, CompanyModule],
+  controllers: [EmployeeRecurringPaymentsController],
+  providers: [EmployeeRecurringPaymentsService, EmployeeRecurringPaymentsBillingService],
+  exports: [EmployeeRecurringPaymentsService, EmployeeRecurringPaymentsBillingService],
+})
+export class EmployeeRecurringPaymentsModule {}
+```
+
+- [ ] **Passo 6: `ReportsService` — escopar o resumo financeiro por empresa**
+
+Em `backend/src/reports/reports.service.ts`, injete `CompanyContextService` e adicione `companyId` ao filtro já existente:
+```ts
+constructor(
+  private readonly prisma: PrismaService,
+  private readonly companyContext: CompanyContextService,
+) {}
+
+async financialSummary(topDefaulters = 5) {
+  const companyId = await this.companyContext.getCurrentCompanyId();
+  const today = startOfToday();
+  const revenueClientFilter = { client: { companyId, includeInRevenueReport: true } };
+  // ... resto do método sem nenhuma outra mudança (revenueClientFilter já é usado em todos os 4 lugares)
+}
+```
+Atualize `reports.service.spec.ts` com o mesmo mock de `CompanyContextService`. `backend/src/reports/reports.module.ts` ganha `imports: [CompanyModule]` (mesmo formato dos outros módulos acima).
+
+- [ ] **Passo 7: `BillingSchedulerService` — voltar a ser singleton de verdade**
+
+Reescreva `backend/src/billing/billing-scheduler.service.ts` trocando as duas dependências pelos novos singletons:
+```ts
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { EmployeeRecurringPaymentsBillingService } from '../employee-recurring-payments/employee-recurring-payments-billing.service';
+import { SubscriptionsBillingService } from '../subscriptions/subscriptions-billing.service';
+
+interface DueChargesResult {
+  checked: number;
+  generated: number;
+}
+
+@Injectable()
+export class BillingSchedulerService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(BillingSchedulerService.name);
+
+  constructor(
+    private readonly subscriptionsBilling: SubscriptionsBillingService,
+    private readonly employeeRecurringPaymentsBilling: EmployeeRecurringPaymentsBillingService,
+  ) {}
+
+  async onApplicationBootstrap() {
+    await this.runCatchUp('inicialização');
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async runDailyCron() {
+    await this.runCatchUp('cron diário');
+  }
+
+  private async runCatchUp(trigger: string) {
+    const subs = await this.safeGenerate(
+      () => this.subscriptionsBilling.generateDueCharges(),
+      'assinaturas de clientes',
+      trigger,
+    );
+    const employees = await this.safeGenerate(
+      () => this.employeeRecurringPaymentsBilling.generateDueCharges(),
+      'recorrências de funcionário',
+      trigger,
+    );
+
+    const totalGenerated = (subs?.generated ?? 0) + (employees?.generated ?? 0);
+    if (totalGenerated > 0) {
+      this.logger.log(
+        `Cobrança automática (${trigger}): ${subs?.generated ?? 0} assinatura(s), ` +
+          `${employees?.generated ?? 0} recorrência(s) de funcionário geradas.`,
+      );
+    }
+  }
+
+  private async safeGenerate(
+    fn: () => Promise<DueChargesResult>,
+    label: string,
+    trigger: string,
+  ): Promise<DueChargesResult | null> {
+    try {
+      return await fn();
+    } catch (err) {
+      this.logger.error(
+        `Falha na cobrança automática de ${label} (${trigger})`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      return null;
+    }
+  }
+}
+```
+Atualize `billing-scheduler.service.spec.ts` só nos nomes das variáveis mockadas (`subscriptionsBilling`/`employeeRecurringPaymentsBilling` em vez de `subscriptionsService`/`employeeRecurringPaymentsService`) — o comportamento testado não muda. `backend/src/billing/billing.module.ts` já importa `SubscriptionsModule`/`EmployeeRecurringPaymentsModule`, que agora exportam os novos singletons também — nenhuma mudança de import necessária ali.
+
+- [ ] **Passo 8: Verificação manual — provar que o vazamento fechou E que o cron voltou a registrar**
+
+Com o backend rodando de verdade (reinicie pra pegar o schema/DI atualizados):
+1. Confirme no log de boot que a linha `Cannot register cron job "BillingSchedulerService@runDailyCron" because it is defined in a non static provider` **não aparece mais**.
+2. Registre (ou reutilize) duas empresas diferentes via `/auth/register`. Crie um cliente em cada uma (`POST /clients` autenticado como cada admin). `GET /clients` de cada uma deve devolver **só o próprio cliente**, nunca o da outra.
+3. Repita o mesmo teste para `GET /clients/trash` (lixeira) e `GET /reports/financial-summary` (totais/inadimplentes não devem incluir a outra empresa).
+4. Tente `GET /receivables/:id`/`GET /subscriptions/:id` de um lançamento/assinatura pertencente à empresa A autenticado como um usuário da empresa B — confirme `404` (não deve nem revelar que o recurso existe).
+
+- [ ] **Passo 9: Rodar testes, build, lint e commitar**
+
+```bash
+cd backend
+npm test
+npm run build
+npm run lint
+git add prisma/schema.prisma prisma/migrations src/clients src/receivables src/subscriptions src/employee-recurring-payments src/reports src/billing
+git commit -m "fix(backend): scope Financeiro (Client/Receivable/Subscription/Reports) by tenant; fix billing cron broken by request-scoped CompanyContextService"
+```
+
+---
+
+### Task 6: `UsersModule` — admin gerencia logins
 
 **Files:**
 - Create: `backend/src/users/dto/create-user.dto.ts`
@@ -1148,7 +1818,7 @@ git commit -m "feat(backend): add UsersModule (create/list/block/unblock logins,
 
 ---
 
-### Task 6: Validação final do backend
+### Task 7: Validação final do backend
 
 **Files:**
 - Modify: `backend/test/app.e2e-spec.ts`
@@ -1213,7 +1883,7 @@ Com o backend rodando (`npm run start:dev`):
 
 ---
 
-### Task 7: Frontend — camada de sessão
+### Task 8: Frontend — camada de sessão
 
 **Files:**
 - Create: `src/lib/auth.ts`
@@ -1362,7 +2032,7 @@ git commit -m "feat(frontend): add in-memory session layer with silent token ref
 
 ---
 
-### Task 8: Frontend — login real + rotas protegidas
+### Task 9: Frontend — login real + rotas protegidas
 
 **Files:**
 - Modify: `src/pages/Login.tsx`
@@ -1370,7 +2040,7 @@ git commit -m "feat(frontend): add in-memory session layer with silent token ref
 - Modify: `src/App.tsx`
 
 **Interfaces:**
-- Consumes: `login`/`restoreSession`/`getCurrentUser` (Task 7).
+- Consumes: `login`/`restoreSession`/`getCurrentUser` (Task 8).
 
 - [ ] **Passo 1: `Login.tsx` real**
 
@@ -1433,7 +2103,7 @@ Localizar onde `AppLayout` é montado nas rotas e envolver com `<Route element={
 - [ ] **Passo 4: `tsc`/`eslint` limpos + verificação manual real no navegador**
 
 1. Sem sessão, acessar `/app/funcionarios` direto pela URL → confirma redirecionamento pra `/login`.
-2. Logar com um usuário criado via `/auth/register` (Task 6, passo 2) → confirma redirecionamento pra `/app` e acesso normal.
+2. Logar com um usuário criado via `/auth/register` (Task 7, passo 2) → confirma redirecionamento pra `/app` e acesso normal.
 3. Recarregar a página (F5) dentro de `/app` → confirma que continua logado (sessão restaurada via cookie), não volta pro login.
 
 - [ ] **Passo 5: Commit**
@@ -1445,13 +2115,13 @@ git commit -m "feat(frontend): wire real login and protect /app routes"
 
 ---
 
-### Task 9: Frontend — navegação restrita por módulo + logout
+### Task 10: Frontend — navegação restrita por módulo + logout
 
 **Files:**
 - Modify: `src/layouts/AppLayout.tsx`
 
 **Interfaces:**
-- Consumes: `getCurrentUser` (Task 7), `logout` (Task 7).
+- Consumes: `getCurrentUser` (Task 8), `logout` (Task 8).
 
 - [ ] **Passo 1: Mapear cada item de navegação existente pro módulo correspondente**
 
@@ -1459,7 +2129,7 @@ Ex.: "Clientes" → `CLIENTES`, os itens de RH (Funcionários/Cargos/Controle de
 
 - [ ] **Passo 2: Ligar o logout**
 
-No local onde já existe `UserProfileDropdown`/`UserProfileDrawer` (ver ação de sair já mockada, se existir), chamar `logout()` do Task 7 e `navigate('/login')` depois.
+No local onde já existe `UserProfileDropdown`/`UserProfileDrawer` (ver ação de sair já mockada, se existir), chamar `logout()` do Task 8 e `navigate('/login')` depois.
 
 - [ ] **Passo 3: Verificação manual**
 
@@ -1475,7 +2145,7 @@ git commit -m "feat(frontend): gate sidebar navigation by the current user's mod
 
 ---
 
-### Task 10: Frontend — `UsersManagement.tsx` real
+### Task 11: Frontend — `UsersManagement.tsx` real
 
 **Files:**
 - Modify: `src/lib/api.ts` (adicionar funções de `companies/me/users`)
@@ -1513,7 +2183,7 @@ Remover `mockUsers`/`AVAILABLE_ROLES` fixo. Carregar via `listSystemUsers()` + `
 - [ ] **Passo 3: Verificação manual real no navegador**
 
 1. Como ADMIN, criar um login `EMPLOYEE` pra um funcionário existente, com só o módulo RH — confirma que a senha temporária aparece uma vez.
-2. Deslogar, logar com esse novo usuário e essa senha — confirma acesso restrito (Task 9).
+2. Deslogar, logar com esse novo usuário e essa senha — confirma acesso restrito (Task 10).
 3. Tentar criar outro login pro mesmo funcionário — confirma erro "já possui login".
 4. Bloquear o login recém-criado — confirma que uma nova tentativa de login dele falha.
 
@@ -1527,7 +2197,7 @@ git commit -m "feat(frontend): connect UsersManagement to real login administrat
 
 ---
 
-### Task 11: Validação final + documentação
+### Task 12: Validação final + documentação
 
 **Files:**
 - Modify: `CLAUDE.md`
