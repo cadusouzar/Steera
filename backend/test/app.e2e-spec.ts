@@ -9,6 +9,13 @@ describe('QuickFlow backend (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let authHeader: string;
+  let e2eCompanyId: string;
+  // Unique per run so a second `npm run test:e2e` against the same database
+  // never collides with the row this suite itself left behind — collisions
+  // used to surface as an unhandled 500 from POST /auth/register (fixed
+  // separately in AuthService.register, but this suite shouldn't rely on
+  // that fix alone: idempotency here is the real guarantee).
+  const e2eEmail = `e2e-${Date.now()}@test.com`;
 
   beforeAll(async () => {
     // These tests create and delete real rows. Refuse to touch anything but the
@@ -35,12 +42,20 @@ describe('QuickFlow backend (e2e)', () => {
     // and thread the resulting access token through every request below.
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
-      .send({ companyName: 'E2E Test Co', email: 'e2e@test.com', password: 'senha-de-teste-12345' })
+      .send({ companyName: 'E2E Test Co', email: e2eEmail, password: 'senha-de-teste-12345' })
       .expect(201);
     authHeader = `Bearer ${registerRes.body.accessToken}`;
+
+    const e2eUser = await prisma.user.findUniqueOrThrow({ where: { email: e2eEmail } });
+    e2eCompanyId = e2eUser.companyId;
   });
 
   afterAll(async () => {
+    // Mirrors the cleanup pattern every other test in this file already uses
+    // in its own `finally` block — this suite creates its own tenant/admin
+    // too, so it cleans up after itself the same way. Cascades to the User
+    // row and its RefreshTokens (both onDelete: Cascade from Company/User).
+    await prisma.company.delete({ where: { id: e2eCompanyId } });
     await app.close();
   });
 

@@ -1,6 +1,7 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import * as passwordUtil from './password.util';
@@ -12,7 +13,7 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     prisma = {
-      user: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
+      user: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(), create: jest.fn() },
       refreshToken: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn() },
       $transaction: jest.fn((cb) => cb(prisma)),
       company: { create: jest.fn() },
@@ -72,6 +73,20 @@ describe('AuthService', () => {
     const result = await service.refresh('algum-valor', fakeRes);
     expect(result.accessToken).toBe('signed.jwt.token');
     expect(prisma.refreshToken.update).toHaveBeenCalledWith({ where: { id: 'rt1' }, data: { replacedByTokenId: 'rt2' } });
+  });
+
+  it('register rejects a duplicate email with a clean 409 instead of an unhandled 500', async () => {
+    prisma.company.create.mockResolvedValue({ id: 'company-1', name: 'Empresa Duplicada' });
+    prisma.user.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`email`)', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+        meta: { target: ['email'] },
+      }),
+    );
+    await expect(
+      service.register({ companyName: 'Empresa Duplicada', email: 'ja-existe@test.com', password: 'senha12345' }, fakeRes),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('changePassword rejects an incorrect current password', async () => {

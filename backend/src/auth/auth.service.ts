@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { AppModule as AppModuleEnum } from '@prisma/client';
+import { AppModule as AppModuleEnum, Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPassword, verifyPassword } from './password.util';
@@ -47,18 +47,29 @@ export class AuthService {
 
   async register(dto: { companyName: string; email: string; password: string }, res: Response) {
     const passwordHash = await hashPassword(dto.password);
-    const user = await this.prisma.$transaction(async (tx) => {
-      const company = await tx.company.create({ data: { name: dto.companyName } });
-      return tx.user.create({
-        data: {
-          companyId: company.id,
-          email: dto.email,
-          passwordHash,
-          role: 'ADMIN',
-          modules: ALL_MODULES,
-        },
+    let user;
+    try {
+      user = await this.prisma.$transaction(async (tx) => {
+        const company = await tx.company.create({ data: { name: dto.companyName } });
+        return tx.user.create({
+          data: {
+            companyId: company.id,
+            email: dto.email,
+            passwordHash,
+            role: 'ADMIN',
+            modules: ALL_MODULES,
+          },
+        });
       });
-    });
+    } catch (err) {
+      // P2002 = unique constraint violation on User.email. Sem isso, um
+      // e-mail duplicado (retry do usuário, ou dois cadastros concorrentes)
+      // vazava como 500 opaco em vez de um erro de negócio claro.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Este e-mail já está cadastrado');
+      }
+      throw err;
+    }
     const accessToken = this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
