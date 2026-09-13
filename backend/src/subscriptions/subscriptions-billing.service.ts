@@ -12,6 +12,7 @@ export class SubscriptionsBillingService {
   private async createChargeForSubscription(subscription: {
     id: string;
     clientId: string;
+    companyId: string;
     description: string;
     amount: Prisma.Decimal;
     dueDay: number;
@@ -22,6 +23,7 @@ export class SubscriptionsBillingService {
     return this.prisma.receivable.create({
       data: {
         clientId: subscription.clientId,
+        companyId: subscription.companyId,
         subscriptionId: subscription.id,
         referenceYear: now.getFullYear(),
         referenceMonth: now.getMonth() + 1,
@@ -33,6 +35,14 @@ export class SubscriptionsBillingService {
     });
   }
 
+  // Called by BillingSchedulerService once per company, already wrapped in
+  // `runWithTenant(companyId, ...)` — the RLS backstop's tenant context
+  // means the query below is automatically scoped to that one company at
+  // the database level (this method never filters by companyId itself,
+  // relying on the same RLS session variable every other request-driven
+  // query in the app relies on). This method has no HTTP request/req.user of
+  // its own (it runs from a @Cron job / OnApplicationBootstrap), which is
+  // exactly why the caller must establish that context explicitly.
   async generateDueCharges(): Promise<{ checked: number; generated: number }> {
     const today = startOfToday();
     const currentDay = today.getUTCDate();

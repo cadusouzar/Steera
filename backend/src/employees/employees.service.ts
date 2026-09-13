@@ -4,6 +4,7 @@ import { normalizeCpf } from '../common/cpf.util';
 import { parseDateOnly } from '../common/date.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { runTenantTransaction } from '../prisma/tenant-rls.extension';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -125,7 +126,7 @@ export class EmployeesService {
       throw new ConflictException(`Funcionário ${id} já está inativo`);
     }
 
-    const [updated] = await this.prisma.$transaction([
+    const [updated] = await runTenantTransaction(this.prisma, [
       this.prisma.employee.update({
         where: { id },
         data: { status: EmployeeStatus.INACTIVE, terminationDate: new Date() },

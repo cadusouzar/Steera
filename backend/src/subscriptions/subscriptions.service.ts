@@ -16,18 +16,22 @@ export class SubscriptionsService {
     const companyId = await this.companyContext.getCurrentCompanyId();
     const client = await this.prisma.client.findFirst({ where: { id: clientId, companyId } });
     if (!client) throw new NotFoundException(`Cliente ${clientId} não encontrado`);
+    return client;
   }
 
   private async assertExists(id: string): Promise<Subscription> {
     const companyId = await this.companyContext.getCurrentCompanyId();
-    const found = await this.prisma.subscription.findFirst({ where: { id, client: { companyId } } });
+    // Direct companyId filter (Subscription now carries its own companyId —
+    // see the RLS backstop migration) instead of the previous
+    // `client: { companyId }` subquery-shaped filter.
+    const found = await this.prisma.subscription.findFirst({ where: { id, companyId } });
     if (!found) throw new NotFoundException(`Assinatura ${id} não encontrada`);
     return found;
   }
 
   async create(clientId: string, dto: CreateSubscriptionDto) {
-    await this.ensureClientExists(clientId);
-    return this.prisma.subscription.create({ data: { ...dto, clientId } });
+    const client = await this.ensureClientExists(clientId);
+    return this.prisma.subscription.create({ data: { ...dto, clientId, companyId: client.companyId } });
   }
 
   async findAllForClient(clientId: string) {
@@ -71,6 +75,7 @@ export class SubscriptionsService {
       return await this.prisma.receivable.create({
         data: {
           clientId: subscription.clientId,
+          companyId: subscription.companyId,
           subscriptionId: subscription.id,
           referenceYear,
           referenceMonth,

@@ -49,7 +49,7 @@ describe('SubscriptionsService', () => {
     prisma.subscription.findFirst.mockResolvedValue(null);
     await expect(service.findOne('sub-other-company')).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.subscription.findFirst).toHaveBeenCalledWith({
-      where: { id: 'sub-other-company', client: { companyId: 'company-1' } },
+      where: { id: 'sub-other-company', companyId: 'company-1' },
     });
   });
 

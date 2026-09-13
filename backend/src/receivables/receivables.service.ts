@@ -36,7 +36,11 @@ export class ReceivablesService {
 
   private async assertExists(id: string): Promise<Receivable> {
     const companyId = await this.companyContext.getCurrentCompanyId();
-    const found = await this.prisma.receivable.findFirst({ where: { id, client: { companyId } } });
+    // Direct companyId filter (added alongside the RLS backstop migration —
+    // Receivable now carries its own companyId instead of only being
+    // reachable via the client relation) — simpler and faster than the
+    // previous `client: { companyId }` subquery-shaped filter.
+    const found = await this.prisma.receivable.findFirst({ where: { id, companyId } });
     if (!found) throw new NotFoundException(`Lançamento ${id} não encontrado`);
     return found;
   }
@@ -47,7 +51,7 @@ export class ReceivablesService {
       throw new BadRequestException(`Não é possível criar lançamentos para o cliente ${clientId}: cliente inativo`);
     }
     const created = await this.prisma.receivable.create({
-      data: { ...dto, dueDate: parseDateOnly(dto.dueDate), clientId },
+      data: { ...dto, dueDate: parseDateOnly(dto.dueDate), clientId, companyId: client.companyId },
     });
     return toResponse(created);
   }

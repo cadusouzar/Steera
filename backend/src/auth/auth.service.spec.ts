@@ -19,6 +19,12 @@ describe('AuthService', () => {
       // callback (register()) e array (changePassword(), espelhando
       // UsersService.block()).
       $transaction: jest.fn((arg) => (typeof arg === 'function' ? arg(prisma) : Promise.all(arg))),
+      // Called by runAsSystem/runTenantInteractiveTransaction (register()) to
+      // set the RLS bypass session var before running the callback — see
+      // tenant-rls.extension.ts. Not exercised by any assertion in this file
+      // (these tests never set up a real ALS tenant context), just needs to
+      // exist so `tx.$executeRaw` doesn't blow up as `undefined()`.
+      $executeRaw: jest.fn(),
       company: { create: jest.fn() },
     };
     const module = await Test.createTestingModule({

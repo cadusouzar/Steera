@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { runTenantTransaction } from '../prisma/tenant-rls.extension';
 import { hashPassword } from '../auth/password.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -110,7 +111,7 @@ export class UsersService {
     // encontrado nesta empresa" (nunca vaza pra um admin de outra empresa se
     // o id existe em outro tenant).
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
-    await this.prisma.$transaction([
+    await runTenantTransaction(this.prisma, [
       this.prisma.user.update({ where: { id: userId }, data: { status: 'BLOCKED' } }),
       this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
     ]);

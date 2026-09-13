@@ -3,6 +3,8 @@ import { JwtService } from '@nestjs/jwt';
 import { AppModule as AppModuleEnum, Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import { runAsSystem } from '../prisma/tenant-context';
+import { runTenantInteractiveTransaction, runTenantTransaction } from '../prisma/tenant-rls.extension';
 import { hashPassword, verifyPassword } from './password.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 
@@ -61,18 +63,25 @@ export class AuthService {
     const passwordHash = await hashPassword(dto.password);
     let user;
     try {
-      user = await this.prisma.$transaction(async (tx) => {
-        const company = await tx.company.create({ data: { name: dto.companyName } });
-        return tx.user.create({
-          data: {
-            companyId: company.id,
-            email: dto.email,
-            passwordHash,
-            role: 'ADMIN',
-            modules: ALL_MODULES,
-          },
-        });
-      });
+      // runAsSystem: this is THE call site that creates a brand new tenant —
+      // there is no companyId to scope by yet (it's created inside this very
+      // transaction), and this route is @Public() (no req.user, no tenant
+      // context from TenantContextInterceptor). See the RLS migration's
+      // comment and the RLS report for the full reasoning on this bypass.
+      user = await runAsSystem(() =>
+        runTenantInteractiveTransaction(this.prisma, async (tx) => {
+          const company = await tx.company.create({ data: { name: dto.companyName } });
+          return tx.user.create({
+            data: {
+              companyId: company.id,
+              email: dto.email,
+              passwordHash,
+              role: 'ADMIN',
+              modules: ALL_MODULES,
+            },
+          });
+        }),
+      );
     } catch (err) {
       // P2002 = unique constraint violation on User.email. Sem isso, um
       // e-mail duplicado (retry do usuário, ou dois cadastros concorrentes)
@@ -95,7 +104,11 @@ export class AuthService {
   }
 
   async login(dto: { email: string; password: string }, res: Response) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    // runAsSystem: email is globally unique (not scoped to a company), and
+    // there is no way to know which company a user belongs to before we've
+    // found them by email — this lookup is legitimately cross-tenant by
+    // necessity. See the RLS migration's comment for the full reasoning.
+    const user = await runAsSystem(() => this.prisma.user.findUnique({ where: { email: dto.email } }));
     // Mensagem genérica de propósito — nunca revelar se foi o e-mail ou a
     // senha que errou, isso ajudaria alguém tentando adivinhar contas válidas.
     if (!user || user.status !== 'ACTIVE' || !(await verifyPassword(user.passwordHash, dto.password))) {
@@ -113,7 +126,12 @@ export class AuthService {
   async refresh(refreshCookieValue: string | undefined, res: Response) {
     if (!refreshCookieValue) throw new UnauthorizedException('Sessão não encontrada');
     const tokenHash = hashRefreshToken(refreshCookieValue);
-    const existing = await this.prisma.refreshToken.findUnique({ where: { tokenHash }, include: { user: true } });
+    // runAsSystem: `include: { user: true }` joins against the RLS-protected
+    // User table before any tenant context exists for this request (this
+    // route is @Public()) — same reasoning as login() above.
+    const existing = await runAsSystem(() =>
+      this.prisma.refreshToken.findUnique({ where: { tokenHash }, include: { user: true } }),
+    );
     if (!existing || existing.expiresAt < new Date()) {
       throw new UnauthorizedException('Sessão expirada, faça login novamente');
     }
@@ -156,7 +174,7 @@ export class AuthService {
     // revogado) logado indefinidamente — a troca de senha "resolveria" nada
     // pra esse invasor. mustChangePassword some aqui também: é exatamente o
     // ato que ele existe pra forçar.
-    await this.prisma.$transaction([
+    await runTenantTransaction(this.prisma, [
       this.prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false } }),
       this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
     ]);

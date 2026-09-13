@@ -60,6 +60,14 @@ model Receivable {
   // includeInRevenueReport=false) — deleting a Client there deletes its
   // receivables/subscriptions too.
   client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  // Added for the RLS backstop (defense-in-depth migration): previously this
+  // table was only scoped to a company indirectly, via `client.companyId`.
+  // A direct, indexed companyId column is what lets the RLS policy on this
+  // table be a simple, fast `"companyId" = current_setting(...)` check
+  // instead of a subquery through Client. Backfilled from Client.companyId
+  // at migration time — see the migration SQL for the exact backfill query.
+  companyId   String
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   // Null for manually-created receivables. Set only for charges generated via
   // Subscription.generateCharge — SetNull (not Cascade) so deleting a subscription
   // never deletes the historical financial records it already generated.
@@ -85,6 +93,7 @@ model Receivable {
   @@index([clientId])
   @@index([dueDate])
   @@index([status])
+  @@index([companyId])
 }
 
 model Subscription {
@@ -95,6 +104,9 @@ model Subscription {
   // includeInRevenueReport=false) — deleting a Client there deletes its
   // receivables/subscriptions too.
   client      Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  // Same rationale/backfill as Receivable.companyId above.
+  companyId   String
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   description String
   amount      Decimal            @db.Decimal(10, 2)
   dueDay      Int
@@ -104,6 +116,7 @@ model Subscription {
   receivables Receivable[]
 
   @@index([clientId])
+  @@index([companyId])
 }
 
 enum AppModule {
@@ -172,6 +185,8 @@ model Company {
   updatedAt         DateTime        @updatedAt
   users             User[]
   clients           Client[]
+  receivables       Receivable[]
+  subscriptions     Subscription[]
 }
 
 model Role {

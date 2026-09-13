@@ -112,7 +112,7 @@ describe('ReceivablesService', () => {
     prisma.receivable.findFirst.mockResolvedValue(null);
     await expect(service.findOne('other-company-id')).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.receivable.findFirst).toHaveBeenCalledWith({
-      where: { id: 'other-company-id', client: { companyId: 'company-1' } },
+      where: { id: 'other-company-id', companyId: 'company-1' },
     });
   });
 
