@@ -1,7 +1,11 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { ScheduleLeaveDto } from './dto/schedule-leave.dto';
 import { LeaveSchedulesService } from './leave-schedules.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('RH')
 @Controller()
 export class LeaveSchedulesController {
   constructor(private readonly service: LeaveSchedulesService) {}

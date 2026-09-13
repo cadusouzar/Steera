@@ -1,9 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateEmployeePaymentDto } from './dto/create-employee-payment.dto';
 import { QueryEmployeePaymentsDto } from './dto/query-employee-payments.dto';
 import { UpdateEmployeePaymentDto } from './dto/update-employee-payment.dto';
 import { EmployeePaymentsService } from './employee-payments.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('RH')
 @Controller()
 export class EmployeePaymentsController {
   constructor(private readonly service: EmployeePaymentsService) {}

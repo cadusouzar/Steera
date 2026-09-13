@@ -1,8 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateEmployeeRecurringPaymentDto } from './dto/create-employee-recurring-payment.dto';
 import { UpdateEmployeeRecurringPaymentDto } from './dto/update-employee-recurring-payment.dto';
 import { EmployeeRecurringPaymentsService } from './employee-recurring-payments.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('RH')
 @Controller()
 export class EmployeeRecurringPaymentsController {
   constructor(private readonly service: EmployeeRecurringPaymentsService) {}

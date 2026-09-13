@@ -1,9 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateReceivableDto } from './dto/create-receivable.dto';
 import { QueryReceivablesDto } from './dto/query-receivables.dto';
 import { UpdateReceivableDto } from './dto/update-receivable.dto';
 import { ReceivablesService } from './receivables.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('CLIENTES')
 @Controller()
 export class ReceivablesController {
   constructor(private readonly receivablesService: ReceivablesService) {}

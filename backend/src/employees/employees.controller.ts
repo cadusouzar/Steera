@@ -1,11 +1,15 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { toEmployeeDetail, toEmployeeListItem } from './employee-response.mapper';
 import { EmployeesService } from './employees.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('RH')
 @Controller('employees')
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}

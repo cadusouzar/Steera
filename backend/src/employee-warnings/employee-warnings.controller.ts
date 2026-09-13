@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateEmployeeWarningDto } from './dto/create-employee-warning.dto';
 import { UpdateEmployeeWarningDto } from './dto/update-employee-warning.dto';
 import { EmployeeWarningsService } from './employee-warnings.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('RH')
 @Controller()
 export class EmployeeWarningsController {
   constructor(private readonly warningsService: EmployeeWarningsService) {}

@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { ResumeVacationDto } from './dto/resume-vacation.dto';
 import { ScheduleVacationDto } from './dto/schedule-vacation.dto';
 import { VacationSchedulesService } from './vacation-schedules.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('RH')
 @Controller()
 export class VacationSchedulesController {
   constructor(private readonly service: VacationSchedulesService) {}

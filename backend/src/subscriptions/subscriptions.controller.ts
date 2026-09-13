@@ -1,8 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { SubscriptionsService } from './subscriptions.service';
 
+@UseGuards(ModulesGuard)
+@RequireModule('CLIENTES')
 @Controller()
 export class SubscriptionsController {
   constructor(private readonly subscriptionsService: SubscriptionsService) {}
