@@ -8,6 +8,7 @@ import { RegisterDto } from './dto/register.dto';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
 import { AllowDuringForcedPasswordChange } from './decorators/allow-during-forced-password-change.decorator';
 import { Public } from './decorators/public.decorator';
+import { AntiCsrfHeaderGuard } from './guards/anti-csrf-header.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { loginEmailTracker } from './login-throttle.util';
 
@@ -36,8 +37,12 @@ export class AuthController {
   // novos a cada chamada bem-sucedida (rastrear por e-mail não faz o mesmo
   // sentido de "várias tentativas contra a MESMA conta" que faz em login) —
   // só o throttler "default" (por IP) se aplica aqui.
+  //
+  // AntiCsrfHeaderGuard roda ANTES do ThrottlerGuard de propósito: uma
+  // requisição sem o cabeçalho é rejeitada com 400 sem consumir uma unidade
+  // do bucket de throttle (ver anti-csrf-header.guard.ts).
   @Public()
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(AntiCsrfHeaderGuard, ThrottlerGuard)
   @SkipThrottle({ 'login-email': true })
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
   @Post('register')
@@ -50,8 +55,10 @@ export class AuthController {
   // (novo) por e-mail, sem IP na chave — fecha a lacuna de um atacante que
   // faz brute-force de UM e-mail conhecido rotacionando IPs, que o "default"
   // sozinho não pega (cada IP novo começa com bucket zerado).
+  // AntiCsrfHeaderGuard (ver register acima e anti-csrf-header.guard.ts) roda
+  // antes dos throttlers pelo mesmo motivo.
   @Public()
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(AntiCsrfHeaderGuard, ThrottlerGuard)
   @Throttle({
     default: { limit: 5, ttl: 900_000 },
     'login-email': { limit: 5, ttl: 900_000, getTracker: loginEmailTracker },

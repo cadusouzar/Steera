@@ -59,7 +59,11 @@ export async function login(email: string, password: string): Promise<CurrentUse
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
     credentials: 'include', // necessário pro cookie httpOnly do refresh token ir/voltar
-    headers: { 'Content-Type': 'application/json' },
+    // X-Requested-With: mitigação simples de CSRF exigida pelo backend
+    // (ver AntiCsrfHeaderGuard) — um <form> HTML cross-site não consegue
+    // setar cabeçalhos customizados, então isso já barra esse vetor sem
+    // precisar de um token CSRF de verdade.
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
@@ -73,7 +77,9 @@ export async function register(companyName: string, email: string, password: str
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
     credentials: 'include', // necessário pro cookie httpOnly do refresh token ir/voltar
-    headers: { 'Content-Type': 'application/json' },
+    // X-Requested-With: mesma mitigação de CSRF do login acima (ver
+    // AntiCsrfHeaderGuard no backend).
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
     body: JSON.stringify({ companyName, email, password }),
   });
   if (!res.ok) {
