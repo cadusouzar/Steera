@@ -19,6 +19,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ReceivablesModule } from './receivables/receivables.module';
 import { ReportsModule } from './reports/reports.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     ReceivablesModule,
     SubscriptionsModule,
     ReportsModule,
+    UsersModule,
   ],
   providers: [
     // JwtAuthGuard já respeita @Public() (Task 3) — nega por padrão em toda
