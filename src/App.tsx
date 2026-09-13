@@ -4,6 +4,7 @@ import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import AppLayout from './layouts/AppLayout';
+import RequireAuth from './components/RequireAuth';
 import Overview from './pages/app/Overview';
 import Roles from './pages/app/Roles';
 import EmployeesList from './pages/app/EmployeesList';
@@ -27,20 +28,22 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           
-          <Route path="/app" element={<AppLayout />}>
-            <Route index element={<Overview />} />
-            <Route path="cargos" element={<Roles />} />
-            <Route path="funcionarios" element={<EmployeesList />} />
-            <Route path="funcionarios/novo" element={<EmployeeForm />} />
-            <Route path="ponto" element={<TimeTracking />} />
-            <Route path="clientes" element={<ClientsList />} />
-            <Route path="estoque" element={<InventoryList />} />
-            <Route path="compras" element={<PurchasingList />} />
-            <Route path="orcamentos" element={<QuotesList />} />
-            <Route path="financas" element={<FinancesSaaS />} />
-            <Route path="usuarios" element={<UsersManagement />} />
-            <Route path="analytics" element={<DashboardHub />} />
-            <Route path="analytics/:id" element={<DashboardBuilder />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/app" element={<AppLayout />}>
+              <Route index element={<Overview />} />
+              <Route path="cargos" element={<Roles />} />
+              <Route path="funcionarios" element={<EmployeesList />} />
+              <Route path="funcionarios/novo" element={<EmployeeForm />} />
+              <Route path="ponto" element={<TimeTracking />} />
+              <Route path="clientes" element={<ClientsList />} />
+              <Route path="estoque" element={<InventoryList />} />
+              <Route path="compras" element={<PurchasingList />} />
+              <Route path="orcamentos" element={<QuotesList />} />
+              <Route path="financas" element={<FinancesSaaS />} />
+              <Route path="usuarios" element={<UsersManagement />} />
+              <Route path="analytics" element={<DashboardHub />} />
+              <Route path="analytics/:id" element={<DashboardBuilder />} />
+            </Route>
           </Route>
         </Routes>
       </BrowserRouter>
