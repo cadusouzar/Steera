@@ -5,6 +5,11 @@ export interface CurrentUser {
   email: string;
   role: 'admin' | 'employee';
   modules: string[];
+  // true pra um login criado por um admin (UsersService.create(), senha
+  // temporária gerada pelo sistema) que ainda não trocou a senha — nunca
+  // true pra quem se registrou via POST /auth/register (escolheu a própria
+  // senha). RequireAuth usa isso pra forçar a troca antes de liberar o app.
+  mustChangePassword: boolean;
 }
 
 interface ApiUser {
@@ -12,6 +17,7 @@ interface ApiUser {
   email: string;
   role: string;
   modules: string[];
+  mustChangePassword: boolean;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -29,7 +35,13 @@ export function getCurrentUser(): CurrentUser | null {
 }
 
 function toCurrentUser(user: ApiUser): CurrentUser {
-  return { id: user.id, email: user.email, role: user.role.toLowerCase() as 'admin' | 'employee', modules: user.modules };
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role.toLowerCase() as 'admin' | 'employee',
+    modules: user.modules,
+    mustChangePassword: user.mustChangePassword,
+  };
 }
 
 function applySession(data: { accessToken: string; user: ApiUser }): CurrentUser {
@@ -76,6 +88,31 @@ export async function logout(): Promise<void> {
   clearSession();
 }
 
+// Usado pela troca de senha voluntária (futura tela de conta) e pelo fluxo
+// forçado de RequireAuth/ForcedPasswordChange (mustChangePassword). Fica
+// aqui, não em src/lib/api.ts, porque — como login/register/logout acima —
+// mexe diretamente no `currentUser` em memória deste módulo (limpa
+// mustChangePassword no sucesso, sem precisar de um round-trip extra pra
+// GET /auth/me).
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${API_URL}/auth/me/password`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string });
+    throw new Error(body.message || 'Não foi possível trocar a senha');
+  }
+  if (currentUser) {
+    currentUser = { ...currentUser, mustChangePassword: false };
+  }
+}
+
 // Garante que chamadas concorrentes a refreshOnce()/restoreSession()
 // (ex.: duas requisições da API expirando ao mesmo tempo e caindo em 401,
 // ou uma dessas rodando junto com restoreSession() na inicialização)
@@ -98,7 +135,18 @@ export async function refreshOnce(): Promise<boolean> {
     try {
       const res = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' });
       if (!res.ok) {
-        clearSession();
+        // 429 (rate limit) NÃO é prova de que a sessão é inválida — é só
+        // "tente de novo mais tarde". Sem essa distinção, um usuário que
+        // recarrega a página várias vezes seguidas em pouco tempo (cada
+        // reload chama refreshOnce() via RequireAuth) esgotava o bucket de
+        // /auth/refresh e era deslogado à força por um 429, mesmo com uma
+        // sessão perfeitamente válida — aí recarregava de novo, batia no
+        // mesmo bucket ainda esgotado, e ficava preso nesse loop. Qualquer
+        // outro !res.ok (401/403 de sessão expirada/revogada de verdade)
+        // continua limpando a sessão normalmente.
+        if (res.status !== 429) {
+          clearSession();
+        }
         return false;
       }
       const data = await res.json();

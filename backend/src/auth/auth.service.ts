@@ -73,7 +73,13 @@ export class AuthService {
     const accessToken = this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
-    return { accessToken, user: { id: user.id, email: user.email, role: user.role, modules: user.modules } };
+    // register() é o único lugar onde o próprio usuário escolhe a senha (não
+    // uma temporária gerada pelo sistema) — mustChangePassword nasce false
+    // aqui, ao contrário de UsersService.create().
+    return {
+      accessToken,
+      user: { id: user.id, email: user.email, role: user.role, modules: user.modules, mustChangePassword: user.mustChangePassword },
+    };
   }
 
   async login(dto: { email: string; password: string }, res: Response) {
@@ -86,7 +92,10 @@ export class AuthService {
     const accessToken = this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
-    return { accessToken, user: { id: user.id, email: user.email, role: user.role, modules: user.modules } };
+    return {
+      accessToken,
+      user: { id: user.id, email: user.email, role: user.role, modules: user.modules, mustChangePassword: user.mustChangePassword },
+    };
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {
@@ -128,16 +137,33 @@ export class AuthService {
       throw new BadRequestException('Senha atual incorreta');
     }
     const passwordHash = await hashPassword(dto.newPassword);
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    // Mesmo padrão de UsersService.block(): update de senha + revogação de
+    // TODOS os refresh tokens ativos numa única $transaction. Sem isso, um
+    // usuário que troca a senha por suspeita de conta comprometida deixaria
+    // um invasor com um refresh token já válido (não expirado, não
+    // revogado) logado indefinidamente — a troca de senha "resolveria" nada
+    // pra esse invasor. mustChangePassword some aqui também: é exatamente o
+    // ato que ele existe pra forçar.
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false } }),
+      this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+    ]);
   }
 
   // Usado por GET /auth/me — devolve o MESMO formato de `user` que
-  // login()/register() já devolvem ({ id, email, role, modules }), não os
-  // claims crus do JWT (que não carregam `email`). Mantém o frontend com um
-  // único formato de perfil pra lidar, venha ele de login ou de uma
-  // renovação de sessão após reload.
+  // login()/register() já devolvem ({ id, email, role, modules,
+  // mustChangePassword }), não os claims crus do JWT (que não carregam
+  // `email`/`mustChangePassword`). Mantém o frontend com um único formato de
+  // perfil pra lidar, venha ele de login ou de uma renovação de sessão após
+  // reload.
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    return { id: user.id, email: user.email, role: user.role, modules: user.modules };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      modules: user.modules,
+      mustChangePassword: user.mustChangePassword,
+    };
   }
 }

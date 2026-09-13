@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { getCurrentUser, restoreSession } from '../lib/auth';
+import ForcedPasswordChange from './ForcedPasswordChange';
 
 // Guarda de rota para tudo sob /app/*: no mount, se já não houver um
 // usuário em memória (ex.: acabou de logar nesta mesma carga de página),
@@ -11,6 +12,11 @@ import { getCurrentUser, restoreSession } from '../lib/auth';
 const RequireAuth = () => {
   const [checked, setChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(!!getCurrentUser());
+  // Espelha `currentUser.mustChangePassword` (login criado por um admin com
+  // senha temporária, ver UsersService.create()/Fix 6) — enquanto true,
+  // RequireAuth mostra ForcedPasswordChange no lugar do app inteiro, mesmo
+  // com `authenticated` true.
+  const [mustChangePassword, setMustChangePassword] = useState(!!getCurrentUser()?.mustChangePassword);
   // Em dev, o React.StrictMode invoca este efeito duas vezes por mount
   // (monta -> limpa -> monta de novo), o que dispararia duas chamadas
   // concorrentes de restoreSession() usando o MESMO cookie de refresh
@@ -24,7 +30,9 @@ const RequireAuth = () => {
   const restoreAttempted = useRef(false);
 
   useEffect(() => {
-    if (getCurrentUser()) {
+    const existing = getCurrentUser();
+    if (existing) {
+      setMustChangePassword(existing.mustChangePassword);
       setChecked(true);
       return;
     }
@@ -32,12 +40,17 @@ const RequireAuth = () => {
     restoreAttempted.current = true;
     restoreSession().then((user) => {
       setAuthenticated(!!user);
+      setMustChangePassword(!!user?.mustChangePassword);
       setChecked(true);
     });
   }, []);
 
   if (!checked) return null;
-  return authenticated ? <Outlet /> : <Navigate to="/login" replace />;
+  if (!authenticated) return <Navigate to="/login" replace />;
+  if (mustChangePassword) {
+    return <ForcedPasswordChange onDone={() => setMustChangePassword(false)} />;
+  }
+  return <Outlet />;
 };
 
 export default RequireAuth;

@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
 
@@ -77,6 +78,21 @@ describe('UsersService', () => {
     const result = await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', modules: ['RH'] } as any);
     expect(result.temporaryPassword).toHaveLength(16);
     expect(result.user.id).toBe('u1');
+  });
+
+  it('rejects creating a login with an e-mail already used by ANY company with a clean 409 instead of an unhandled 500', async () => {
+    // User.email é único GLOBALMENTE, não por empresa — mesmo padrão/mesmo
+    // bug já corrigido em AuthService.register() (ver auth.service.spec.ts).
+    prisma.user.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`email`)', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+        meta: { target: ['email'] },
+      }),
+    );
+    await expect(
+      service.create('c1', { email: 'ja-existe-em-outra-empresa@test.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('creates an ADMIN login without checking the employee-linked plan limit', async () => {

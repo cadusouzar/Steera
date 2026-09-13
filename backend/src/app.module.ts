@@ -27,11 +27,29 @@ import { UsersModule } from './users/users.module';
     // (and anything else reading DATABASE_URL) is instantiated.
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
-    // Limite padrão de 5 requisições a cada 15 min. Não é registrado como
-    // APP_GUARD global — só o AuthController aplica ThrottlerGuard
-    // explicitamente (ver auth.controller.ts), pra não limitar rotas de
-    // RH/Financeiro sem necessidade.
-    ThrottlerModule.forRoot([{ ttl: 900_000, limit: 5 }]),
+    // Limite padrão de 5 requisições a cada 15 min, por IP (throttler
+    // "default"). Não é registrado como APP_GUARD global — só o
+    // AuthController aplica ThrottlerGuard explicitamente (ver
+    // auth.controller.ts), pra não limitar rotas de RH/Financeiro sem
+    // necessidade.
+    //
+    // "login-email" é um segundo throttler nomeado, keyed só por e-mail
+    // (nunca por IP — ver login-throttle.util.ts), usado só em POST
+    // /auth/login pra fechar a lacuna de um atacante que faz brute-force de
+    // UM e-mail conhecido rotacionando IPs (o throttler "default" sozinho
+    // não pega isso, já que cada IP novo começa com um bucket zerado).
+    // register()/refresh() pulam esse throttler via @SkipThrottle — register
+    // cria um recurso novo a cada request (rastreio por e-mail não faz
+    // sentido do mesmo jeito) e refresh não tem e-mail no corpo. O limite
+    // aqui é o mesmo do "default" (5/15min) só por consistência com o valor
+    // já usado nesta mesma spec ("5 tentativas/15 min") — o valor de fato
+    // usado em runtime vem do @Throttle({'login-email': {...}}) no handler
+    // de login, este aqui é só o "existir" mínimo exigido pra esse nome
+    // aparecer em `this.throttlers` do guard.
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 900_000, limit: 5 },
+      { name: 'login-email', ttl: 900_000, limit: 5 },
+    ]),
     PrismaModule,
     AuthModule,
     CompanyModule,

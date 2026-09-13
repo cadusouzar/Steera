@@ -92,17 +92,28 @@ por LGPD — completo só em `GET /employees/:id`), Advertências (sempre aninha
   substituído por autenticação de verdade. `AuthModule` (`backend/src/auth/`) expõe
   `POST /auth/register` (cria `Company` + primeiro `User` com `role: ADMIN` e todos os módulos —
   ver pendência de cobrança logo abaixo), `POST /auth/login`, `POST /auth/refresh`,
-  `POST /auth/logout` e `GET /auth/me`; `register`/`login`/`refresh` têm rate limiting
-  (`ThrottlerGuard`, 5 requisições/15min por rota). Sessão é access token JWT de vida curta (15min,
+  `POST /auth/logout`, `GET /auth/me` e `PATCH /auth/me/password`; `register`/`login`/`refresh`/
+  `me/password` têm rate limiting (`ThrottlerGuard`) — `register` e `me/password` em 5 e 10
+  requisições/15min por IP respectivamente, `refresh` em 60/15min por IP (mais generoso de
+  propósito: é chamado a cada carregamento de página via `restoreSession()`, e um limite de 5
+  derrubava sessões válidas de usuários legítimos — fix pós-revisão final, 13/09/2026), e `login` com
+  **dois** throttlers em paralelo: o de sempre por IP (5/15min) e um novo por e-mail apenas
+  (`login-email`, 5/15min, sem IP na chave — ver `backend/src/auth/login-throttle.util.ts`), pra
+  fechar a lacuna de um atacante rotacionando IPs pra forçar a senha de UM e-mail conhecido sem
+  nunca estourar o limite por IP. Sessão é access token JWT de vida curta (15min,
   devolvido no corpo da resposta, guardado só em memória no frontend — nunca `localStorage`/
   `sessionStorage`) + refresh token rotativo (30 dias, hash persistido em `RefreshToken`, valor
   puro só em cookie `HttpOnly; Secure; SameSite=Strict; Path=/auth`), com detecção de reuso: um
   refresh token já trocado (`replacedByTokenId` setado) sendo reapresentado revoga a família
   inteira de tokens daquele usuário. `UsersModule` (`backend/src/users/`) cobre os logins da
-  empresa (`GET/POST /companies/me/users`, `PATCH .../block|unblock`) e o plano
-  (`PATCH /companies/me/plan`) — cada `Company` tem `planTier` (`BASICO`/`PRO`/`EMPRESARIAL`) e
-  `maxEmployeeLogins` (10/50/999999); criar um novo login com `role: EMPLOYEE` conta só logins
-  `EMPLOYEE` ativos contra esse teto (logins `ADMIN` não contam) e rejeita com `403` ao estourar.
+  empresa (`GET/POST /companies/me/users`, `PATCH .../block|unblock`) — cada `Company` tem
+  `planTier` (`BASICO`/`PRO`/`EMPRESARIAL`) e `maxEmployeeLogins` (10/50/999999); criar um novo
+  login com `role: EMPLOYEE` conta só logins `EMPLOYEE` ativos contra esse teto (logins `ADMIN` não
+  contam) e rejeita com `403` ao estourar. **Não existe (nem deve existir) rota HTTP pra uma empresa
+  mudar o próprio plano** — havia `PATCH /companies/me/plan` gated só por `@Roles('ADMIN')`, o que
+  permitia o próprio admin da empresa subir seu teto de plano de graça; removido na rodada de fixes
+  pós-revisão final (13/09/2026). Até existir cobrança/pagamento de verdade, mudar o plano de uma
+  empresa é uma operação manual no banco (`UPDATE "Company" SET "planTier" = ..., "maxEmployeeLogins" = ...`).
   `User.employeeId` é `@unique` — um funcionário nunca pode ter dois logins. `CompanyContextService`
   (`backend/src/company/company-context.service.ts`) deixou de ser um stub fixo: agora é
   `@Injectable({ scope: Scope.REQUEST })` e lê `companyId` de `req.user` (populado pelo
@@ -116,18 +127,38 @@ por LGPD — completo só em `GET /employees/:id`), Advertências (sempre aninha
   `CompanyContextService` — cobrem todas as empresas de uma vez em cada execução, ver seção de
   Cobrança automática abaixo).
   No frontend, `src/lib/auth.ts` guarda o access token em uma variável de módulo (nunca storage),
-  `src/components/RequireAuth.tsx` protege todas as rotas sob `/app`, e a sidebar em
+  `src/components/RequireAuth.tsx` protege todas as rotas sob `/app` (e força a troca de senha
+  temporária antes de liberar o app — ver `mustChangePassword` abaixo), e a sidebar em
   `src/layouts/AppLayout.tsx` é module-gated: só mostra os links dos módulos presentes em
-  `user.modules` (o mesmo array armazenado em `User.modules`, editável em Usuários e Acessos —
-  `src/pages/app/UsersManagement.tsx`). **Pendência explícita, com o mesmo destaque das outras
-  pendências desta seção: `POST /auth/register` não tem nenhum gate de cobrança/pagamento atrás —
-  qualquer pessoa pode criar uma empresa nova de graça hoje.** Isso é uma decisão deliberada da
+  `user.modules` (o mesmo array armazenado em `User.modules`). **`modules`/`role`/`email` são
+  definidos uma única vez na criação do login e não são editáveis depois** — não existe rota
+  `PATCH` para editar um login existente (`UsersController` só tem GET/POST/block/unblock) nem fluxo
+  de edição em `src/pages/app/UsersManagement.tsx`; é uma limitação conhecida, não um bug (mudar
+  módulos/papel de um login hoje exige bloqueá-lo e criar um novo).
+  **Pendência explícita, com o mesmo destaque das outras pendências desta seção: `modules` é
+  aplicado hoje só como filtro de UI (a sidebar não mostra o link) — nenhum guard no backend
+  confere `modules` antes de servir dado nenhum** (a única exceção, adicionada na rodada de fixes
+  pós-revisão final de 13/09/2026, é a checagem pontual em `GET /employees/:id` — ver
+  `EmployeesController.findOne`). Um usuário autenticado que souber ou adivinhar a URL de um módulo
+  que não tem consegue carregar aquela página e os dados reais dela, **desde que pertença à mesma
+  empresa** — isso nunca é um vazamento cross-tenant, o isolamento por empresa do
+  `CompanyContextService` é completamente independente dessa lacuna e não é afetado por ela. É uma
+  limitação explícita e deliberadamente adiada, não um esquecimento silencioso.
+  **Pendência explícita, com o mesmo destaque das outras pendências desta seção:
+  `POST /auth/register` não tem nenhum gate de cobrança/pagamento atrás — qualquer pessoa pode criar
+  uma empresa nova de graça hoje.** Isso é uma decisão deliberada da
   spec desta etapa (o objetivo era ter autenticação/multi-tenant reais primeiro), não um
   esquecimento — mas precisa ser endereçada antes de expor o registro publicamente em produção.
-  Também fora do escopo, deliberadamente: recuperação de senha por e-mail e MFA. Ver
-  `[[DECISOES-TECNICAS]]`, seção "Autenticação real (auth-multitenant, Task 12, 13/09/2026)", para
-  o detalhe completo (incluindo o histórico do stub de empresa única que essa implementação
-  substituiu, antes descrito na seção 8).
+  Também fora do escopo, deliberadamente: recuperação de senha por e-mail e MFA.
+  **Login criado pelo admin força troca de senha (`mustChangePassword`, fix pós-revisão final,
+  13/09/2026):** `User.mustChangePassword` nasce `true` só quando `UsersService.create()` gera a
+  senha temporária (nunca em `POST /auth/register`, onde o próprio usuário escolhe a senha);
+  `AuthService.changePassword()` limpa a flag. `GET /auth/me` e o `user` devolvido por
+  `login()`/`register()` incluem o campo; `RequireAuth.tsx` mostra
+  `src/components/ForcedPasswordChange.tsx` no lugar do app inteiro enquanto ele for `true`.
+  Ver `[[DECISOES-TECNICAS]]`, seção "Autenticação real (auth-multitenant, Task 12, 13/09/2026)" e a
+  seção de fixes pós-revisão final logo depois dela, para o detalhe completo (incluindo o histórico
+  do stub de empresa única que essa implementação substituiu, antes descrito na seção 8).
 - **Férias — sem cálculo de saldo, com teto flat de 30 dias (decisão revertida em 11/09/2026):** o
   projeto não tem, e nunca teve no escopo pretendido, o conceito de "saldo de férias". A calculadora
   de saldo/dias/adicional de 1/3 (`VacationCalculationService`, que existiu por um curto período)

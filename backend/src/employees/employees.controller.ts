@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -20,8 +21,19 @@ export class EmployeesController {
     return { items: items.map(toEmployeeListItem), total, page, pageSize };
   }
 
+  // GET /:id devolve dado LGPD-sensível completo (CPF, dados bancários,
+  // salário — mascarado/omitido da listagem de propósito, ver CLAUDE.md).
+  // Checagem inline em vez de um guard/decorator novo (YAGNI — é o único
+  // call site que precisa disso hoje): ADMIN sempre pode; um login EMPLOYEE
+  // só pode se `RH` estiver entre seus `modules` (é o caso legítimo de um
+  // EMPLOYEE fazendo administração de RH, que este plano passou a permitir
+  // pela primeira vez). Nunca gatear só por ADMIN — quebraria esse uso
+  // legítimo.
   @Get(':id')
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    if (user.role !== 'ADMIN' && !user.modules?.includes('RH')) {
+      throw new ForbiddenException('Sem permissão para ver os dados completos deste funcionário');
+    }
     return toEmployeeDetail(await this.employeesService.findOne(id));
   }
 

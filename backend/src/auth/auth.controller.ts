@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -8,6 +8,7 @@ import { RegisterDto } from './dto/register.dto';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { loginEmailTracker } from './login-throttle.util';
 
 // `me`/`me/password` levam @UseGuards(JwtAuthGuard) explícito aqui, mesmo
 // sabendo que a Task 4 vai registrar esse mesmo guard globalmente — sem
@@ -15,13 +16,13 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 // próxima (o guard global só existe depois que app.module.ts for
 // atualizado). Redundante depois da Task 4, nunca incorreto.
 //
-// ThrottlerGuard é aplicado só nos 3 métodos abaixo (register/login/refresh),
-// não na classe inteira — aplicar na classe também limitaria /auth/me,
-// /auth/me/password e /auth/logout ao mesmo bucket de 5/15min, e /auth/me em
-// especial é chamado a cada carregamento de página/restauração de sessão
-// pelo frontend; num cenário de IP compartilhado (NAT), isso poderia
-// bloquear usuários legítimos sem necessidade — nada no brief/spec pediu
-// throttling pra essas 3 rotas.
+// ThrottlerGuard é aplicado só nos métodos abaixo que precisam dele
+// (register/login/refresh/me/password), não na classe inteira — aplicar na
+// classe também limitaria /auth/me e /auth/logout, e /auth/me em especial é
+// chamado a cada carregamento de página/restauração de sessão pelo
+// frontend; num cenário de IP compartilhado (NAT), isso poderia bloquear
+// usuários legítimos sem necessidade — nada no brief/spec pediu throttling
+// pra essas 2 rotas.
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -29,25 +30,51 @@ export class AuthController {
   // As 4 rotas abaixo são @Public() de propósito — ninguém tem token antes
   // de logar/registrar, e logout precisa funcionar mesmo com um access
   // token já expirado (só o cookie de refresh importa pra ele).
+  //
+  // @SkipThrottle({'login-email': true}): register cria uma Company/User
+  // novos a cada chamada bem-sucedida (rastrear por e-mail não faz o mesmo
+  // sentido de "várias tentativas contra a MESMA conta" que faz em login) —
+  // só o throttler "default" (por IP) se aplica aqui.
   @Public()
   @UseGuards(ThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
   @Post('register')
   register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     return this.auth.register(dto, res);
   }
 
+  // Dois throttlers em paralelo aqui (ver login-throttle.util.ts e
+  // app.module.ts): "default" por IP (5/15min, já existia) e "login-email"
+  // (novo) por e-mail, sem IP na chave — fecha a lacuna de um atacante que
+  // faz brute-force de UM e-mail conhecido rotacionando IPs, que o "default"
+  // sozinho não pega (cada IP novo começa com bucket zerado).
   @Public()
   @UseGuards(ThrottlerGuard)
-  @Throttle({ default: { limit: 5, ttl: 900_000 } })
+  @Throttle({
+    default: { limit: 5, ttl: 900_000 },
+    'login-email': { limit: 5, ttl: 900_000, getTracker: loginEmailTracker },
+  })
   @Post('login')
   login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     return this.auth.login(dto, res);
   }
 
+  // Limite bem mais generoso que login/register (60/15min vs 5/15min):
+  // POST /auth/refresh é chamado em TODO carregamento de página/restauração
+  // de sessão (RequireAuth -> restoreSession() -> refreshOnce(), ver
+  // src/lib/auth.ts) — 5/15min bastava pra 6 reloads derrubarem a sessão de
+  // um usuário legítimo. 60/15min ainda é um teto real (protege contra abuso
+  // grosseiro) mas dá folga confortável até pra um escritório pequeno atrás
+  // do mesmo IP compartilhado. @SkipThrottle({'login-email': true}): refresh
+  // não tem e-mail no corpo (só o cookie httpOnly), então esse throttler não
+  // se aplica aqui — sem o skip, todo refresh sem e-mail cairia no mesmo
+  // bucket "sem e-mail" (ver fallback em loginEmailTracker), o que juntaria
+  // usuários diferentes na mesma chave.
   @Public()
   @UseGuards(ThrottlerGuard)
-  @Throttle({ default: { limit: 5, ttl: 900_000 } })
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 60, ttl: 900_000 } })
   @Post('refresh')
   refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.auth.refresh(req.cookies?.rt, res);
@@ -68,7 +95,15 @@ export class AuthController {
     return this.auth.getProfile(user.userId);
   }
 
-  @UseGuards(JwtAuthGuard)
+  // Sem throttle até esta rodada de fixes era uma escolha deliberada (igual
+  // /auth/me) — mas diferente de /auth/me, esta rota aceita um
+  // `currentPassword` adivinhável: um access token de 15min roubado
+  // permitiria brute-force ilimitado contra a senha atual de verdade sem
+  // isso. Limite generoso o bastante pra nunca travar um usuário legítimo
+  // reeditando um typo algumas vezes.
+  @UseGuards(JwtAuthGuard, ThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 10, ttl: 900_000 } })
   @Patch('me/password')
   changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
     return this.auth.changePassword(user.userId, dto);

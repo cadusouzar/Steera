@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPassword } from '../auth/password.util';
 import { generateRefreshTokenValue } from '../auth/refresh-token.util';
@@ -20,6 +21,7 @@ const SAFE_USER_SELECT = {
   employeeId: true,
   modules: true,
   status: true,
+  mustChangePassword: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -57,21 +59,41 @@ export class UsersService {
 
     // Senha temporária de alta entropia — devolvida uma única vez na resposta;
     // o hash é o que persiste. O login troca no primeiro acesso via
-    // PATCH /auth/me/password.
+    // PATCH /auth/me/password (mustChangePassword força esse fluxo — ver
+    // abaixo e AuthService.changePassword()).
     const temporaryPassword = generateRefreshTokenValue().slice(0, 16);
     const passwordHash = await hashPassword(temporaryPassword);
 
-    const user = await this.prisma.user.create({
-      data: {
-        companyId,
-        email: dto.email,
-        passwordHash,
-        role: dto.role,
-        employeeId: dto.role === 'EMPLOYEE' ? dto.employeeId : null,
-        modules: dto.modules,
-      },
-      select: SAFE_USER_SELECT,
-    });
+    let user;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          companyId,
+          email: dto.email,
+          passwordHash,
+          role: dto.role,
+          employeeId: dto.role === 'EMPLOYEE' ? dto.employeeId : null,
+          modules: dto.modules,
+          // Sempre true aqui: quem recebe uma senha gerada pelo sistema (em
+          // vez de escolher a própria, como em POST /auth/register) é
+          // obrigado a trocá-la no primeiro acesso. Mesmo bug/mesmo fix de
+          // AuthService.register() para P2002 abaixo — ver esse catch.
+          mustChangePassword: true,
+        },
+        select: SAFE_USER_SELECT,
+      });
+    } catch (err) {
+      // P2002 = unique constraint violation on User.email. User.email é
+      // único GLOBALMENTE (não só por empresa) — sem este catch, criar um
+      // login com um e-mail já usado por QUALQUER empresa (inclusive uma
+      // completamente diferente) vazava como 500 opaco, e o 500-vs-201
+      // funcionava como um oráculo de existência cross-tenant. Mesmo padrão
+      // exato já usado em AuthService.register() (ver esse arquivo).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Este e-mail já está cadastrado');
+      }
+      throw err;
+    }
 
     return { user, temporaryPassword };
   }
@@ -95,6 +117,12 @@ export class UsersService {
     await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } });
   }
 
+  // Sem controller na frente de propósito (ver comentário em users.module.ts) —
+  // `PATCH /companies/me/plan` foi removido por deixar o próprio admin da
+  // empresa subir seu teto de plano de graça. Até existir um caminho real de
+  // cobrança/operador, mudar plano é `UPDATE "Company" ...` manual no banco;
+  // este método fica pronto pra ser chamado por esse futuro caminho
+  // manual/operator-only, sem precisar reinventar o mapeamento de limites.
   updatePlan(companyId: string, dto: UpdatePlanDto) {
     return this.prisma.company.update({
       where: { id: companyId },

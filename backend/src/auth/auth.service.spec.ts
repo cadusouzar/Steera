@@ -15,7 +15,10 @@ describe('AuthService', () => {
     prisma = {
       user: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(), create: jest.fn() },
       refreshToken: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn() },
-      $transaction: jest.fn((cb) => cb(prisma)),
+      // Suporta os dois estilos de $transaction usados neste service:
+      // callback (register()) e array (changePassword(), espelhando
+      // UsersService.block()).
+      $transaction: jest.fn((arg) => (typeof arg === 'function' ? arg(prisma) : Promise.all(arg))),
       company: { create: jest.fn() },
     };
     const module = await Test.createTestingModule({
@@ -93,5 +96,19 @@ describe('AuthService', () => {
     prisma.user.findUniqueOrThrow.mockResolvedValue({ id: '1', passwordHash: 'h' });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
     await expect(service.changePassword('1', { currentPassword: 'errada', newPassword: 'nova12345' })).rejects.toThrow('Senha atual incorreta');
+  });
+
+  it('changePassword revokes every active refresh token and clears mustChangePassword on success', async () => {
+    prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', passwordHash: 'h', mustChangePassword: true });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+    await service.changePassword('u1', { currentPassword: 'antiga12345', newPassword: 'nova12345' });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { passwordHash: expect.any(String), mustChangePassword: false },
+    });
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
   });
 });
