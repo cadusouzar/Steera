@@ -19,11 +19,8 @@ jest.mock('fs', () => ({
   createReadStream: jest.fn().mockReturnValue({ pipe: jest.fn() }),
 }));
 
-// files.service.ts importa `fromBuffer` (renomeado localmente para `fileTypeFromBuffer`) — a
-// versão pinada v16.x do pacote usa esse nome, não `fileTypeFromBuffer` (só existe no v17+ ESM-only
-// — ver o comentário grande em files.service.ts). O mock precisa espelhar o export real.
-jest.mock('file-type', () => ({
-  fromBuffer: jest.fn(),
+jest.mock('./file-signature.util', () => ({
+  detectRealMimeType: jest.fn(),
 }));
 
 jest.mock('sharp', () => {
@@ -47,7 +44,7 @@ const { mkdir, writeFile, stat } = jest.requireMock('fs/promises') as {
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { createReadStream } = jest.requireMock('fs') as { createReadStream: jest.Mock };
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { fromBuffer: fileTypeFromBuffer } = jest.requireMock('file-type') as { fromBuffer: jest.Mock };
+const { detectRealMimeType } = jest.requireMock('./file-signature.util') as { detectRealMimeType: jest.Mock };
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const sharpMock = jest.requireMock('sharp').default as jest.Mock;
 
@@ -85,21 +82,21 @@ describe('FilesService', () => {
 
   describe('upload', () => {
     it('rejects a file above the configured max size before ever inspecting its bytes', async () => {
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'application/pdf', ext: 'pdf' });
+      detectRealMimeType.mockReturnValue('application/pdf');
       const file = { ...pdfFile(), size: 10 * 1024 * 1024 };
 
       await expect(
         service.upload('company-1', 'user-1', file, FileAssetPurpose.ADJUSTMENT_ATTACHMENT, 5 * 1024 * 1024),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(fileTypeFromBuffer).not.toHaveBeenCalled();
+      expect(detectRealMimeType).not.toHaveBeenCalled();
       expect(writeFile).not.toHaveBeenCalled();
       expect(prisma.fileAsset.create).not.toHaveBeenCalled();
     });
 
     it('rejects a MIME type not on the allow-list even when the client-declared mimetype lies', async () => {
       // Cliente declara application/pdf, mas o sniff de magic bytes revela texto puro.
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'text/plain', ext: 'txt' });
+      detectRealMimeType.mockReturnValue('text/plain');
       const file = { buffer: Buffer.from('isto e so texto puro'), originalname: 'fake.pdf', mimetype: 'application/pdf', size: 20 };
 
       await expect(
@@ -111,14 +108,14 @@ describe('FilesService', () => {
 
     // Regressão de um bug real encontrado na verificação manual desta task (14/09/2026): o código
     // original do brief fazia `detected?.mime ?? file.mimetype`, caindo de volta pro mimetype
-    // DECLARADO (controlado pelo atacante) sempre que `fileTypeFromBuffer` não reconhece a
+    // DECLARADO (controlado pelo atacante) sempre que `detectRealMimeType` não reconhece a
     // assinatura real dos bytes — que é exatamente o que acontece pra texto puro sem nenhum magic
     // number conhecido, não só pra variantes malformadas de um formato válido. Um arquivo de texto
     // puro se passando por `application/pdf` passava pelo allow-list sem nenhuma detecção real.
     // Confirmado empiricamente (ver task-2-report.md) e corrigido: `realMime` nunca mais cai de
     // volta pro valor declarado — undefined/não reconhecido é sempre rejeitado.
     it('rejects the upload when magic-byte sniffing cannot recognize the file at all (never falls back to the declared mimetype)', async () => {
-      fileTypeFromBuffer.mockResolvedValue(undefined);
+      detectRealMimeType.mockReturnValue(undefined);
       const file = {
         buffer: Buffer.from('isto e apenas texto puro, sem nenhum magic number reconhecivel'),
         originalname: 'fake.pdf',
@@ -134,7 +131,7 @@ describe('FilesService', () => {
     });
 
     it('accepts a real PDF and persists a FileAsset with the correct fields', async () => {
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'application/pdf', ext: 'pdf' });
+      detectRealMimeType.mockReturnValue('application/pdf');
       const file = pdfFile();
 
       const result = await service.upload('company-1', 'user-1', file, FileAssetPurpose.ADJUSTMENT_ATTACHMENT);
@@ -155,7 +152,7 @@ describe('FilesService', () => {
     });
 
     it('accepts a real JPEG, strips EXIF via sharp, and persists the re-encoded buffer size', async () => {
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'image/jpeg', ext: 'jpg' });
+      detectRealMimeType.mockReturnValue('image/jpeg');
       const file = { buffer: Buffer.from('fake-jpeg-bytes-with-exif'), originalname: 'foto.jpg', mimetype: 'image/jpeg', size: 26 };
 
       await service.upload('company-1', 'user-1', file, FileAssetPurpose.TIME_PUNCH_PHOTO);
@@ -172,7 +169,7 @@ describe('FilesService', () => {
     });
 
     it('accepts a real PNG', async () => {
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'image/png', ext: 'png' });
+      detectRealMimeType.mockReturnValue('image/png');
       const file = { buffer: Buffer.from('fake-png-bytes'), originalname: 'foto.png', mimetype: 'image/png', size: 14 };
 
       await service.upload('company-1', 'user-1', file, FileAssetPurpose.TIME_PUNCH_PHOTO);
@@ -181,7 +178,7 @@ describe('FilesService', () => {
     });
 
     it('never stores the file under its original filename on disk — always a fresh random UUID', async () => {
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'application/pdf', ext: 'pdf' });
+      detectRealMimeType.mockReturnValue('application/pdf');
       const file = { ...pdfFile(), originalname: '../../../etc/passwd.pdf' };
 
       await service.upload('company-1', 'user-1', file, FileAssetPurpose.ADJUSTMENT_ATTACHMENT);
@@ -193,7 +190,7 @@ describe('FilesService', () => {
     });
 
     it('sanitizes path-traversal/special characters out of the originalFilename metadata field', async () => {
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'application/pdf', ext: 'pdf' });
+      detectRealMimeType.mockReturnValue('application/pdf');
       const file = { ...pdfFile(), originalname: '../../../etc/passwd; rm -rf.pdf' };
 
       await service.upload('company-1', 'user-1', file, FileAssetPurpose.ADJUSTMENT_ATTACHMENT);
@@ -205,7 +202,7 @@ describe('FilesService', () => {
     });
 
     it('creates the storage directory before writing (mkdir recursive)', async () => {
-      fileTypeFromBuffer.mockResolvedValue({ mime: 'application/pdf', ext: 'pdf' });
+      detectRealMimeType.mockReturnValue('application/pdf');
       await service.upload('company-1', 'user-1', pdfFile(), FileAssetPurpose.ADJUSTMENT_ATTACHMENT);
       expect(mkdir).toHaveBeenCalledWith(join(process.cwd(), 'storage', 'attachments'), { recursive: true });
     });

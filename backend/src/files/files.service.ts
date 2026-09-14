@@ -3,18 +3,10 @@ import { randomUUID } from 'crypto';
 import { createReadStream } from 'fs';
 import { mkdir, stat, writeFile } from 'fs/promises';
 import { join } from 'path';
-// Pinned to file-type@16.x (not the current v22 "latest") on purpose: v17+ dropped CommonJS
-// entirely (ESM-only, no "main"/"types" field — package.json only exposes a conditional "exports"
-// map TypeScript's classic Node resolution here can't see, so it fails to compile, and relying on
-// Node's newer require(esm) interop would make this security-critical magic-byte check brittle
-// across Node versions/deploy targets). v16.5.4 is the last CJS release and is kept alive
-// specifically for this by upstream's own "version-16" dist-tag. Its export is named `fromBuffer`
-// (renamed to `fileTypeFromBuffer` only in the ESM-only v17+ rewrite) — aliased on import so the
-// rest of this file (and its tests) can use the same name the brief/spec use.
-import { fromBuffer as fileTypeFromBuffer } from 'file-type';
 import sharp from 'sharp';
 import { FileAssetPurpose } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { detectRealMimeType } from './file-signature.util';
 
 const STORAGE_ROOT = join(process.cwd(), 'storage', 'attachments');
 // Exportados para reuso em dto/upload-file.dto.ts (pré-checagem barata no nível do multer/pipe,
@@ -42,22 +34,17 @@ export class FilesService {
     if (file.size > maxSizeBytes) {
       throw new BadRequestException(`Arquivo excede o tamanho máximo permitido (${maxSizeBytes} bytes)`);
     }
-    // Nunca confiar só no mimetype declarado pelo cliente — confere a assinatura real do arquivo.
+    // Nunca confiar só no mimetype declarado pelo cliente — confere a assinatura real do arquivo
+    // (magic bytes) via `detectRealMimeType` (ver file-signature.util.ts — checagem manual,
+    // dependency-free, escopada só aos 3 formatos aceitos; ver o comentário lá para o histórico de
+    // por que não usamos mais o pacote `file-type`, incluindo uma CVE de DoS encontrada na única
+    // versão dele compatível com CJS).
     //
-    // DEVIATION FROM THE BRIEF, flagged explicitly (found + fixed during manual verification,
-    // 14/09/2026): the brief's original code was `detected?.mime ?? file.mimetype` — falling back
-    // to the CLIENT-DECLARED mimetype whenever `fileTypeFromBuffer` can't recognize the real bytes
-    // (`detected` is `undefined`). Verified empirically that this happens for ordinary plain text
-    // (no magic-byte signature at all, not just malformed variants of a known format) — so a
-    // plain-text file declaring `mimetype: 'application/pdf'` sailed straight through the allow-list
-    // check under the original code and was written to disk verbatim with a `.pdf` extension and a
-    // `FileAsset` row claiming `mimeType: 'application/pdf'`, completely undetected. Images got
-    // accidental protection only because `sharp()` below throws on non-image bytes — PDFs (never
-    // passed through sharp) had zero protection. This defeats the exact security property this task
-    // exists to guarantee. Fix: an unrecognized real type is now always rejected, full stop — never
-    // falls back to the declared value for this decision.
-    const detected = await fileTypeFromBuffer(file.buffer);
-    const realMime = detected?.mime;
+    // Um arquivo cuja assinatura não é reconhecida é SEMPRE rejeitado — nunca cai de volta para o
+    // `file.mimetype` declarado (bug real encontrado e corrigido durante a verificação manual desta
+    // task, 14/09/2026: a versão anterior deste código fazia isso, e um arquivo de texto puro
+    // declarando `application/pdf` passava pelo allow-list sem nenhuma detecção real).
+    const realMime = detectRealMimeType(file.buffer);
     if (!realMime || !ALLOWED_MIME.has(realMime)) {
       throw new BadRequestException('Formato de arquivo não permitido (aceitos: PDF, JPG, PNG)');
     }
