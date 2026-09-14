@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
+import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
 import { CreatePunchDto } from './dto/create-punch.dto';
 import { TimeClockService } from './time-clock.service';
 
@@ -20,7 +22,11 @@ interface UploadedPhoto {
 // JwtAuthGuard já é global (APP_GUARD em app.module.ts) — todo endpoint aqui exige login válido.
 @Controller('time-clock')
 export class TimeClockController {
-  constructor(private readonly timeClock: TimeClockService) {}
+  constructor(
+    private readonly timeClock: TimeClockService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
+    private readonly calculation: TimeAttendanceCalculationService,
+  ) {}
 
   @Get('status')
   getStatus(@CurrentUser() user: AuthenticatedUser) {
@@ -40,5 +46,16 @@ export class TimeClockController {
   @Get('punches')
   listOwnPunches(@CurrentUser() user: AuthenticatedUser, @Query('from') from?: string, @Query('to') to?: string) {
     return this.timeClock.listOwnPunches(user, from, to);
+  }
+
+  @Get('summary')
+  async getSummary(@CurrentUser() user: AuthenticatedUser, @Query('year') year: string, @Query('month') month: string) {
+    const numericYear = Number(year);
+    const numericMonth = Number(month);
+    if (!Number.isInteger(numericYear) || !Number.isInteger(numericMonth) || numericMonth < 1 || numericMonth > 12) {
+      throw new BadRequestException('Parâmetros year/month inválidos');
+    }
+    const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
+    return this.calculation.calculateMonthlySummary(employee.id, numericYear, numericMonth);
   }
 }

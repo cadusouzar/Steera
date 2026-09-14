@@ -1,0 +1,190 @@
+import { Test } from '@nestjs/testing';
+import { HolidaysService } from '../holidays/holidays.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
+
+const TZ = 'America/Sao_Paulo'; // UTC-3, sem horário de verão
+
+// Helper: monta um TimeEvent mínimo com serverRecordedAt em UTC a partir de um horário LOCAL
+// (America/Sao_Paulo, UTC-3) — deixa os testes lidos em "horário local" sem duplicar a lógica de
+// conversão de fuso que o próprio serviço testa.
+const localEvent = (type: string, y: number, m: number, d: number, h: number, min = 0) => ({
+  id: `${type}-${y}${m}${d}${h}${min}`,
+  type,
+  serverRecordedAt: new Date(Date.UTC(y, m - 1, d, h + 3, min)), // +3h: converte local (UTC-3) -> UTC
+});
+
+describe('TimeAttendanceCalculationService', () => {
+  let service: TimeAttendanceCalculationService;
+  let prisma: {
+    employee: { findUnique: jest.Mock };
+    company: { findUnique: jest.Mock };
+    workSchedule: { findMany: jest.Mock };
+    timeEvent: { findMany: jest.Mock };
+    vacationSchedule: { findFirst: jest.Mock };
+    leaveSchedule: { findFirst: jest.Mock };
+  };
+  let holidays: { isHoliday: jest.Mock };
+
+  const schedule = {
+    id: 'sched-1',
+    employeeId: 'emp-1',
+    weekDays: [1, 2, 3, 4, 5], // seg-sex
+    dailyMinutes: 480,
+    validFrom: new Date(Date.UTC(2026, 0, 1)),
+    validTo: null,
+  };
+
+  beforeEach(async () => {
+    prisma = {
+      employee: { findUnique: jest.fn().mockResolvedValue({ companyId: 'company-1' }) },
+      company: { findUnique: jest.fn().mockResolvedValue({ timezone: TZ }) },
+      workSchedule: { findMany: jest.fn().mockResolvedValue([schedule]) },
+      timeEvent: { findMany: jest.fn().mockResolvedValue([]) },
+      vacationSchedule: { findFirst: jest.fn().mockResolvedValue(null) },
+      leaveSchedule: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
+    holidays = { isHoliday: jest.fn().mockResolvedValue(false) };
+
+    const module = await Test.createTestingModule({
+      providers: [
+        TimeAttendanceCalculationService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: HolidaysService, useValue: holidays },
+      ],
+    }).compile();
+    service = module.get(TimeAttendanceCalculationService);
+  });
+
+  // 2026-01-05 é uma segunda-feira (dentro de schedule.weekDays).
+  const MONDAY = new Date(Date.UTC(2026, 0, 5));
+
+  it('calculates a plain worked period (CLOCK_IN 08:00 -> CLOCK_OUT 17:00 local, no break)', async () => {
+    prisma.timeEvent.findMany.mockResolvedValue([
+      localEvent('CLOCK_IN', 2026, 1, 5, 8),
+      localEvent('CLOCK_OUT', 2026, 1, 5, 17),
+    ]);
+
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+    expect(summary.workedMinutes).toBe(9 * 60);
+    expect(summary.expectedMinutes).toBe(480);
+    expect(summary.balanceMinutes).toBe(9 * 60 - 480);
+    expect(summary.hasOpenJourney).toBe(false);
+  });
+
+  it('discounts multiple break intervals from worked time', async () => {
+    prisma.timeEvent.findMany.mockResolvedValue([
+      localEvent('CLOCK_IN', 2026, 1, 5, 8),
+      localEvent('BREAK_START', 2026, 1, 5, 10),
+      localEvent('BREAK_END', 2026, 1, 5, 10, 15),
+      localEvent('BREAK_START', 2026, 1, 5, 12),
+      localEvent('BREAK_END', 2026, 1, 5, 13),
+      localEvent('CLOCK_OUT', 2026, 1, 5, 17),
+    ]);
+
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+    // 9h de jornada - (15min + 60min) de intervalo = 465min
+    expect(summary.breakMinutes).toBe(75);
+    expect(summary.workedMinutes).toBe(9 * 60 - 75);
+  });
+
+  it('flags an incomplete journey (CLOCK_IN with no CLOCK_OUT anywhere in the 48h lookahead) as hasOpenJourney, not counted as worked', async () => {
+    prisma.timeEvent.findMany.mockResolvedValue([localEvent('CLOCK_IN', 2026, 1, 5, 8)]);
+
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+    expect(summary.hasOpenJourney).toBe(true);
+    expect(summary.workedMinutes).toBe(0);
+  });
+
+  it('sums an EXTRA_IN/EXTRA_OUT pair into extraMinutes, never into workedMinutes', async () => {
+    prisma.timeEvent.findMany.mockResolvedValue([
+      localEvent('CLOCK_IN', 2026, 1, 5, 8),
+      localEvent('CLOCK_OUT', 2026, 1, 5, 17),
+      localEvent('EXTRA_IN', 2026, 1, 5, 18),
+      localEvent('EXTRA_OUT', 2026, 1, 5, 19, 30),
+    ]);
+
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+    expect(summary.extraMinutes).toBe(90);
+    expect(summary.workedMinutes).toBe(9 * 60);
+  });
+
+  it('correctly pairs a night shift crossing midnight (CLOCK_IN 22:00 local, CLOCK_OUT 06:00 local next day) — credited to the day it opened, not flagged as an open journey', async () => {
+    // CLOCK_OUT recorded on 2026-01-06 (the next calendar day) — fetched via the 48h lookahead
+    // buffer, but credited to Monday 2026-01-05 because that's when the pair OPENED.
+    prisma.timeEvent.findMany.mockResolvedValue([
+      localEvent('CLOCK_IN', 2026, 1, 5, 22),
+      localEvent('CLOCK_OUT', 2026, 1, 6, 6),
+    ]);
+
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+    expect(summary.hasOpenJourney).toBe(false);
+    expect(summary.workedMinutes).toBe(8 * 60);
+    // The CLOCK_OUT itself (dated the next civil day) is not part of THIS day's displayed events.
+    expect(summary.events).toHaveLength(1);
+    expect(summary.events[0].type).toBe('CLOCK_IN');
+  });
+
+  it('zeroes expectedMinutes on a holiday', async () => {
+    holidays.isHoliday.mockResolvedValue(true);
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+    expect(summary.expectedMinutes).toBe(0);
+    expect(summary.isHoliday).toBe(true);
+  });
+
+  it('zeroes expectedMinutes during a scheduled vacation, even on a non-holiday', async () => {
+    prisma.vacationSchedule.findFirst.mockResolvedValue({ id: 'vac-1' });
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+    expect(summary.expectedMinutes).toBe(0);
+    expect(summary.isOnVacationOrLeave).toBe(true);
+  });
+
+  it('zeroes expectedMinutes during a scheduled leave (afastamento), even on a non-holiday', async () => {
+    prisma.leaveSchedule.findFirst.mockResolvedValue({ id: 'leave-1' });
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+    expect(summary.expectedMinutes).toBe(0);
+    expect(summary.isOnVacationOrLeave).toBe(true);
+  });
+
+  it('zeroes expectedMinutes on a day of the week not covered by the WorkSchedule (weekDays filter), even though the schedule is otherwise in its valid range', async () => {
+    // 2026-01-10 é um sábado — fora de schedule.weekDays ([1..5]).
+    const SATURDAY = new Date(Date.UTC(2026, 0, 10));
+    const summary = await service.calculateDailySummary('emp-1', SATURDAY);
+    expect(summary.expectedMinutes).toBe(0);
+  });
+
+  it('resolves the day/night boundary using the company timezone, not raw UTC (a punch at 21:30 local, 00:30 UTC the next day, is still credited to the local calendar day)', async () => {
+    // 21:30 local em 2026-01-05 = 00:30 UTC em 2026-01-06. Um cálculo ingênuo por fronteira UTC
+    // atribuiria esse evento ao dia UTC seguinte; o correto é permanecer em 2026-01-05 (local).
+    prisma.timeEvent.findMany.mockResolvedValue([
+      localEvent('CLOCK_IN', 2026, 1, 5, 8),
+      localEvent('CLOCK_OUT', 2026, 1, 5, 21, 30),
+    ]);
+
+    const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+    expect(summary.workedMinutes).toBe(13 * 60 + 30);
+    expect(summary.events).toHaveLength(2);
+  });
+
+  describe('calculateMonthlySummary', () => {
+    it('sums daily totals across the month and never generates a day after today', async () => {
+      jest.useFakeTimers().setSystemTime(new Date(Date.UTC(2026, 0, 3, 12))); // "today" = 2026-01-03
+      prisma.timeEvent.findMany.mockResolvedValue([
+        localEvent('CLOCK_IN', 2026, 1, 5, 8),
+        localEvent('CLOCK_OUT', 2026, 1, 5, 17),
+      ]);
+
+      const result = await service.calculateMonthlySummary('emp-1', 2026, 1);
+
+      expect(result.days).toHaveLength(3); // dias 1, 2 e 3 de janeiro apenas
+      expect(result.days.every((d) => new Date(d.date).getTime() <= Date.now())).toBe(true);
+      jest.useRealTimers();
+    });
+  });
+});
