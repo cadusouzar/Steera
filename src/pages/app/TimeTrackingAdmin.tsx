@@ -8,7 +8,7 @@ import {
   listEmployees, listTimeInconsistencies, listPendingAdjustmentRequests, approveAdjustmentRequest,
   rejectAdjustmentRequest, listJustificationsForReview, reviewJustification, proactiveCorrection,
   listCompanyTimeEvents, listWorkSchedules, createWorkSchedule, listWorkLocations, createWorkLocation,
-  updateWorkLocation, getTimeTrackingSettings, updateTimeTrackingSettings, getFileDownloadUrl,
+  updateWorkLocation, getTimeTrackingSettings, updateTimeTrackingSettings, fetchProtectedFileObjectUrl,
   type EmployeeListItem, type TimePunch, type AdjustmentRequestRecord, type JustificationRecord,
   type TimePunchType, type WorkScheduleRecord, type WorkLocationRecord, type TimeTrackingSettingsRecord,
 } from '../../lib/api';
@@ -40,6 +40,22 @@ function formatDateTime(iso: string) {
 }
 function formatDateOnly(dateStr: string) {
   return dateStr.split('-').reverse().join('/');
+}
+
+// `downloadUrl` nunca pode virar `<a href>` direto — a rota exige o JWT de acesso normal além do
+// token de download (ver fetchProtectedFileObjectUrl em src/lib/api.ts), e um <a> disparado pelo
+// browser nunca consegue anexar um cabeçalho Authorization. Abre uma aba em branco de forma
+// SÍNCRONA (dentro do próprio clique, pra não ser bloqueada como pop-up) e só depois navega ela
+// pro Object URL, uma vez que o fetch autenticado resolve.
+async function openAttachment(downloadUrl: string) {
+  const win = window.open('', '_blank');
+  try {
+    const objectUrl = await fetchProtectedFileObjectUrl(downloadUrl);
+    if (win) win.location.href = objectUrl;
+    else window.open(objectUrl, '_blank');
+  } catch {
+    win?.close();
+  }
 }
 
 const TimeTrackingAdmin = () => {
@@ -209,7 +225,7 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
                 <Td>{formatDateOnly(r.targetDate)}</Td>
                 <Td>{ADJUSTMENT_TYPE_LABELS[r.type]}</Td>
                 <Td className="max-w-xs"><span className="text-sm">{r.reason}</span></Td>
-                <Td>{r.downloadUrl ? <a href={getFileDownloadUrl(r) ?? undefined} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-sm"><Paperclip size={14} /> Ver</a> : '-'}</Td>
+                <Td>{r.downloadUrl ? <button onClick={() => openAttachment(r.downloadUrl!)} className="text-primary hover:underline inline-flex items-center gap-1 text-sm"><Paperclip size={14} /> Ver</button> : '-'}</Td>
                 <Td className="text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button onClick={() => handleApprove(r.id)} disabled={actingId === r.id} className="px-3 py-2 rounded-lg bg-green-500/10 text-green-600 hover:bg-green-500/20 text-xs font-bold flex items-center gap-1 disabled:opacity-50">
@@ -312,7 +328,7 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
                 <Td>{employeeName(j.employeeId)}</Td>
                 <Td>{JUSTIFICATION_TYPE_LABELS[j.type]}</Td>
                 <Td className="max-w-xs"><span className="text-sm">{j.description}</span></Td>
-                <Td>{j.downloadUrl ? <a href={getFileDownloadUrl(j) ?? undefined} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-sm"><Paperclip size={14} /> Ver</a> : '-'}</Td>
+                <Td>{j.downloadUrl ? <button onClick={() => openAttachment(j.downloadUrl!)} className="text-primary hover:underline inline-flex items-center gap-1 text-sm"><Paperclip size={14} /> Ver</button> : '-'}</Td>
                 <Td className="text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button onClick={() => handleApprove(j.id)} disabled={actingId === j.id} className="px-3 py-2 rounded-lg bg-green-500/10 text-green-600 hover:bg-green-500/20 text-xs font-bold flex items-center gap-1 disabled:opacity-50">

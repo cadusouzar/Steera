@@ -10,7 +10,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { getCurrentUser, refreshCurrentUser } from '../../lib/auth';
 import {
   getTimeClockStatus, createTimePunch, getOwnTimeSummary, createAdjustmentRequest,
-  listOwnAdjustmentRequests, cancelAdjustmentRequest, linkMyEmployee, listEmployees, getFileDownloadUrl,
+  listOwnAdjustmentRequests, cancelAdjustmentRequest, linkMyEmployee, listEmployees, fetchProtectedFileObjectUrl,
   type TimeClockStatus, type TimePunch, type MonthlySummary, type DailySummary,
   type AdjustmentRequestRecord, type TimePunchType, type EmployeeListItem,
 } from '../../lib/api';
@@ -218,6 +218,34 @@ const TimeTracking = () => {
   const [submittingPunch, setSubmittingPunch] = useState(false);
   const [submitPunchError, setSubmitPunchError] = useState('');
   const [selectedPunchDetail, setSelectedPunchDetail] = useState<TimePunch | null>(null);
+  const [punchPhotoObjectUrl, setPunchPhotoObjectUrl] = useState<string | null>(null);
+  const [punchPhotoLoading, setPunchPhotoLoading] = useState(false);
+
+  // `photoDownloadUrl` nunca pode virar `<img src>` direto — a rota exige o JWT de acesso normal
+  // além do token de download (ver fetchProtectedFileObjectUrl em src/lib/api.ts), então busca a
+  // imagem via fetch autenticado e usa um Object URL local. Revoga o Object URL anterior ao trocar
+  // de marcação/fechar o modal, pra não vazar memória.
+  useEffect(() => {
+    if (!selectedPunchDetail?.photoDownloadUrl) {
+      setPunchPhotoObjectUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPunchPhotoLoading(true);
+    fetchProtectedFileObjectUrl(selectedPunchDetail.photoDownloadUrl)
+      .then((url) => {
+        if (cancelled) { URL.revokeObjectURL(url); return; }
+        objectUrl = url;
+        setPunchPhotoObjectUrl(url);
+      })
+      .catch(() => { if (!cancelled) setPunchPhotoObjectUrl(null); })
+      .finally(() => { if (!cancelled) setPunchPhotoLoading(false); });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedPunchDetail]);
 
   // Garante que a câmera é desligada se o usuário sair da página com o modal de confirmação
   // ainda aberto (ex.: navegou pra outra rota) — sem isso o stream ficaria vivo indefinidamente,
@@ -1072,8 +1100,14 @@ const TimeTracking = () => {
                   )}
 
                   {selectedPunchDetail.photoDownloadUrl ? (
-                    <div className="w-full aspect-square bg-secondary/20 rounded-xl border-2 border-border overflow-hidden mb-4 relative">
-                      <img src={getFileDownloadUrl({ downloadUrl: selectedPunchDetail.photoDownloadUrl }) ?? undefined} alt="Foto de Ponto" className="w-full h-full object-cover" />
+                    <div className="w-full aspect-square bg-secondary/20 rounded-xl border-2 border-border overflow-hidden mb-4 relative flex items-center justify-center">
+                      {punchPhotoObjectUrl ? (
+                        <img src={punchPhotoObjectUrl} alt="Foto de Ponto" className="w-full h-full object-cover" />
+                      ) : punchPhotoLoading ? (
+                        <Loader2 size={24} className="animate-spin text-muted" />
+                      ) : (
+                        <span className="text-xs text-muted">Não foi possível carregar a foto.</span>
+                      )}
                     </div>
                   ) : (
                     <div className="w-full aspect-square bg-secondary/20 rounded-xl border border-dashed border-border mb-4 flex flex-col items-center justify-center text-muted">

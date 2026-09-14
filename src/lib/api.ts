@@ -1473,7 +1473,37 @@ export async function linkMyEmployee(employeeId: string): Promise<void> {
 // O backend já devolve um `downloadUrl` pronto (path relativo, token de curta duração já
 // embutido) em qualquer resposta que referencie um anexo/foto — nunca construído aqui a partir de
 // um token cru (ver buildFileDownloadPath no backend, download-token.util.ts). Só prefixa a
-// origem da API pra virar uma URL absoluta usável em <img src>/<a href>.
+// origem da API pra virar uma URL absoluta.
+//
+// NUNCA usar esse valor direto num <img src>/<a href> — `GET /file-assets/:id` exige o JWT de
+// acesso normal (`JwtAuthGuard`, global) ALÉM do `?token=` de curto prazo, de propósito (ver
+// files.controller.ts: o token de download é uma segunda camada, nunca substitui a autenticação
+// normal). Um <img>/<a> disparado pelo próprio browser nunca consegue anexar um cabeçalho
+// `Authorization` customizado — só uma chamada JS (`fetch`) consegue. Bug real encontrado só numa
+// verificação de navegador de verdade (14/09/2026, Task 14): todo link/foto de anexo devolvia 401
+// nesse formato, mascarado até então porque toda verificação anterior usava `curl` com um cabeçalho
+// `Authorization` manual. Use `fetchProtectedFileObjectUrl()` abaixo em vez desta função
+// diretamente em JSX — ela mantida exportada só como utilitário de baixo nível.
 export function getFileDownloadUrl(record: { downloadUrl: string | null }): string | null {
   return record.downloadUrl ? `${API_URL}${record.downloadUrl}` : null;
+}
+
+// Busca o arquivo de verdade via fetch autenticado (Authorization: Bearer, com o mesmo retry de
+// 401 de request() acima) e devolve um Object URL local (`URL.createObjectURL`) pronto pra usar em
+// `<img src>` ou `window.open()` — o único jeito de honrar a exigência de dupla camada de
+// autenticação do backend a partir de um elemento HTML normal. Quem chama é responsável por
+// `URL.revokeObjectURL()` quando não precisar mais (evita vazamento de memória).
+export async function fetchProtectedFileObjectUrl(downloadUrl: string, isRetry = false): Promise<string> {
+  const token = getAccessToken();
+  const res = await fetch(`${API_URL}${downloadUrl}`, {
+    credentials: 'include',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401 && !isRetry) {
+    const renewed = await refreshOnce();
+    if (renewed) return fetchProtectedFileObjectUrl(downloadUrl, true);
+  }
+  if (!res.ok) throw new Error(`Não foi possível carregar o arquivo (erro ${res.status}).`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
