@@ -4,11 +4,16 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 async function request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
   const token = getAccessToken();
+  // Upload multipart (batida de ponto com foto, anexo de ajuste/justificativa) manda FormData no
+  // body — nesse caso o Content-Type (com o boundary) precisa ser definido pelo próprio browser,
+  // nunca fixado aqui como application/json (ver createTimePunch/createAdjustmentRequest/
+  // createJustification abaixo).
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     credentials: 'include', // manda o cookie httpOnly do refresh token em toda chamada
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -857,4 +862,606 @@ export async function getFinancialSummary(): Promise<FinancialSummary> {
     totalRecurring: Number(res.totalRecurring),
     topDefaulters: res.topDefaulters.map((d) => ({ ...d, overdueAmount: Number(d.overdueAmount) })),
   };
+}
+
+// ==== Controle de Ponto (Time Tracking) ====
+
+// ---- Shapes returned by the backend ----
+interface ApiTimeEvent {
+  id: string;
+  employeeId: string;
+  type: 'CLOCK_IN' | 'BREAK_START' | 'BREAK_END' | 'CLOCK_OUT' | 'EXTRA_IN' | 'EXTRA_OUT';
+  source: 'WEB' | 'MOBILE' | 'ADMIN_MANUAL';
+  serverRecordedAt: string;
+  latitude: string | number | null;
+  longitude: string | number | null;
+  locationStatus: 'WITHIN_RANGE' | 'OUT_OF_RANGE' | 'IMPRECISE' | 'UNAVAILABLE' | 'NOT_REQUIRED';
+  validationStatus: 'VALID' | 'PENDING_REVIEW' | 'CORRECTED';
+  downloadUrl: string | null;
+}
+interface ApiTimeClockStatus {
+  nextAllowedType: ApiTimeEvent['type'];
+  requirePhoto: boolean;
+  requireLocation: boolean;
+}
+interface ApiDailySummary {
+  date: string;
+  workedMinutes: number;
+  expectedMinutes: number;
+  breakMinutes: number;
+  extraMinutes: number;
+  balanceMinutes: number;
+  isHoliday: boolean;
+  isOnVacationOrLeave: boolean;
+  hasOpenJourney: boolean;
+  events: ApiTimeEvent[];
+}
+interface ApiMonthlySummary {
+  days: ApiDailySummary[];
+  totals: { workedMinutes: number; expectedMinutes: number; extraMinutes: number; balanceMinutes: number };
+}
+interface ApiTimeAdjustmentRequest {
+  id: string;
+  employeeId: string;
+  targetDate: string;
+  relatedEventId: string | null;
+  type: 'ADD_MISSING_PUNCH' | 'CORRECT_TIME' | 'REMOVE_PUNCH';
+  requestedEventType: ApiTimeEvent['type'] | null;
+  requestedTime: string | null;
+  reason: string;
+  justification: string | null;
+  downloadUrl: string | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+interface ApiTimeJustification {
+  id: string;
+  employeeId: string;
+  relatedDate: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  type: 'ABSENCE' | 'INCOMPLETE_DAY' | 'ADJUSTMENT_SUPPORT' | 'MEDICAL_CERTIFICATE' | 'OTHER';
+  description: string;
+  downloadUrl: string | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+interface ApiWorkSchedule {
+  id: string;
+  employeeId: string;
+  name: string;
+  weekDays: number[];
+  expectedStartTime: string;
+  expectedEndTime: string;
+  breakMinutes: number;
+  dailyMinutes: number;
+  weeklyMinutes: number;
+  toleranceMinutes: number;
+  allowOvertime: boolean;
+  maxOvertimeMinutesPerDay: number | null;
+  nightShift: boolean;
+  validFrom: string;
+  validTo: string | null;
+}
+interface ApiWorkLocation {
+  id: string;
+  name: string;
+  latitude: string | number;
+  longitude: string | number;
+  radiusMeters: number;
+  active: boolean;
+}
+interface ApiTimeTrackingSettings {
+  requirePhoto: boolean;
+  requireLocation: boolean;
+  allowLocationException: boolean;
+  allowExtraPeriods: boolean;
+  maxAttachmentSizeBytes: number;
+}
+
+// ---- Shapes the UI works with ----
+export type TimePunchType = 'clock_in' | 'break_start' | 'break_end' | 'clock_out' | 'extra_in' | 'extra_out';
+
+export interface TimeClockStatus {
+  nextAllowedType: TimePunchType;
+  requirePhoto: boolean;
+  requireLocation: boolean;
+}
+export interface TimePunch {
+  id: string;
+  employeeId: string;
+  type: TimePunchType;
+  source: 'web' | 'mobile' | 'admin_manual';
+  recordedAt: string;
+  latitude: number | null;
+  longitude: number | null;
+  locationStatus: 'within_range' | 'out_of_range' | 'imprecise' | 'unavailable' | 'not_required';
+  validationStatus: 'valid' | 'pending_review' | 'corrected';
+  photoDownloadUrl: string | null;
+}
+export interface DailySummary {
+  date: string;
+  workedMinutes: number;
+  expectedMinutes: number;
+  breakMinutes: number;
+  extraMinutes: number;
+  balanceMinutes: number;
+  isHoliday: boolean;
+  isOnVacationOrLeave: boolean;
+  hasOpenJourney: boolean;
+  events: TimePunch[];
+}
+export interface MonthlySummary {
+  days: DailySummary[];
+  totals: { workedMinutes: number; expectedMinutes: number; extraMinutes: number; balanceMinutes: number };
+}
+export interface AdjustmentRequestRecord {
+  id: string;
+  employeeId: string;
+  targetDate: string;
+  relatedEventId: string | null;
+  type: 'add_missing_punch' | 'correct_time' | 'remove_punch';
+  requestedEventType: TimePunchType | null;
+  requestedTime: string | null;
+  reason: string;
+  justification: string | null;
+  downloadUrl: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+export interface JustificationRecord {
+  id: string;
+  employeeId: string;
+  relatedDate: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  type: 'absence' | 'incomplete_day' | 'adjustment_support' | 'medical_certificate' | 'other';
+  description: string;
+  downloadUrl: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+export interface WorkScheduleRecord {
+  id: string;
+  employeeId: string;
+  name: string;
+  weekDays: number[];
+  expectedStartTime: string;
+  expectedEndTime: string;
+  breakMinutes: number;
+  dailyMinutes: number;
+  weeklyMinutes: number;
+  toleranceMinutes: number;
+  allowOvertime: boolean;
+  maxOvertimeMinutesPerDay: number | null;
+  nightShift: boolean;
+  validFrom: string;
+  validTo: string | null;
+}
+export interface WorkLocationRecord {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  active: boolean;
+}
+export interface TimeTrackingSettingsRecord {
+  requirePhoto: boolean;
+  requireLocation: boolean;
+  allowLocationException: boolean;
+  allowExtraPeriods: boolean;
+  maxAttachmentSizeBytes: number;
+}
+
+function mapTimePunch(e: ApiTimeEvent): TimePunch {
+  return {
+    id: e.id,
+    employeeId: e.employeeId,
+    type: e.type.toLowerCase() as TimePunchType,
+    source: e.source.toLowerCase() as TimePunch['source'],
+    recordedAt: e.serverRecordedAt,
+    latitude: e.latitude != null ? Number(e.latitude) : null,
+    longitude: e.longitude != null ? Number(e.longitude) : null,
+    locationStatus: e.locationStatus.toLowerCase() as TimePunch['locationStatus'],
+    validationStatus: e.validationStatus.toLowerCase() as TimePunch['validationStatus'],
+    photoDownloadUrl: e.downloadUrl,
+  };
+}
+function mapDailySummary(d: ApiDailySummary): DailySummary {
+  return { ...d, events: d.events.map(mapTimePunch) };
+}
+function mapMonthlySummary(m: ApiMonthlySummary): MonthlySummary {
+  return { days: m.days.map(mapDailySummary), totals: m.totals };
+}
+function mapAdjustmentRequest(r: ApiTimeAdjustmentRequest): AdjustmentRequestRecord {
+  return {
+    id: r.id,
+    employeeId: r.employeeId,
+    targetDate: r.targetDate.slice(0, 10),
+    relatedEventId: r.relatedEventId,
+    type: r.type.toLowerCase() as AdjustmentRequestRecord['type'],
+    requestedEventType: r.requestedEventType ? (r.requestedEventType.toLowerCase() as TimePunchType) : null,
+    requestedTime: r.requestedTime,
+    reason: r.reason,
+    justification: r.justification,
+    downloadUrl: r.downloadUrl,
+    status: r.status.toLowerCase() as AdjustmentRequestRecord['status'],
+    reviewNote: r.reviewNote,
+    reviewedAt: r.reviewedAt,
+    createdAt: r.createdAt,
+  };
+}
+function mapJustification(j: ApiTimeJustification): JustificationRecord {
+  return {
+    id: j.id,
+    employeeId: j.employeeId,
+    relatedDate: j.relatedDate ? j.relatedDate.slice(0, 10) : null,
+    periodStart: j.periodStart ? j.periodStart.slice(0, 10) : null,
+    periodEnd: j.periodEnd ? j.periodEnd.slice(0, 10) : null,
+    type: j.type.toLowerCase() as JustificationRecord['type'],
+    description: j.description,
+    downloadUrl: j.downloadUrl,
+    status: j.status.toLowerCase() as JustificationRecord['status'],
+    reviewNote: j.reviewNote,
+    reviewedAt: j.reviewedAt,
+    createdAt: j.createdAt,
+  };
+}
+function mapWorkSchedule(s: ApiWorkSchedule): WorkScheduleRecord {
+  return {
+    id: s.id,
+    employeeId: s.employeeId,
+    name: s.name,
+    weekDays: s.weekDays,
+    expectedStartTime: s.expectedStartTime,
+    expectedEndTime: s.expectedEndTime,
+    breakMinutes: s.breakMinutes,
+    dailyMinutes: s.dailyMinutes,
+    weeklyMinutes: s.weeklyMinutes,
+    toleranceMinutes: s.toleranceMinutes,
+    allowOvertime: s.allowOvertime,
+    maxOvertimeMinutesPerDay: s.maxOvertimeMinutesPerDay,
+    nightShift: s.nightShift,
+    validFrom: s.validFrom.slice(0, 10),
+    validTo: s.validTo ? s.validTo.slice(0, 10) : null,
+  };
+}
+function mapWorkLocation(l: ApiWorkLocation): WorkLocationRecord {
+  return {
+    id: l.id,
+    name: l.name,
+    latitude: Number(l.latitude),
+    longitude: Number(l.longitude),
+    radiusMeters: l.radiusMeters,
+    active: l.active,
+  };
+}
+function mapTimeTrackingSettings(s: ApiTimeTrackingSettings): TimeTrackingSettingsRecord {
+  return { ...s };
+}
+
+// FormData só recebe string/Blob — descarta campos undefined/null em vez de mandar "undefined"
+// como string. Usado pelos 3 endpoints multipart (foto de ponto, anexo de ajuste, anexo de
+// justificativa) — nunca JSON.stringify nesses três, o browser define o Content-Type/boundary
+// sozinho (ver request() no topo do arquivo).
+function toFormData(fields: Record<string, string | number | boolean | undefined | null>): FormData {
+  const fd = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined && value !== null) fd.append(key, String(value));
+  }
+  return fd;
+}
+
+// ---- Bater o próprio ponto ----
+export async function getTimeClockStatus(): Promise<TimeClockStatus> {
+  const s = await request<ApiTimeClockStatus>('/time-clock/status');
+  return { nextAllowedType: s.nextAllowedType.toLowerCase() as TimePunchType, requirePhoto: s.requirePhoto, requireLocation: s.requireLocation };
+}
+
+export async function createTimePunch(input: {
+  type: TimePunchType;
+  latitude?: number;
+  longitude?: number;
+  accuracyMeters?: number;
+  deviceReportedAt?: string;
+  isMobile?: boolean;
+  photo?: File;
+}): Promise<{ event: TimePunch; nextAllowedType: TimePunchType }> {
+  const fd = toFormData({
+    type: input.type.toUpperCase(),
+    latitude: input.latitude,
+    longitude: input.longitude,
+    accuracyMeters: input.accuracyMeters,
+    deviceReportedAt: input.deviceReportedAt,
+    isMobile: input.isMobile,
+  });
+  if (input.photo) fd.append('photo', input.photo);
+  const res = await request<{ event: ApiTimeEvent; nextAllowedType: ApiTimeEvent['type'] }>('/time-clock/punches', {
+    method: 'POST',
+    body: fd,
+  });
+  return { event: mapTimePunch(res.event), nextAllowedType: res.nextAllowedType.toLowerCase() as TimePunchType };
+}
+
+export async function listOwnTimePunches(from?: string, to?: string): Promise<TimePunch[]> {
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  const query = qs.toString();
+  const events = await request<ApiTimeEvent[]>(`/time-clock/punches${query ? `?${query}` : ''}`);
+  return events.map(mapTimePunch);
+}
+
+export async function getOwnTimeSummary(year: number, month: number): Promise<MonthlySummary> {
+  const res = await request<ApiMonthlySummary>(`/time-clock/summary?year=${year}&month=${month}`);
+  return mapMonthlySummary(res);
+}
+
+// ---- Solicitações de ajuste (funcionário) ----
+export async function createAdjustmentRequest(input: {
+  targetDate: string;
+  relatedEventId?: string;
+  type: 'add_missing_punch' | 'correct_time' | 'remove_punch';
+  requestedEventType?: TimePunchType;
+  requestedTime?: string;
+  reason: string;
+  justification?: string;
+  attachment?: File;
+}): Promise<AdjustmentRequestRecord> {
+  const fd = toFormData({
+    targetDate: input.targetDate,
+    relatedEventId: input.relatedEventId,
+    type: input.type.toUpperCase(),
+    requestedEventType: input.requestedEventType?.toUpperCase(),
+    requestedTime: input.requestedTime,
+    reason: input.reason,
+    justification: input.justification,
+  });
+  if (input.attachment) fd.append('attachment', input.attachment);
+  const r = await request<ApiTimeAdjustmentRequest>('/time-adjustment-requests', { method: 'POST', body: fd });
+  return mapAdjustmentRequest(r);
+}
+
+export async function listOwnAdjustmentRequests(): Promise<AdjustmentRequestRecord[]> {
+  const items = await request<ApiTimeAdjustmentRequest[]>('/time-adjustment-requests/me');
+  return items.map(mapAdjustmentRequest);
+}
+
+export async function cancelAdjustmentRequest(id: string): Promise<AdjustmentRequestRecord> {
+  const r = await request<ApiTimeAdjustmentRequest>(`/time-adjustment-requests/${id}/cancel`, { method: 'PATCH' });
+  return mapAdjustmentRequest(r);
+}
+
+// ---- Justificativas e atestados (funcionário) ----
+export async function createJustification(input: {
+  type: 'absence' | 'incomplete_day' | 'adjustment_support' | 'medical_certificate' | 'other';
+  description: string;
+  relatedDate?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  attachment?: File;
+}): Promise<JustificationRecord> {
+  const fd = toFormData({
+    type: input.type.toUpperCase(),
+    description: input.description,
+    relatedDate: input.relatedDate,
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+  });
+  if (input.attachment) fd.append('attachment', input.attachment);
+  const j = await request<ApiTimeJustification>('/time-justifications', { method: 'POST', body: fd });
+  return mapJustification(j);
+}
+
+export async function listOwnJustifications(): Promise<JustificationRecord[]> {
+  const items = await request<ApiTimeJustification[]>('/time-justifications/me');
+  return items.map(mapJustification);
+}
+
+// ---- Visões administrativas (ADMIN ou superior direto) ----
+export async function listCompanyTimeEvents(
+  employeeId: string,
+  params?: { from?: string; to?: string; status?: 'valid' | 'pending_review' | 'corrected'; page?: number; pageSize?: number },
+): Promise<Paginated<TimePunch>> {
+  const qs = new URLSearchParams();
+  if (params?.from) qs.set('from', params.from);
+  if (params?.to) qs.set('to', params.to);
+  if (params?.status) qs.set('status', params.status.toUpperCase());
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
+  const query = qs.toString();
+  const res = await request<Paginated<ApiTimeEvent>>(`/employees/${employeeId}/time-events${query ? `?${query}` : ''}`);
+  return { ...res, items: res.items.map(mapTimePunch) };
+}
+
+// Sem filtro de status forçado apesar do nome — "Pending" reflete o uso típico (a caixa de
+// entrada de aprovações), mas o caller pode pedir outro status explicitamente; simétrico a
+// listJustificationsForReview logo abaixo.
+export async function listPendingAdjustmentRequests(params?: {
+  status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  page?: number;
+  pageSize?: number;
+}): Promise<Paginated<AdjustmentRequestRecord>> {
+  const qs = new URLSearchParams();
+  qs.set('status', (params?.status ?? 'pending').toUpperCase());
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
+  const res = await request<Paginated<ApiTimeAdjustmentRequest>>(`/time-adjustment-requests?${qs.toString()}`);
+  return { ...res, items: res.items.map(mapAdjustmentRequest) };
+}
+
+export async function approveAdjustmentRequest(id: string, reviewNote?: string): Promise<void> {
+  await request(`/time-adjustment-requests/${id}/approve`, { method: 'PATCH', body: JSON.stringify({ reviewNote }) });
+}
+
+export async function rejectAdjustmentRequest(id: string, reviewNote: string): Promise<AdjustmentRequestRecord> {
+  const r = await request<ApiTimeAdjustmentRequest>(`/time-adjustment-requests/${id}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reviewNote }),
+  });
+  return mapAdjustmentRequest(r);
+}
+
+// Correção proativa (sem solicitação prévia do funcionário) — mesmo formato de
+// createAdjustmentRequest, sem anexo (ProactiveCorrectionDto não aceita um no backend) e com
+// `reason` sempre obrigatório.
+export async function proactiveCorrection(
+  employeeId: string,
+  input: {
+    targetDate: string;
+    relatedEventId?: string;
+    type: 'add_missing_punch' | 'correct_time' | 'remove_punch';
+    requestedEventType?: TimePunchType;
+    requestedTime?: string;
+    reason: string;
+  },
+): Promise<void> {
+  await request(`/employees/${employeeId}/time-events/correct`, {
+    method: 'POST',
+    body: JSON.stringify({
+      targetDate: input.targetDate,
+      relatedEventId: input.relatedEventId,
+      type: input.type.toUpperCase(),
+      requestedEventType: input.requestedEventType?.toUpperCase(),
+      requestedTime: input.requestedTime,
+      reason: input.reason,
+    }),
+  });
+}
+
+export async function listJustificationsForReview(params?: {
+  status?: 'pending' | 'approved' | 'rejected';
+  page?: number;
+  pageSize?: number;
+}): Promise<Paginated<JustificationRecord>> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status.toUpperCase());
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
+  const query = qs.toString();
+  const res = await request<Paginated<ApiTimeJustification>>(`/time-justifications${query ? `?${query}` : ''}`);
+  return { ...res, items: res.items.map(mapJustification) };
+}
+
+export async function reviewJustification(id: string, decision: 'approve' | 'reject', reviewNote?: string): Promise<JustificationRecord> {
+  const j = await request<ApiTimeJustification>(`/time-justifications/${id}/${decision}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reviewNote }),
+  });
+  return mapJustification(j);
+}
+
+export async function listTimeInconsistencies(): Promise<TimePunch[]> {
+  const events = await request<ApiTimeEvent[]>('/time-events/inconsistencies');
+  return events.map(mapTimePunch);
+}
+
+// ---- Configuração administrativa (jornadas, locais de trabalho, regras da empresa) ----
+export async function listWorkSchedules(employeeId?: string): Promise<WorkScheduleRecord[]> {
+  const qs = employeeId ? `?employeeId=${employeeId}&pageSize=100` : '?pageSize=100';
+  const res = await request<Paginated<ApiWorkSchedule>>(`/work-schedules${qs}`);
+  return res.items.map(mapWorkSchedule);
+}
+
+export async function createWorkSchedule(input: {
+  employeeId: string;
+  name: string;
+  weekDays: number[];
+  expectedStartTime: string;
+  expectedEndTime: string;
+  breakMinutes?: number;
+  dailyMinutes: number;
+  weeklyMinutes: number;
+  toleranceMinutes?: number;
+  allowOvertime?: boolean;
+  maxOvertimeMinutesPerDay?: number;
+  nightShift?: boolean;
+  validFrom: string;
+  validTo?: string;
+}): Promise<WorkScheduleRecord> {
+  const s = await request<ApiWorkSchedule>('/work-schedules', { method: 'POST', body: JSON.stringify(input) });
+  return mapWorkSchedule(s);
+}
+
+export async function updateWorkSchedule(
+  id: string,
+  input: Partial<{
+    employeeId: string;
+    name: string;
+    weekDays: number[];
+    expectedStartTime: string;
+    expectedEndTime: string;
+    breakMinutes: number;
+    dailyMinutes: number;
+    weeklyMinutes: number;
+    toleranceMinutes: number;
+    allowOvertime: boolean;
+    maxOvertimeMinutesPerDay: number;
+    nightShift: boolean;
+    validFrom: string;
+    validTo: string;
+  }>,
+): Promise<WorkScheduleRecord> {
+  const s = await request<ApiWorkSchedule>(`/work-schedules/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return mapWorkSchedule(s);
+}
+
+export async function listWorkLocations(activeOnly?: boolean): Promise<WorkLocationRecord[]> {
+  const qs = activeOnly ? '?active=true&pageSize=100' : '?pageSize=100';
+  const res = await request<Paginated<ApiWorkLocation>>(`/work-locations${qs}`);
+  return res.items.map(mapWorkLocation);
+}
+
+export async function createWorkLocation(input: {
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  active?: boolean;
+}): Promise<WorkLocationRecord> {
+  const l = await request<ApiWorkLocation>('/work-locations', { method: 'POST', body: JSON.stringify(input) });
+  return mapWorkLocation(l);
+}
+
+export async function updateWorkLocation(
+  id: string,
+  input: Partial<{ name: string; latitude: number; longitude: number; radiusMeters: number; active: boolean }>,
+): Promise<WorkLocationRecord> {
+  const l = await request<ApiWorkLocation>(`/work-locations/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return mapWorkLocation(l);
+}
+
+export async function getTimeTrackingSettings(): Promise<TimeTrackingSettingsRecord> {
+  const s = await request<ApiTimeTrackingSettings>('/time-tracking-settings');
+  return mapTimeTrackingSettings(s);
+}
+
+export async function updateTimeTrackingSettings(
+  input: Partial<TimeTrackingSettingsRecord>,
+): Promise<TimeTrackingSettingsRecord> {
+  const s = await request<ApiTimeTrackingSettings>('/time-tracking-settings', { method: 'PATCH', body: JSON.stringify(input) });
+  return mapTimeTrackingSettings(s);
+}
+
+// ---- Vínculo do próprio login a um Employee (admin que ainda não pode bater ponto) ----
+export async function linkMyEmployee(employeeId: string): Promise<void> {
+  await request('/auth/me/employee-link', { method: 'PATCH', body: JSON.stringify({ employeeId }) });
+}
+
+// ---- Download de anexos/fotos ----
+// O backend já devolve um `downloadUrl` pronto (path relativo, token de curta duração já
+// embutido) em qualquer resposta que referencie um anexo/foto — nunca construído aqui a partir de
+// um token cru (ver buildFileDownloadPath no backend, download-token.util.ts). Só prefixa a
+// origem da API pra virar uma URL absoluta usável em <img src>/<a href>.
+export function getFileDownloadUrl(record: { downloadUrl: string | null }): string | null {
+  return record.downloadUrl ? `${API_URL}${record.downloadUrl}` : null;
 }
