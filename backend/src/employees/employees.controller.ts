@@ -1,7 +1,11 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { ModulesGuard } from '../auth/guards/modules.guard';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
+import { QueryTimeEventsDto } from '../time-clock/dto/query-time-events.dto';
+import { TimeAttendanceCalculationService } from '../time-clock/time-attendance-calculation.service';
+import { TimeClockService } from '../time-clock/time-clock.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -12,7 +16,12 @@ import { EmployeesService } from './employees.service';
 @RequireModule('RH')
 @Controller('employees')
 export class EmployeesController {
-  constructor(private readonly employeesService: EmployeesService) {}
+  constructor(
+    private readonly employeesService: EmployeesService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
+    private readonly timeClock: TimeClockService,
+    private readonly calculation: TimeAttendanceCalculationService,
+  ) {}
 
   @Post()
   async create(@Body() dto: CreateEmployeeDto) {
@@ -54,5 +63,35 @@ export class EmployeesController {
   @Patch(':id/reactivate')
   async reactivate(@Param('id') id: string) {
     return toEmployeeDetail(await this.employeesService.reactivate(id));
+  }
+
+  // Visões administrativas agregadas de ponto (Task 10) — pura composição sobre
+  // TimeClockService/TimeAttendanceCalculationService, já prontos e já testados nas Tasks 6/7;
+  // nenhuma lógica de negócio nova aqui. assertCanManage() de propósito ANTES de qualquer consulta
+  // — 404 (nunca 403) pro alvo, mesmo padrão do resto do módulo de ponto.
+  @Get(':employeeId/time-events')
+  async listTimeEvents(
+    @Param('employeeId') employeeId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: QueryTimeEventsDto,
+  ) {
+    await this.timeManagementAuth.assertCanManage(user, employeeId);
+    return this.timeClock.listForEmployeeAdmin(user, employeeId, query);
+  }
+
+  @Get(':employeeId/time-summary')
+  async timeSummary(
+    @Param('employeeId') employeeId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('year') year: string,
+    @Query('month') month: string,
+  ) {
+    await this.timeManagementAuth.assertCanManage(user, employeeId);
+    const numericYear = Number(year);
+    const numericMonth = Number(month);
+    if (!Number.isInteger(numericYear) || !Number.isInteger(numericMonth) || numericMonth < 1 || numericMonth > 12) {
+      throw new BadRequestException('Parâmetros year/month inválidos');
+    }
+    return this.calculation.calculateMonthlySummary(employeeId, numericYear, numericMonth);
   }
 }

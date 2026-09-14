@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateAdjustmentRequestDto } from './dto/create-adjustment-request.dto';
 import { ProactiveCorrectionDto } from './dto/proactive-correction.dto';
 import { ReviewAdjustmentRequestDto } from './dto/review-adjustment-request.dto';
@@ -43,7 +45,14 @@ export class TimeAdjustmentsController {
 
   // Administrativa: ADMIN vê a empresa inteira, um superior direto vê só seus subordinados diretos
   // (TimeAdjustmentsService.listForAdmin resolve isso via TimeManagementAuthService — nunca filtra
-  // aqui no controller).
+  // aqui no controller). @RequireModule('RH') aqui (e nas outras rotas administrativas abaixo,
+  // nunca nas de auto-atendimento acima) — mesma exigência de módulo RH que qualquer outra tela
+  // administrativa de RH, conforme a spec ("o login também precisa do módulo RH para acessar as
+  // telas administrativas de ponto"). Só nas rotas administrativas: criar/cancelar/ver a própria
+  // solicitação é ação de "quem sou eu", mesmo espírito de TimeClockController não exigir módulo
+  // pra bater o próprio ponto.
+  @UseGuards(ModulesGuard)
+  @RequireModule('RH')
   @Get('time-adjustment-requests')
   listForAdmin(
     @CurrentUser() user: AuthenticatedUser,
@@ -54,16 +63,22 @@ export class TimeAdjustmentsController {
     return this.service.listForAdmin(user, status, page ? Number(page) : undefined, pageSize ? Number(pageSize) : undefined);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('RH')
   @Patch('time-adjustment-requests/:id/approve')
   approve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewAdjustmentRequestDto) {
     return this.service.approve(user, id, dto.reviewNote);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('RH')
   @Patch('time-adjustment-requests/:id/reject')
   reject(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewAdjustmentRequestDto) {
     return this.service.reject(user, id, dto.reviewNote);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('RH')
   @Post('employees/:employeeId/time-events/correct')
   proactiveCorrect(
     @CurrentUser() user: AuthenticatedUser,

@@ -7,10 +7,11 @@ import { WorkLocationsModule } from '../work-locations/work-locations.module';
 import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
 import { TimeClockController } from './time-clock.controller';
 import { TimeClockService } from './time-clock.service';
+import { TimeEventsAdminController } from './time-events-admin.controller';
 
 @Module({
   imports: [FilesModule, TimeTrackingSettingsModule, WorkLocationsModule, TimeManagementAuthModule, HolidaysModule],
-  controllers: [TimeClockController],
+  controllers: [TimeClockController, TimeEventsAdminController],
   providers: [TimeClockService, TimeAttendanceCalculationService],
   exports: [TimeClockService, TimeAttendanceCalculationService],
 })

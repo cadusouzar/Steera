@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateJustificationDto } from './dto/create-justification.dto';
 import { ReviewJustificationDto } from './dto/review-justification.dto';
 import { TimeJustificationsService } from './time-justifications.service';
@@ -32,6 +34,10 @@ export class TimeJustificationsController {
     return this.service.listOwn(user);
   }
 
+  // Administrativa — exige módulo RH (mesmo padrão do resto do projeto e das rotas equivalentes de
+  // TimeAdjustmentsController), diferente de create/listOwn acima (auto-atendimento, "quem sou eu").
+  @UseGuards(ModulesGuard)
+  @RequireModule('RH')
   @Get()
   listForAdmin(
     @CurrentUser() user: AuthenticatedUser,
@@ -42,11 +48,15 @@ export class TimeJustificationsController {
     return this.service.listForAdmin(user, status, page ? Number(page) : undefined, pageSize ? Number(pageSize) : undefined);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('RH')
   @Patch(':id/approve')
   approve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewJustificationDto) {
     return this.service.approve(user, id, dto.reviewNote);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('RH')
   @Patch(':id/reject')
   reject(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewJustificationDto) {
     return this.service.reject(user, id, dto.reviewNote);

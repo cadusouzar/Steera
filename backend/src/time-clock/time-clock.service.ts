@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { FileAssetPurpose } from '@prisma/client';
+import { FileAssetPurpose, Prisma } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,6 +7,7 @@ import { TimeManagementAuthService } from '../time-management/time-management-au
 import { TimeTrackingSettingsService } from '../time-tracking-settings/time-tracking-settings.service';
 import { WorkLocationsService } from '../work-locations/work-locations.service';
 import { CreatePunchDto } from './dto/create-punch.dto';
+import { QueryTimeEventsDto } from './dto/query-time-events.dto';
 import { haversineDistanceMeters } from './geo-distance.util';
 import { computeOpenState, getNextAllowedType, validateTransition } from './time-sequence.util';
 
@@ -152,5 +153,46 @@ export class TimeClockService {
       },
       orderBy: { serverRecordedAt: 'desc' },
     });
+  }
+
+  // Visão administrativa agregada (Task 10) — chamador já confirmado autorizado via
+  // TimeManagementAuthService.assertCanManage(user, employeeId) no controller, ANTES de chegar
+  // aqui; `companyId: user.companyId` aqui é defesa em profundidade (mesmo padrão do resto do
+  // projeto: nunca depender só do RLS, mesmo já tendo RLS como backstop) — `employeeId`, uma vez
+  // confirmado pertencente à empresa do chamador, já escopa tudo sozinho, mas o filtro explícito
+  // não custa nada e evita depender implicitamente dessa garantia.
+  async listForEmployeeAdmin(user: AuthenticatedUser, employeeId: string, query: QueryTimeEventsDto) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const where: Prisma.TimeEventWhereInput = {
+      companyId: user.companyId,
+      employeeId,
+      ...(query.from || query.to
+        ? { serverRecordedAt: { gte: query.from ? new Date(query.from) : undefined, lte: query.to ? new Date(query.to) : undefined } }
+        : {}),
+      ...(query.status ? { validationStatus: query.status } : {}),
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.timeEvent.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { serverRecordedAt: 'desc' } }),
+      this.prisma.timeEvent.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
+  }
+
+  // Todas as marcações PENDING_REVIEW (fora de área, localização exigida mas indisponível com
+  // exceção autorizada, etc.) que o login atual pode gerenciar — a empresa inteira se ADMIN, só
+  // subordinados diretos se superior. Nunca filtra funcionário-a-funcionário chamando canManage()
+  // em loop (N+1) — usa getManageableEmployeeIds() pra resolver o conjunto de uma vez, mesmo padrão
+  // já usado em TimeAdjustmentsService/TimeJustificationsService.listForAdmin (Tasks 8/9).
+  async listInconsistencies(user: AuthenticatedUser) {
+    const manageable = await this.timeManagementAuth.getManageableEmployeeIds(user);
+    if (manageable !== 'ALL' && manageable.length === 0) return [];
+
+    const where: Prisma.TimeEventWhereInput = {
+      companyId: user.companyId,
+      validationStatus: 'PENDING_REVIEW',
+      ...(manageable === 'ALL' ? {} : { employeeId: { in: manageable } }),
+    };
+    return this.prisma.timeEvent.findMany({ where, orderBy: { serverRecordedAt: 'desc' } });
   }
 }
