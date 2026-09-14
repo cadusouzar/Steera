@@ -23,6 +23,7 @@ const employee: Employee = {
   payOnLastBusinessDay: false,
   bankDetails: 'Banco 001 / Ag 1234 / CC 56789-0',
   salaryRecurrenceEnabled: true,
+  managerId: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
   updatedAt: new Date('2026-01-01T00:00:00Z'),
 };

@@ -3,6 +3,7 @@ import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { LinkEmployeeDto } from './dto/link-employee.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
@@ -125,5 +126,20 @@ export class AuthController {
   @Patch('me/password')
   changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
     return this.auth.changePassword(user.userId, dto);
+  }
+
+  // Auto-vínculo admin<->funcionário (Task 4 do plano de Controle de Ponto):
+  // a identidade do CALLER (userId/companyId) vem só de req.user via
+  // @CurrentUser() — nunca do body. O único id legítimo no body é o
+  // `employeeId` ALVO (o funcionário existente que este login está
+  // escolhendo vincular a si mesmo); AuthService.linkCurrentUserToEmployee
+  // valida que ele pertence à mesma empresa e não tem outro User já
+  // vinculado. @UseGuards(JwtAuthGuard) explícito aqui é redundante com o
+  // APP_GUARD global (ver app.module.ts) — mesmo padrão redundante-de-propósito
+  // já usado em `me`/`me/password` acima.
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/employee-link')
+  linkEmployee(@CurrentUser() user: AuthenticatedUser, @Body() dto: LinkEmployeeDto) {
+    return this.auth.linkCurrentUserToEmployee(user.userId, user.companyId, dto.employeeId);
   }
 }

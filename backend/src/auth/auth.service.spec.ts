@@ -1,4 +1,4 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
@@ -26,6 +26,7 @@ describe('AuthService', () => {
       // exist so `tx.$executeRaw` doesn't blow up as `undefined()`.
       $executeRaw: jest.fn(),
       company: { create: jest.fn() },
+      employee: { findFirst: jest.fn() },
     };
     const module = await Test.createTestingModule({
       providers: [AuthService, { provide: PrismaService, useValue: prisma }, { provide: JwtService, useValue: { sign: jest.fn(() => 'signed.jwt.token') } }],
@@ -123,5 +124,51 @@ describe('AuthService', () => {
     // devolver um token novo aqui, JwtAuthGuard bloquearia o resto da sessão
     // logo após uma troca de senha bem-sucedida (ver esse guard).
     expect(result.accessToken).toBe('signed.jwt.token');
+  });
+
+  describe('linkCurrentUserToEmployee', () => {
+    it('rejects when the target employee does not exist in the caller company', async () => {
+      prisma.employee.findFirst.mockResolvedValue(null);
+      await expect(
+        service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-other-company'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects when the target employee already has a different login linked', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', companyId: 'company-1' });
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-someone-else', employeeId: 'employee-1' });
+      await expect(
+        service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    // Este é o caso central do Passo 4 do brief: um User que JÁ tem
+    // employeeId vinculado não pode trocar de vínculo por esta rota.
+    it('rejects when the calling login already has an employeeId linked (no swapping via this route)', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.user.findUnique.mockResolvedValue(null); // employee-2 has no login yet
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'user-1', employeeId: 'employee-already-linked' });
+
+      await expect(
+        service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('links the calling login to the target employee and returns the updated profile', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.user.findUnique.mockResolvedValue(null); // no existing login for employee-2
+      prisma.user.findUniqueOrThrow
+        .mockResolvedValueOnce({ id: 'user-1', employeeId: null }) // caller, not yet linked
+        .mockResolvedValueOnce({
+          id: 'user-1', email: 'admin@empresa.com', role: 'ADMIN', modules: ['DASHBOARD'],
+          mustChangePassword: false, employeeId: 'employee-2',
+        }); // getProfile() after the update
+
+      const profile = await service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2');
+
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'user-1' }, data: { employeeId: 'employee-2' } });
+      expect(profile.employeeId).toBe('employee-2');
+    });
   });
 });

@@ -24,6 +24,24 @@ export class EmployeesService {
     }
   }
 
+  // `currentEmployeeId` só é informado em update() (em create() o funcionário
+  // ainda não existe, então nem auto-referência nem ciclo direto são
+  // possíveis ainda). Ciclos de 3+ nós são uma limitação conhecida e
+  // documentada, não tratada aqui de propósito (ver task brief).
+  private async assertManagerUsable(managerId: string, companyId: string, currentEmployeeId?: string) {
+    const manager = await this.prisma.employee.findFirst({ where: { id: managerId, companyId } });
+    if (!manager) throw new NotFoundException(`Funcionário ${managerId} não encontrado`);
+
+    if (currentEmployeeId && managerId === currentEmployeeId) {
+      throw new BadRequestException('Um funcionário não pode ser seu próprio superior');
+    }
+    if (currentEmployeeId && manager.managerId === currentEmployeeId) {
+      throw new BadRequestException(
+        'Isso criaria um ciclo direto de hierarquia: o funcionário escolhido como superior já tem este funcionário como seu próprio superior',
+      );
+    }
+  }
+
   async create(dto: CreateEmployeeDto): Promise<Employee> {
     const companyId = await this.companyContext.getCurrentCompanyId();
     await this.assertRoleUsable(dto.roleId, companyId);
@@ -31,6 +49,10 @@ export class EmployeesService {
 
     const existingCpf = await this.prisma.employee.findFirst({ where: { companyId, cpf } });
     if (existingCpf) throw new ConflictException('Já existe um funcionário com este CPF nesta empresa');
+
+    if (dto.managerId) {
+      await this.assertManagerUsable(dto.managerId, companyId);
+    }
 
     return this.prisma.employee.create({
       data: {
@@ -49,7 +71,9 @@ export class EmployeesService {
         payOnLastBusinessDay: dto.payOnLastBusinessDay ?? false,
         bankDetails: dto.bankDetails,
         salaryRecurrenceEnabled: dto.salaryRecurrenceEnabled ?? true,
+        managerId: dto.managerId,
       },
+      include: { manager: { select: { fullName: true } } },
     });
   }
 
@@ -86,8 +110,18 @@ export class EmployeesService {
     return employee;
   }
 
-  findOne(id: string) {
-    return this.assertExists(id);
+  // Join com `manager` de propósito (diferente de assertExists, usado
+  // internamente por outros módulos que só precisam de campos do próprio
+  // Employee) — este é o único método chamado pelo GET /employees/:id, que
+  // precisa do nome do superior pro mapper (employee-response.mapper.ts).
+  async findOne(id: string) {
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const employee = await this.prisma.employee.findFirst({
+      where: { id, companyId },
+      include: { manager: { select: { fullName: true } } },
+    });
+    if (!employee) throw new NotFoundException(`Funcionário ${id} não encontrado`);
+    return employee;
   }
 
   async update(id: string, dto: UpdateEmployeeDto) {
@@ -95,6 +129,10 @@ export class EmployeesService {
 
     if (dto.roleId && dto.roleId !== employee.roleId) {
       await this.assertRoleUsable(dto.roleId, employee.companyId);
+    }
+
+    if (dto.managerId && dto.managerId !== employee.managerId) {
+      await this.assertManagerUsable(dto.managerId, employee.companyId, id);
     }
 
     let cpf: string | undefined;
@@ -113,6 +151,7 @@ export class EmployeesService {
         ...(cpf ? { cpf } : {}),
         ...(dto.admissionDate ? { admissionDate: parseDateOnly(dto.admissionDate) } : {}),
       },
+      include: { manager: { select: { fullName: true } } },
     });
   }
 

@@ -99,7 +99,10 @@ export class AuthService {
     // aqui, ao contrário de UsersService.create().
     return {
       accessToken,
-      user: { id: user.id, email: user.email, role: user.role, modules: user.modules, mustChangePassword: user.mustChangePassword },
+      user: {
+        id: user.id, email: user.email, role: user.role, modules: user.modules,
+        mustChangePassword: user.mustChangePassword, employeeId: user.employeeId,
+      },
     };
   }
 
@@ -119,7 +122,10 @@ export class AuthService {
     this.setRefreshCookie(res, refreshValue);
     return {
       accessToken,
-      user: { id: user.id, email: user.email, role: user.role, modules: user.modules, mustChangePassword: user.mustChangePassword },
+      user: {
+        id: user.id, email: user.email, role: user.role, modules: user.modules,
+        mustChangePassword: user.mustChangePassword, employeeId: user.employeeId,
+      },
     };
   }
 
@@ -204,6 +210,36 @@ export class AuthService {
       role: user.role,
       modules: user.modules,
       mustChangePassword: user.mustChangePassword,
+      employeeId: user.employeeId,
     };
+  }
+
+  // Único caminho pelo qual um login se auto-vincula a um Employee já
+  // existente (ex.: o admin fundador, criado por POST /auth/register sem
+  // nenhum Employee — ver TimeManagementAuthService.resolveOwnEmployee, que
+  // depende deste vínculo existir). `employeeId` é o único id que
+  // legitimamente vem do body aqui: a identidade do CALLER (userId,
+  // companyId) sempre vem de `req.user` via @CurrentUser(), nunca do corpo
+  // da requisição — ver AuthController.linkEmployee.
+  async linkCurrentUserToEmployee(userId: string, companyId: string, employeeId: string) {
+    const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, companyId } });
+    if (!employee) throw new BadRequestException(`Funcionário ${employeeId} não encontrado nesta empresa`);
+
+    // Mesma checagem de unicidade que UsersService.create() já faz pra login
+    // EMPLOYEE (User.employeeId é @unique no schema) — sem isso, dois logins
+    // acabariam "donos" do mesmo funcionário.
+    const existingLogin = await this.prisma.user.findUnique({ where: { employeeId } });
+    if (existingLogin) throw new BadRequestException('Este funcionário já possui um login vinculado');
+
+    const currentUser = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    // Não permite trocar um vínculo já existente por esta rota — trocar de
+    // funcionário vinculado, se algum dia for necessário, é uma decisão
+    // administrativa separada, fora de escopo desta task.
+    if (currentUser.employeeId) {
+      throw new BadRequestException('Este login já está vinculado a um funcionário — não é possível trocar por esta rota');
+    }
+
+    await this.prisma.user.update({ where: { id: userId }, data: { employeeId } });
+    return this.getProfile(userId);
   }
 }

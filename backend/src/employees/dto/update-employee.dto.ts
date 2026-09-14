@@ -18,4 +18,5 @@ export class UpdateEmployeeDto {
   @IsOptional() @IsBoolean() payOnLastBusinessDay?: boolean;
   @IsOptional() @IsString() bankDetails?: string;
   @IsOptional() @IsBoolean() salaryRecurrenceEnabled?: boolean;
+  @IsOptional() @IsString() managerId?: string;
 }
