@@ -36,6 +36,8 @@ const AppLayout = () => {
 
   // Auto-open submenu if active route is inside it
   useEffect(() => {
+    // `startsWith('/app/ponto')` já cobre /app/ponto-administracao também (prefixo de string) —
+    // sem precisar de uma condição separada.
     if (location.pathname.startsWith('/app/funcionarios') || location.pathname.startsWith('/app/cargos') || location.pathname.startsWith('/app/ponto')) {
       setIsHrOpen(true);
     }
@@ -91,8 +93,8 @@ const AppLayout = () => {
             <button 
               onClick={() => setIsHrOpen(!isHrOpen)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                (isActive('/app/funcionarios') || isActive('/app/cargos') || isActive('/app/ponto')) 
-                  ? 'bg-primary/5 text-primary' 
+                (isActive('/app/funcionarios') || isActive('/app/cargos') || isActive('/app/ponto') || isActive('/app/ponto-administracao'))
+                  ? 'bg-primary/5 text-primary'
                   : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
               }`}
             >
@@ -103,7 +105,7 @@ const AppLayout = () => {
               <ChevronDown size={16} className={`transition-transform duration-300 ${isHrOpen ? 'rotate-180' : ''}`} />
             </button>
             
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isHrOpen ? 'max-h-40 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isHrOpen ? 'max-h-52 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <div className="pl-11 pr-2 space-y-1">
                 <Link 
                   to="/app/funcionarios" 
@@ -121,13 +123,21 @@ const AppLayout = () => {
                 >
                   Cargos
                 </Link>
-                <Link 
-                  to="/app/ponto" 
+                <Link
+                  to="/app/ponto"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
                     isActive('/app/ponto') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
                   }`}
                 >
                   Controle de Ponto
+                </Link>
+                <Link
+                  to="/app/ponto-administracao"
+                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
+                    isActive('/app/ponto-administracao') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+                  }`}
+                >
+                  Administração de Ponto
                 </Link>
               </div>
             </div>

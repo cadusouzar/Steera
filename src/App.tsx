@@ -14,6 +14,7 @@ import InventoryList from './pages/app/InventoryList';
 import QuotesList from './pages/app/QuotesList';
 import PurchasingList from './pages/app/PurchasingList';
 import TimeTracking from './pages/app/TimeTracking';
+import TimeTrackingAdmin from './pages/app/TimeTrackingAdmin';
 import FinancesSaaS from './pages/app/FinancesSaaS';
 import UsersManagement from './pages/app/UsersManagement';
 import DashboardHub from './pages/analytics/DashboardHub';
@@ -35,6 +36,7 @@ function App() {
               <Route path="funcionarios" element={<EmployeesList />} />
               <Route path="funcionarios/novo" element={<EmployeeForm />} />
               <Route path="ponto" element={<TimeTracking />} />
+              <Route path="ponto-administracao" element={<TimeTrackingAdmin />} />
               <Route path="clientes" element={<ClientsList />} />
               <Route path="estoque" element={<InventoryList />} />
               <Route path="compras" element={<PurchasingList />} />
