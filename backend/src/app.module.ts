@@ -26,6 +26,7 @@ import { WorkSchedulesModule } from './work-schedules/work-schedules.module';
 import { WorkLocationsModule } from './work-locations/work-locations.module';
 import { TimeTrackingSettingsModule } from './time-tracking-settings/time-tracking-settings.module';
 import { TimeClockModule } from './time-clock/time-clock.module';
+import { TimeAdjustmentsModule } from './time-adjustments/time-adjustments.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { TimeClockModule } from './time-clock/time-clock.module';
     WorkLocationsModule,
     TimeTrackingSettingsModule,
     TimeClockModule,
+    TimeAdjustmentsModule,
   ],
   providers: [
     // JwtAuthGuard já respeita @Public() (Task 3) — nega por padrão em toda

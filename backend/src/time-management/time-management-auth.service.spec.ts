@@ -21,7 +21,7 @@ describe('TimeManagementAuthService', () => {
   beforeEach(async () => {
     prisma = {
       user: { findUnique: jest.fn() },
-      employee: { findFirst: jest.fn(), findUnique: jest.fn() },
+      employee: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
     };
     const module = await Test.createTestingModule({
       providers: [TimeManagementAuthService, { provide: PrismaService, useValue: prisma }],
@@ -30,10 +30,19 @@ describe('TimeManagementAuthService', () => {
   });
 
   describe('canManage', () => {
-    it('ADMIN can always manage, without looking up any employee', async () => {
+    it('ADMIN can manage an employee that belongs to their own company', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', managerId: null });
       const result = await service.canManage(admin, 'target-1');
       expect(result).toBe(true);
+      expect(prisma.employee.findFirst).toHaveBeenCalledWith({ where: { id: 'target-1', companyId: 'company-1' } });
+      // O bypass de ADMIN nunca precisa consultar `user` — só `employee`, já escopado por empresa.
       expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('ADMIN of a DIFFERENT company cannot manage a target employee that belongs to another company (regression guard: this was a real cross-tenant bypass, reproduced live via proactiveCorrect before this fix)', async () => {
+      prisma.employee.findFirst.mockResolvedValue(null); // companyId filter excludes a cross-company target
+      const result = await service.canManage(admin, 'target-other-company');
+      expect(result).toBe(false);
     });
 
     it('EMPLOYEE who is the direct managerId of the target can manage', async () => {
@@ -48,13 +57,13 @@ describe('TimeManagementAuthService', () => {
       });
     });
 
-    it('EMPLOYEE whose login has no linked employeeId can never manage', async () => {
+    it('EMPLOYEE whose login has no linked employeeId can never manage, even when the target employee genuinely exists in the same company', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', managerId: 'someone' });
       prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: null });
 
       const result = await service.canManage(employeeLogin, 'target-1');
 
       expect(result).toBe(false);
-      expect(prisma.employee.findFirst).not.toHaveBeenCalled();
     });
 
     it('EMPLOYEE from another company can never manage (companyId filter finds nothing)', async () => {
@@ -78,6 +87,7 @@ describe('TimeManagementAuthService', () => {
 
   describe('assertCanManage', () => {
     it('resolves without throwing when canManage would return true', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', managerId: null });
       await expect(service.assertCanManage(admin, 'target-1')).resolves.toBeUndefined();
     });
 
@@ -108,6 +118,41 @@ describe('TimeManagementAuthService', () => {
       prisma.employee.findUnique.mockResolvedValue({ id: 'employee-1', status: 'INACTIVE' });
 
       await expect(service.resolveOwnEmployee(employeeLogin)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('getManageableEmployeeIds', () => {
+    it("returns 'ALL' for ADMIN without querying anything", async () => {
+      const result = await service.getManageableEmployeeIds(admin);
+      expect(result).toBe('ALL');
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns [] for an EMPLOYEE login with no linked employeeId', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: null });
+      const result = await service.getManageableEmployeeIds(employeeLogin);
+      expect(result).toEqual([]);
+      expect(prisma.employee.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns the ids of direct reports for an EMPLOYEE login that manages people, scoped to its own company', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.findMany.mockResolvedValue([{ id: 'report-1' }, { id: 'report-2' }]);
+
+      const result = await service.getManageableEmployeeIds(employeeLogin);
+
+      expect(result).toEqual(['report-1', 'report-2']);
+      expect(prisma.employee.findMany).toHaveBeenCalledWith({
+        where: { managerId: 'employee-manager-1', companyId: 'company-1' },
+        select: { id: true },
+      });
+    });
+
+    it('returns [] for an EMPLOYEE login with no direct reports', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.findMany.mockResolvedValue([]);
+      const result = await service.getManageableEmployeeIds(employeeLogin);
+      expect(result).toEqual([]);
     });
   });
 });

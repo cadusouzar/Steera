@@ -12,23 +12,31 @@ import { PrismaService } from '../prisma/prisma.service';
 export class TimeManagementAuthService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // `true` se `currentUser.role === 'ADMIN'`, ou se o Employee vinculado ao
-  // login atual é o `managerId` DIRETO do funcionário-alvo. Não resolve
-  // cadeias de gerência mais longas (ex.: gerente do gerente) — escopo
-  // deliberadamente restrito a supervisão direta nesta task.
+  // `true` se `currentUser.role === 'ADMIN'` **do mesmo company do funcionário-alvo**, ou se o
+  // Employee vinculado ao login atual é o `managerId` DIRETO do funcionário-alvo. Não resolve
+  // cadeias de gerência mais longas (ex.: gerente do gerente) — escopo deliberadamente restrito a
+  // supervisão direta nesta task.
+  //
+  // A checagem `companyId` acontece ANTES do bypass de ADMIN de propósito — encontrado durante a
+  // verificação ao vivo da Task 8 (proactiveCorrect): todo OUTRO chamador deste método (approve/
+  // reject/getStatus/createPunch/...) já filtrava o alvo por `companyId: user.companyId` numa
+  // consulta anterior antes de chegar aqui, então o bypass cego de ADMIN nunca tinha sido
+  // exercitado com um `targetEmployeeId` de fato cross-tenant — até proactiveCorrect(), que passa
+  // o `employeeId` da URL direto pra cá sem nenhuma consulta prévia. Um ADMIN de QUALQUER empresa
+  // conseguia "corrigir" o ponto de um funcionário de OUTRA empresa só sabendo/adivinhando o id
+  // dele — reproduzido ao vivo (HTTP 201 antes deste fix). Buscar o `target` escopado por empresa
+  // primeiro, e só então checar o role, fecha essa lacuna pra TODOS os chamadores atuais e
+  // futuros, sem exigir que cada um lembre de pré-escopar por empresa antes de chamar.
   async canManage(currentUser: AuthenticatedUser, targetEmployeeId: string): Promise<boolean> {
-    if (currentUser.role === 'ADMIN') return true;
-
-    const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
-    if (!currentUserRecord?.employeeId) return false;
-
-    // O filtro `companyId` aqui é o que impede um EMPLOYEE de uma empresa
-    // gerenciar um funcionário-alvo de outra — mesmo que ele de alguma forma
-    // soubesse/adivinhasse o id.
     const target = await this.prisma.employee.findFirst({
       where: { id: targetEmployeeId, companyId: currentUser.companyId },
     });
     if (!target) return false;
+
+    if (currentUser.role === 'ADMIN') return true;
+
+    const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
+    if (!currentUserRecord?.employeeId) return false;
 
     return target.managerId === currentUserRecord.employeeId;
   }
@@ -58,5 +66,24 @@ export class TimeManagementAuthService {
       throw new ForbiddenException('Funcionário inativo não pode realizar esta ação');
     }
     return employee;
+  }
+
+  // Suporte às listagens administrativas paginadas (Task 8: GET /time-adjustment-requests, Task 9
+  // equivalente para justificativas, Task 10: visões agregadas) — em vez de cada uma buscar TODAS
+  // as solicitações da empresa e filtrar uma a uma chamando canManage() (N+1 chamadas, e ainda
+  // assim incompatível com paginação real no banco), resolve de uma vez o conjunto de employeeIds
+  // que o login atual pode gerenciar, pra usar direto num `where: { employeeId: { in: [...] } }`.
+  // 'ALL' sinaliza ADMIN (não precisa materializar a lista inteira de funcionários da empresa).
+  async getManageableEmployeeIds(currentUser: AuthenticatedUser): Promise<string[] | 'ALL'> {
+    if (currentUser.role === 'ADMIN') return 'ALL';
+
+    const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
+    if (!currentUserRecord?.employeeId) return [];
+
+    const reports = await this.prisma.employee.findMany({
+      where: { managerId: currentUserRecord.employeeId, companyId: currentUser.companyId },
+      select: { id: true },
+    });
+    return reports.map((r) => r.id);
   }
 }
