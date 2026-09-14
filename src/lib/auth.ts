@@ -10,6 +10,11 @@ export interface CurrentUser {
   // true pra quem se registrou via POST /auth/register (escolheu a própria
   // senha). RequireAuth usa isso pra forçar a troca antes de liberar o app.
   mustChangePassword: boolean;
+  // null pra um ADMIN recém-registrado (POST /auth/register nunca cria um
+  // Employee) até ele se auto-vincular a um cadastro (PATCH
+  // /auth/me/employee-link) — TimeTracking.tsx usa isso pra decidir entre o
+  // fluxo normal de bater ponto e o estado vazio "vincule seu cadastro".
+  employeeId: string | null;
 }
 
 interface ApiUser {
@@ -18,6 +23,7 @@ interface ApiUser {
   role: string;
   modules: string[];
   mustChangePassword: boolean;
+  employeeId: string | null;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -41,6 +47,7 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     role: user.role.toLowerCase() as 'admin' | 'employee',
     modules: user.modules,
     mustChangePassword: user.mustChangePassword,
+    employeeId: user.employeeId,
   };
 }
 
@@ -207,4 +214,21 @@ export async function restoreSession(): Promise<CurrentUser | null> {
     clearSession();
     return null;
   }
+}
+
+// Rebusca só o perfil (GET /auth/me), sem forçar uma renovação de refresh
+// token como restoreSession() faz — usado depois de uma ação que muda um
+// campo do próprio usuário sem re-logar (hoje só PATCH /auth/me/employee-link,
+// ver TimeTracking.tsx). Assume que já existe uma sessão válida (o access
+// token em memória ainda funciona); se não existir, propaga o erro como
+// qualquer outra chamada autenticada — não tenta silenciosamente virar
+// "sem sessão" como restoreSession() faz na inicialização.
+export async function refreshCurrentUser(): Promise<CurrentUser> {
+  const meRes = await fetch(`${API_URL}/auth/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    credentials: 'include',
+  });
+  if (!meRes.ok) throw new Error('Não foi possível atualizar os dados do usuário');
+  currentUser = toCurrentUser(await meRes.json());
+  return currentUser;
 }
