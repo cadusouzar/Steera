@@ -1158,7 +1158,13 @@ function mapWorkLocation(l: ApiWorkLocation): WorkLocationRecord {
   };
 }
 function mapTimeTrackingSettings(s: ApiTimeTrackingSettings): TimeTrackingSettingsRecord {
-  return { ...s };
+  return {
+    requirePhoto: s.requirePhoto,
+    requireLocation: s.requireLocation,
+    allowLocationException: s.allowLocationException,
+    allowExtraPeriods: s.allowExtraPeriods,
+    maxAttachmentSizeBytes: s.maxAttachmentSizeBytes,
+  };
 }
 
 // FormData só recebe string/Blob — descarta campos undefined/null em vez de mandar "undefined"
