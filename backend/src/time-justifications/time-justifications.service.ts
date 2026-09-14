@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { FileAssetPurpose, JustificationType, Prisma, TimeJustification } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
-import { generateDownloadToken } from '../files/download-token.util';
+import { buildFileDownloadPath } from '../files/download-token.util';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
@@ -25,18 +25,20 @@ export class TimeJustificationsService {
     private readonly timeManagementAuth: TimeManagementAuthService,
   ) {}
 
-  // Anexa um token de download de curta duração (5min, ver download-token.util.ts) SÓ quando o
-  // registro tem attachmentAssetId — nunca gerado "à toa" para quem não deveria ver. A própria
-  // chamada deste método só acontece depois que o chamador já foi confirmado autorizado (dono, via
-  // resolveOwnEmployee em listOwn(), ou canManage, via o WHERE já escopado em listForAdmin()) —
-  // gerar o token aqui, e só aqui, é o que fecha a lacuna apontada no brief ("attachmentAssetId só
-  // é resolvido pra quem tem canManage"): sem isso, GET /file-assets/:id nunca teria como ser
-  // chamado por ninguém, autorizado ou não, já que generateDownloadToken() não tinha nenhum
-  // call site em todo o projeto até esta task.
+  // Anexa um `downloadUrl` pronto (path relativo com token de download de curta duração já
+  // embutido, ver download-token.util.ts) SÓ quando o registro tem attachmentAssetId — nunca
+  // gerado "à toa" para quem não deveria ver. A própria chamada deste método só acontece depois
+  // que o chamador já foi confirmado autorizado (dono, via resolveOwnEmployee em listOwn(), ou
+  // canManage, via o WHERE já escopado em listForAdmin()) — gerar o token aqui, e só aqui, é o que
+  // fecha a lacuna apontada no brief ("attachmentAssetId só é resolvido pra quem tem canManage"):
+  // sem isso, GET /file-assets/:id nunca teria como ser chamado por ninguém, autorizado ou não, já
+  // que generateDownloadToken() não tinha nenhum call site em todo o projeto até esta task. Nome
+  // do campo (`downloadUrl`, não um token cru) e formato (path relativo) seguem a decisão de
+  // interface do Task 11 (frontend api.ts) — o frontend nunca monta token/URL sozinho.
   private withDownloadToken<T extends { attachmentAssetId: string | null }>(record: T) {
     return {
       ...record,
-      attachmentDownloadToken: record.attachmentAssetId ? generateDownloadToken(record.attachmentAssetId) : null,
+      downloadUrl: record.attachmentAssetId ? buildFileDownloadPath(record.attachmentAssetId) : null,
     };
   }
 

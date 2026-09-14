@@ -18,6 +18,14 @@ export function generateDownloadToken(assetId: string): string {
   return `${expiresAt}.${signature}`;
 }
 
+// Path relativo pronto pra qualquer resposta que referencie um attachmentAssetId/photoAssetId
+// (TimeEvent, TimeAdjustmentRequest, TimeJustification) — decisão de interface do Task 11 (frontend
+// api.ts): o frontend nunca monta token/URL sozinho, só usa este campo como veio. Path relativo
+// (não URL absoluta) porque este módulo não conhece a origem/porta do frontend.
+export function buildFileDownloadPath(assetId: string): string {
+  return `/file-assets/${assetId}?token=${generateDownloadToken(assetId)}`;
+}
+
 export function verifyDownloadToken(assetId: string, token: string): boolean {
   const [expiresAtStr, signature] = token.split('.');
   const expiresAt = Number(expiresAtStr);

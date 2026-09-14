@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { FileAssetPurpose, Prisma } from '@prisma/client';
+import { FileAssetPurpose, Prisma, TimeEvent } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { buildFileDownloadPath } from '../files/download-token.util';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
@@ -25,6 +26,15 @@ export class TimeClockService {
     private readonly workLocations: WorkLocationsService,
     private readonly timeManagementAuth: TimeManagementAuthService,
   ) {}
+
+  // `downloadUrl` pronto (path relativo com token já embutido) SÓ quando o evento tem foto —
+  // decisão de interface do Task 11 (frontend api.ts), mesmo padrão de TimeJustificationsService.
+  // Chamado só em respostas de eventos que o próprio funcionário está vendo (os seus) ou que um
+  // chamador já confirmado autorizado (assertCanManage, no controller de Task 10) está vendo —
+  // nunca gerado antes dessa checagem.
+  private withPhotoDownloadUrl<T extends TimeEvent>(event: T) {
+    return { ...event, downloadUrl: event.photoAssetId ? buildFileDownloadPath(event.photoAssetId) : null };
+  }
 
   private async getTodayOpenState(employeeId: string) {
     // "Hoje" pra fins de sequência olha as últimas 24h de eventos, não a data civil — cobre
@@ -139,12 +149,12 @@ export class TimeClockService {
     });
 
     const { state: newState } = await this.getTodayOpenState(employee.id);
-    return { event, nextAllowedType: getNextAllowedType(newState, settings.allowExtraPeriods) };
+    return { event: this.withPhotoDownloadUrl(event), nextAllowedType: getNextAllowedType(newState, settings.allowExtraPeriods) };
   }
 
   async listOwnPunches(user: AuthenticatedUser, from?: string, to?: string) {
     const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
-    return this.prisma.timeEvent.findMany({
+    const events = await this.prisma.timeEvent.findMany({
       where: {
         employeeId: employee.id,
         ...(from || to
@@ -153,6 +163,7 @@ export class TimeClockService {
       },
       orderBy: { serverRecordedAt: 'desc' },
     });
+    return events.map((e) => this.withPhotoDownloadUrl(e));
   }
 
   // Visão administrativa agregada (Task 10) — chamador já confirmado autorizado via
@@ -176,7 +187,7 @@ export class TimeClockService {
       this.prisma.timeEvent.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { serverRecordedAt: 'desc' } }),
       this.prisma.timeEvent.count({ where }),
     ]);
-    return { items, total, page, pageSize };
+    return { items: items.map((e) => this.withPhotoDownloadUrl(e)), total, page, pageSize };
   }
 
   // Todas as marcações PENDING_REVIEW (fora de área, localização exigida mas indisponível com
@@ -193,6 +204,7 @@ export class TimeClockService {
       validationStatus: 'PENDING_REVIEW',
       ...(manageable === 'ALL' ? {} : { employeeId: { in: manageable } }),
     };
-    return this.prisma.timeEvent.findMany({ where, orderBy: { serverRecordedAt: 'desc' } });
+    const events = await this.prisma.timeEvent.findMany({ where, orderBy: { serverRecordedAt: 'desc' } });
+    return events.map((e) => this.withPhotoDownloadUrl(e));
   }
 }

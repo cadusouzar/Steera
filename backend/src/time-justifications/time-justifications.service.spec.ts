@@ -77,7 +77,7 @@ describe('TimeJustificationsService', () => {
       const result = await service.create(employeeUser, { type: 'MEDICAL_CERTIFICATE', description: 'atestado' } as any, attachment);
 
       expect(files.upload).toHaveBeenCalledWith('company-1', 'user-1', attachment, 'JUSTIFICATION_ATTACHMENT');
-      expect(result.attachmentDownloadToken).not.toBeNull();
+      expect(result.downloadUrl).not.toBeNull();
     });
 
     it('propagates a FilesService rejection (invalid format / over size limit) without creating a justification', async () => {
@@ -113,8 +113,8 @@ describe('TimeJustificationsService', () => {
         { id: 'just-2', attachmentAssetId: null },
       ]);
       const result = await service.listOwn(employeeUser);
-      expect(result[0].attachmentDownloadToken).toEqual(expect.any(String));
-      expect(result[1].attachmentDownloadToken).toBeNull();
+      expect(result[0].downloadUrl).toEqual(expect.any(String));
+      expect(result[1].downloadUrl).toBeNull();
     });
 
     it('listForAdmin as a manager only queries the employees they can manage — never resolves a token for anyone outside that set, because the query itself never returns those rows', async () => {

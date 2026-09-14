@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { FileAssetPurpose, Prisma } from '@prisma/client';
+import { FileAssetPurpose, Prisma, TimeAdjustmentRequest } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { buildFileDownloadPath } from '../files/download-token.util';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
@@ -22,6 +23,12 @@ export class TimeAdjustmentsService {
     private readonly files: FilesService,
     private readonly timeManagementAuth: TimeManagementAuthService,
   ) {}
+
+  // `downloadUrl` pronto SÓ quando a solicitação tem anexo — mesmo padrão de
+  // TimeJustificationsService/TimeClockService (decisão de interface do Task 11).
+  private withDownloadUrl<T extends TimeAdjustmentRequest>(request: T) {
+    return { ...request, downloadUrl: request.attachmentAssetId ? buildFileDownloadPath(request.attachmentAssetId) : null };
+  }
 
   // Confere que `relatedEventId`, quando informado, é de fato um TimeEvent do PRÓPRIO
   // `employeeId` (não um id de outro funcionário, mesmo da mesma empresa) — o brief não valida
@@ -58,7 +65,7 @@ export class TimeAdjustmentsService {
       attachmentAssetId = asset.id;
     }
 
-    return this.prisma.timeAdjustmentRequest.create({
+    const created = await this.prisma.timeAdjustmentRequest.create({
       data: {
         companyId: user.companyId,
         employeeId: employee.id,
@@ -72,14 +79,16 @@ export class TimeAdjustmentsService {
         attachmentAssetId,
       },
     });
+    return this.withDownloadUrl(created);
   }
 
   async listOwn(user: AuthenticatedUser) {
     const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
-    return this.prisma.timeAdjustmentRequest.findMany({
+    const items = await this.prisma.timeAdjustmentRequest.findMany({
       where: { employeeId: employee.id },
       orderBy: { createdAt: 'desc' },
     });
+    return items.map((item) => this.withDownloadUrl(item));
   }
 
   async cancel(user: AuthenticatedUser, id: string) {
@@ -87,7 +96,8 @@ export class TimeAdjustmentsService {
     const request = await this.prisma.timeAdjustmentRequest.findFirst({ where: { id, employeeId: employee.id } });
     if (!request) throw new NotFoundException(`Solicitação ${id} não encontrada`);
     if (request.status !== 'PENDING') throw new ConflictException('Só é possível cancelar solicitações pendentes');
-    return this.prisma.timeAdjustmentRequest.update({ where: { id }, data: { status: 'CANCELLED' } });
+    const updated = await this.prisma.timeAdjustmentRequest.update({ where: { id }, data: { status: 'CANCELLED' } });
+    return this.withDownloadUrl(updated);
   }
 
   // Listagem administrativa: ADMIN vê tudo da empresa; um superior direto vê só as solicitações
@@ -113,7 +123,7 @@ export class TimeAdjustmentsService {
       }),
       this.prisma.timeAdjustmentRequest.count({ where }),
     ]);
-    return { items, total, page, pageSize };
+    return { items: items.map((item) => this.withDownloadUrl(item)), total, page, pageSize };
   }
 
   async approve(user: AuthenticatedUser, id: string, reviewNote: string | undefined) {
@@ -170,10 +180,11 @@ export class TimeAdjustmentsService {
       throw new ConflictException('Esta solicitação já foi processada e não pode ser rejeitada novamente');
     }
     if (!reviewNote) throw new BadRequestException('Motivo da rejeição é obrigatório');
-    return this.prisma.timeAdjustmentRequest.update({
+    const updated = await this.prisma.timeAdjustmentRequest.update({
       where: { id },
       data: { status: 'REJECTED', reviewedByUserId: user.userId, reviewNote, reviewedAt: new Date() },
     });
+    return this.withDownloadUrl(updated);
   }
 
   // Correção proativa (sem solicitação prévia do funcionário) — reaproveita approve() em vez de
