@@ -329,6 +329,7 @@ interface ApiEmployeeListItem {
   id: string;
   fullName: string;
   roleId: string;
+  managerId: string | null;
   department: string;
   contractType: 'CLT' | 'PJ' | 'ESTAGIO';
   status: 'ACTIVE' | 'INACTIVE';
@@ -340,6 +341,8 @@ interface ApiEmployeeDetail {
   fullName: string;
   cpf: string;
   roleId: string;
+  managerId: string | null;
+  managerName: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
@@ -405,6 +408,7 @@ export interface EmployeeListItem {
   id: string;
   fullName: string;
   roleId: string;
+  managerId: string | null;
   department: string;
   contractType: 'clt' | 'pj' | 'estagio';
   status: 'active' | 'inactive';
@@ -416,6 +420,8 @@ export interface EmployeeDetail {
   fullName: string;
   cpf: string;
   roleId: string;
+  managerId: string | null;
+  managerName: string | null;
   email?: string;
   phone?: string;
   address?: string;
@@ -471,6 +477,7 @@ export interface EmployeeFormInput {
   fullName: string;
   cpf: string;
   roleId: string;
+  managerId?: string | null;
   email?: string;
   phone?: string;
   address?: string;
@@ -499,6 +506,7 @@ function mapEmployeeListItem(e: ApiEmployeeListItem): EmployeeListItem {
     id: e.id,
     fullName: e.fullName,
     roleId: e.roleId,
+    managerId: e.managerId,
     department: e.department,
     contractType: e.contractType.toLowerCase() as EmployeeListItem['contractType'],
     status: e.status.toLowerCase() as EmployeeListItem['status'],
@@ -513,6 +521,8 @@ function mapEmployeeDetail(e: ApiEmployeeDetail): EmployeeDetail {
     fullName: e.fullName,
     cpf: formatCpf(e.cpf),
     roleId: e.roleId,
+    managerId: e.managerId,
+    managerName: e.managerName,
     email: e.email ?? undefined,
     phone: e.phone ?? undefined,
     address: e.address ?? undefined,
@@ -534,6 +544,7 @@ function toEmployeeDto(input: EmployeeFormInput) {
     fullName: input.fullName,
     cpf: stripCpf(input.cpf),
     roleId: input.roleId,
+    managerId: input.managerId || undefined,
     email: input.email || undefined,
     phone: input.phone || undefined,
     address: input.address || undefined,
@@ -660,6 +671,7 @@ export async function updateEmployee(id: string, input: Partial<EmployeeFormInpu
   // JSON.stringify omite do body, fazendo o backend nunca ver a atualização e manter o
   // valor antigo silenciosamente). O backend aceita `null` via @IsOptional() e persiste
   // como NULL de verdade.
+  if (input.managerId !== undefined) dto.managerId = input.managerId || null;
   if (input.email !== undefined) dto.email = input.email || null;
   if (input.phone !== undefined) dto.phone = input.phone || null;
   if (input.address !== undefined) dto.address = input.address || null;

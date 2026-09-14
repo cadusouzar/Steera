@@ -146,6 +146,7 @@ const EmployeesList = () => {
     try {
       const updated = await api.updateEmployee(selectedEmployee.id, {
         fullName: editForm.fullName, cpf: editForm.cpf, roleId: editForm.roleId,
+        managerId: editForm.managerId,
         email: editForm.email, phone: editForm.phone, address: editForm.address,
         department: editForm.department, contractType: editForm.contractType,
         admissionDate: editForm.admissionDate, baseValue: editForm.baseValue,
@@ -170,7 +171,7 @@ const EmployeesList = () => {
       const warnings = await api.listWarnings(selectedEmployee.id);
       setSelectedEmployee({ ...updated, warnings });
       setEmployeeItems(prev => prev.map(e => e.id === updated.id
-        ? { id: updated.id, fullName: updated.fullName, roleId: updated.roleId, department: updated.department, contractType: updated.contractType, status: updated.status, cpfMasked: e.cpfMasked, baseValue: updated.baseValue }
+        ? { id: updated.id, fullName: updated.fullName, roleId: updated.roleId, managerId: updated.managerId, department: updated.department, contractType: updated.contractType, status: updated.status, cpfMasked: e.cpfMasked, baseValue: updated.baseValue }
         : e));
       setIsEditing(false);
     } catch (err) {
@@ -464,6 +465,11 @@ const EmployeesList = () => {
                             <Briefcase size={14} className="text-primary/70 shrink-0" /> {roleNameById(selectedEmployee.roleId)}
                           </span>
                         )}
+                        {!isEditing && selectedEmployee.managerName && (
+                          <span className="text-muted text-xs font-medium flex items-center gap-1.5 mt-0.5 truncate">
+                            <User size={12} className="text-primary/70 shrink-0" /> Superior: {selectedEmployee.managerName}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -708,6 +714,19 @@ const EmployeesList = () => {
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Departamento</label>
                                 <input type="text" value={editForm.department || ''} onChange={(e) => setEditForm({ ...editForm, department: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="block text-xs font-medium text-foreground/80 mb-1.5">Superior</label>
+                                <CustomSelect
+                                  value={editForm.managerId || ''}
+                                  onChange={(val) => setEditForm({ ...editForm, managerId: val || null })}
+                                  options={[
+                                    { value: '', label: 'Nenhum — sem superior' },
+                                    ...employeeItems.filter(e => e.id !== selectedEmployee.id).map(e => ({ value: e.id, label: e.fullName })),
+                                  ]}
+                                  className="!py-2.5 !px-3"
+                                />
+                                <p className="text-xs text-muted mt-1.5">Quem administra o ponto deste funcionário (aprova/rejeita ajustes, corrige marcações).</p>
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Data de Admissão</label>

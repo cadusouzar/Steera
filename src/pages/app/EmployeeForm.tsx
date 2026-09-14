@@ -4,12 +4,13 @@ import { ArrowLeft, Save, User, Briefcase, DollarSign, AlertTriangle, Loader2 } 
 import { Link, useNavigate } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
 import * as api from '../../lib/api';
-import type { Role } from '../../lib/api';
+import type { EmployeeListItem, Role } from '../../lib/api';
 
 const EmployeeForm = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('pessoal');
   const [roles, setRoles] = useState<Role[]>([]);
+  const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -23,6 +24,7 @@ const EmployeeForm = () => {
 
   // Cargo & Vínculo
   const [roleId, setRoleId] = useState('');
+  const [managerId, setManagerId] = useState('');
   const [department, setDepartment] = useState('');
   const [admissionDate, setAdmissionDate] = useState('');
   const [contractType, setContractType] = useState<'clt' | 'pj' | 'estagio'>('clt');
@@ -38,6 +40,9 @@ const EmployeeForm = () => {
       setRoles([]);
       setLoadError('Não foi possível carregar a lista de cargos. Recarregue a página para tentar novamente.');
     });
+    // Lista completa (não só ativos) — um funcionário pode reportar a alguém que depois foi
+    // inativado; a empresa decide se isso é um problema, não escondemos a opção aqui.
+    api.listEmployees().then(setEmployees).catch(() => setEmployees([]));
   }, []);
 
   const tabs = [
@@ -67,7 +72,7 @@ const EmployeeForm = () => {
     setSaveError(null);
     try {
       const created = await api.createEmployee({
-        fullName, cpf, roleId, email: email || undefined, phone: phone || undefined,
+        fullName, cpf, roleId, managerId: managerId || undefined, email: email || undefined, phone: phone || undefined,
         address: address || undefined, contractType, admissionDate, department,
         baseValue: Number(baseValue), paymentDay, bankDetails: bankDetails || undefined,
         salaryRecurrenceEnabled,
@@ -212,6 +217,22 @@ const EmployeeForm = () => {
                       placeholder="Selecione um cargo..."
                     />
                     <p className="text-xs text-muted mt-2">Os cargos devem ser cadastrados previamente na tela de Cargos.</p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-foreground/80 mb-2">Superior (opcional)</label>
+                    <CustomSelect
+                      value={managerId}
+                      onChange={setManagerId}
+                      options={[
+                        { value: '', label: 'Nenhum — sem superior' },
+                        ...employees.map(e => ({ value: e.id, label: e.fullName })),
+                      ]}
+                      placeholder="Selecione um superior..."
+                    />
+                    <p className="text-xs text-muted mt-2">
+                      Define quem administra o ponto deste funcionário (aprova/rejeita solicitações de
+                      ajuste, corrige marcações) — moldável por empresa, sem hierarquia fixa.
+                    </p>
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Departamento</label>
