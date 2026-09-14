@@ -12,7 +12,8 @@
     "test:watch": "jest --watch --testPathIgnorePatterns=test/",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "seed:holidays": "ts-node prisma/seed-holidays.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.6",

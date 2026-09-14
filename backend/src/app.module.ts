@@ -14,6 +14,7 @@ import { EmployeeRecurringPaymentsModule } from './employee-recurring-payments/e
 import { EmployeePaymentsModule } from './employee-payments/employee-payments.module';
 import { VacationsModule } from './vacations/vacations.module';
 import { LeavesModule } from './leaves/leaves.module';
+import { HolidaysModule } from './holidays/holidays.module';
 import { BillingModule } from './billing/billing.module';
 import { ClientsModule } from './clients/clients.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -61,6 +62,7 @@ import { UsersModule } from './users/users.module';
     EmployeePaymentsModule,
     VacationsModule,
     LeavesModule,
+    HolidaysModule,
     BillingModule,
     ClientsModule,
     ReceivablesModule,
