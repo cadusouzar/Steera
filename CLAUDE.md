@@ -421,17 +421,33 @@ solicitações de ajuste, justificativas/atestados e configuração administrati
   já que não existe endpoint dedicado pra isso) — o backend segue sendo a fronteira real (`404`
   visível se tentar corrigir alguém fora da própria autoridade), mas o seletor mostra mais opções
   do que as que de fato funcionam; `npm run test:e2e` do backend não roda neste ambiente de dev por
-  falta de um banco `*_test` provisionado (préexistente a este módulo). **Verificação interativa em
-  navegador real não foi possível durante a implementação** (ferramenta de automação de navegador
-  desconectada nesta sessão) — toda a lógica foi verificada estaticamente
-  (`tsc`/lint/build/transform do Vite) e por rastreamento manual completo do fluxo de dados, e o
-  backend foi extensivamente testado ao vivo via HTTP real (duas empresas, hierarquia de superior,
-  ciclo de ponto completo com foto/localização reais, ajuste solicitado/aprovado/rejeitado,
-  justificativa com atestado, isolamento entre empresas em toda rota nova) — mas um percurso
-  clicando de verdade em `[[TimeTracking]]`/`[[TimeTrackingAdmin]]` num navegador ainda não
-  aconteceu e deveria ser tratado como pendente.
-  Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo todas as
-  decisões e o incidente de segurança acima).
+  falta de um banco `*_test` provisionado (préexistente a este módulo); o `useEffect` que carrega as
+  marcações existentes na aba de Correção Proativa não reexecuta após um envio bem-sucedido para o
+  mesmo funcionário/data (chave de dependência não inclui um contador de sucesso), mostrando
+  "nenhuma marcação encontrada" de forma obsoleta até a página ser recarregada — o dado em si está
+  correto (confirmado ao vivo), é só a lista de marcações-candidatas que fica desatualizada dentro
+  da mesma sessão de formulário.
+  **Verificação interativa em navegador real: feita (14/09/2026), depois de reconectar a ferramenta
+  de automação de navegador nesta sessão.** Todo o ciclo do funcionário (`[[TimeTracking]]`: status
+  → confirmação → localização → marcação → detalhe de marcação → solicitação de ajuste → cancelar) e
+  da administração (`[[TimeTrackingAdmin]]`: todas as 5 abas, aprovar/rejeitar justificativa e
+  solicitação de ajuste com motivo obrigatório, correção proativa completa, salvar configurações)
+  foi clicado de verdade, não apenas testado por API. Essa verificação encontrou e corrigiu **dois
+  bugs reais que toda a bateria anterior de testes via `curl`/Postman nunca teria pego**, porque
+  ambos só se manifestam quando o próprio navegador monta a requisição:
+  1. Todo link de anexo/foto (`downloadUrl`) era renderizado como `<a href>`/`<img src>` simples —
+     mas `GET /file-assets/:id?token=` exige um Bearer JWT normal **além** do token HMAC (design
+     deliberado da Task 2), e o navegador nunca anexa `Authorization` numa navegação por elemento.
+     Todo clique real em "Ver" ou toda foto de marcação dava `401`. Corrigido com
+     `fetchProtectedFileObjectUrl()` (fetch autenticado + `URL.createObjectURL`) em `src/lib/api.ts`.
+  2. Salvar as configurações da empresa (aba Configuração, botão "Salvar") sempre falhava com `400`
+     — `mapTimeTrackingSettings()` espalhava (`{ ...s }`) a resposta bruta do backend, que carrega
+     `id`/`companyId`/`createdAt`/`updatedAt` em tempo de execução mesmo sem esses campos nas
+     interfaces TypeScript, e esse mesmo objeto era reenviado no `PATCH`, rejeitado pela validação
+     de whitelist do Nest. Corrigido construindo o objeto explicitamente com só os 5 campos.
+  Ambos reproduzidos ao vivo, corrigidos, e re-verificados ao vivo (200 em vez de 401/400) antes de
+  seguir. Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo
+  todas as decisões, o incidente de segurança do `canManage()`, e os dois bugs acima).
 
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
