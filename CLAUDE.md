@@ -24,7 +24,7 @@ Não há suíte de testes configurada no projeto (sem script `test`, sem Jest/Vi
 
 - `src/App.tsx` — única fonte de rotas do app, via `react-router-dom` (`BrowserRouter`/`Routes`/`Route`). Rotas públicas (`/`, `/login`, `/register`) e rotas logadas sob `/app`, todas aninhadas em `AppLayout`.
 - `src/layouts/AppLayout.tsx` — shell do app logado: sidebar com submenus (RH, Comercial, Operações) + header com `ThemeToggle` e `UserProfileDropdown`/`UserProfileDrawer`. Todo conteúdo de página é renderizado via `<Outlet />`.
-- `src/pages/app/*` — páginas do ERP logado (uma por rota em `/app/...`): `Overview`, `Roles`, `EmployeesList`/`EmployeeForm`, `ClientsList`, `InventoryList`, `QuotesList`, `PurchasingList`, `TimeTracking`, `FinancesSaaS`, `UsersManagement`.
+- `src/pages/app/*` — páginas do ERP logado (uma por rota em `/app/...`): `Overview`, `Roles`, `EmployeesList`/`EmployeeForm`, `ClientsList`, `InventoryList`, `QuotesList`, `PurchasingList`, `TimeTracking`/`TimeTrackingAdmin`, `FinancesSaaS`, `UsersManagement`.
 - `src/pages/analytics/*` — módulo de dashboards customizáveis: `DashboardHub` (lista/gerencia dashboards salvos) e `DashboardBuilder` (editor de widgets, rota `/app/analytics/:id`).
 - `src/pages/*.tsx` (raiz) — páginas públicas: `LandingPage`, `Login`, `Register`.
 - `src/components/analytics/*` — peças do dashboard builder: `WidgetCanvas` (grid via react-grid-layout), `ChartRenderer` (Recharts), `DataSidebar` (painel de configuração de widgets).
@@ -76,10 +76,14 @@ npm run test:e2e          # teste de integração (precisa de PostgreSQL local r
 **Arquitetura:** 4 módulos financeiros (`ClientsModule`, `ReceivablesModule`, `SubscriptionsModule`,
 `ReportsModule`) + `PrismaModule` global + 8 módulos de Recursos Humanos (`CompanyModule`,
 `RolesModule`, `EmployeesModule`, `EmployeeWarningsModule`, `EmployeePaymentsModule`,
-`EmployeeRecurringPaymentsModule`, `VacationsModule`, `LeavesModule`). "Overdue" em
-lançamentos/pagamentos é sempre derivado em runtime (nunca persistido). Ver `[[ARQUITETURA]]`,
-`[[BANCO-DE-DADOS]]`, `[[API]]`, `[[AMBIENTE-LOCAL]]` e `[[DECISOES-TECNICAS]]` no vault
-(`B:\Quickflow\Quickflow`) para detalhes.
+`EmployeeRecurringPaymentsModule`, `VacationsModule`, `LeavesModule`) + 8 módulos de Controle de
+Ponto (`TimeClockModule`, `TimeAdjustmentsModule`, `TimeJustificationsModule`,
+`WorkSchedulesModule`, `WorkLocationsModule`, `TimeTrackingSettingsModule`, `HolidaysModule`,
+`FilesModule`, este último compartilhado com o resto do backend) + `TimeManagementAuthModule`
+(autorização compartilhada por hierarquia de superior). "Overdue" em lançamentos/pagamentos é
+sempre derivado em runtime (nunca persistido). Ver `[[ARQUITETURA]]`, `[[BANCO-DE-DADOS]]`,
+`[[API]]`, `[[AMBIENTE-LOCAL]]` e `[[DECISOES-TECNICAS]]` no vault (`B:\Quickflow\Quickflow`) para
+detalhes.
 
 **Módulo de RH (`RolesModule`, `EmployeesModule`, `EmployeeWarningsModule`, `EmployeePaymentsModule`,
 `EmployeeRecurringPaymentsModule`, `VacationsModule`, `LeavesModule`, `CompanyModule`):** cobre
@@ -311,6 +315,123 @@ financeiro em uso; precisa de revisão dedicada. Detalhes completos em `[[DECISO
 Detalhes completos (decisão de duas camadas cron+bootstrap, motivo de não ter catch-up retroativo,
 raciocínio de "uma empresa por execução") em `[[DECISOES-TECNICAS]]`; mapa de módulos em
 `[[ARQUITETURA]]`; nota sobre o comportamento (sem endpoint novo) em `[[API]]`.
+
+**Controle de Ponto (`TimeClockModule`/`TimeAdjustmentsModule`/`TimeJustificationsModule`/
+`WorkSchedulesModule`/`WorkLocationsModule`/`TimeTrackingSettingsModule`/`HolidaysModule`/
+`FilesModule`, implementado em 14/09/2026):** módulo novo, cobrindo batida de ponto, apuração,
+solicitações de ajuste, justificativas/atestados e configuração administrativa. Spec em
+`docs/superpowers/specs/2026-09-13-time-tracking-design.md`, plano em
+`docs/superpowers/plans/2026-09-13-time-tracking.md`.
+- **Modelo de evento flexível, nunca posicional:** `TimeEvent` tem um `type`
+  (`CLOCK_IN`/`BREAK_START`/`BREAK_END`/`CLOCK_OUT`/`EXTRA_IN`/`EXTRA_OUT`) em vez de colunas fixas
+  — a "próxima marcação permitida" é decidida por uma máquina de estado real
+  (`time-sequence.util.ts`: `computeOpenState`/`getNextAllowedType`/`validateTransition`, andando
+  por todo o histórico de eventos em ordem) que corrige o bug do mock antigo do frontend
+  (`punchSequence[array.length]`, um índice posicional que quebrava silenciosamente com qualquer
+  marcação faltando). `TimeEvent` é imutável por design de aplicação — nenhuma rota
+  `PATCH`/`DELETE` existe pra ele em lugar nenhum; toda correção passa pelo fluxo de
+  `TimeAdjustmentRequest` (ver abaixo), que sempre CRIA um novo evento, nunca altera o original.
+  Hora sempre `serverRecordedAt` (server-authoritative); `deviceReportedAt` existe só pra
+  auditoria, nunca é fonte de verdade.
+- **Hierarquia de superior:** `Employee.managerId` (auto-relação, `onDelete: SetNull`) — uma
+  autorização por dado, ortogonal a `role`/`modules`, resolvida por
+  `TimeManagementAuthService` (`backend/src/time-management/`), o único lugar do projeto que
+  decide "quem pode administrar o ponto de quem": `role === 'ADMIN'` da mesma empresa sempre pode;
+  um login `EMPLOYEE` cujo `Employee` é o `managerId` **direto** de outro pode administrar só esse
+  subordinado (sem propagação em cadeia — gerente do gerente não herda automaticamente). Todo
+  módulo administrativo injeta este serviço em vez de reimplementar a checagem; 404 (nunca 403)
+  quando nega, mesmo padrão já usado no resto do backend. Rotas administrativas exigem o módulo
+  `RH` além de `canManage` — as de auto-atendimento (bater o próprio ponto, ver/cancelar a própria
+  solicitação) não exigem módulo nenhum, mesmo espírito de `/auth/me`.
+  **Incidente encontrado e corrigido durante a implementação:** `canManage()`'s bypass de ADMIN
+  originalmente checava só `role`, nunca se o funcionário-alvo pertencia à MESMA empresa do ADMIN —
+  todo outro chamador (`approve`/`reject`) já filtrava o alvo por `companyId` numa consulta
+  anterior, então a lacuna nunca tinha sido exercitada até a correção proativa
+  (`POST /employees/:employeeId/time-events/correct`), que passa um `employeeId` cru direto pra
+  `assertCanManage`. Reproduzido ao vivo: um ADMIN de qualquer empresa conseguia criar
+  `TimeEvent`/`TimeCorrection` reais contra um funcionário de OUTRA empresa. Corrigido buscando o
+  alvo escopado por empresa ANTES de checar o role — fecha a lacuna pra todo chamador atual e
+  futuro, não só esse. Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe
+  completo (evidência, chamadas antes/depois do fix).
+- **Admin sem `Employee` (fundador via `POST /auth/register`, que nunca cria um `Employee`):**
+  `PATCH /auth/me/employee-link` deixa o próprio login se vincular a um `Employee` já existente
+  (criado normalmente via "Novo Funcionário"), uma única vez — login que já tem `employeeId` é
+  rejeitado. Até se vincular, o login simplesmente não bate ponto (frontend mostra um estado vazio
+  explicando isso, nunca um erro genérico).
+- **Geofencing opcional:** `WorkLocation` (nome, lat/lng, raio) por empresa — distância sempre
+  calculada no servidor (Haversine, `geo-distance.util.ts`), nunca confiando num "dentro da área"
+  vindo do cliente. Sem nenhum `WorkLocation` configurado, localização nunca bloqueia nem valida
+  nada. Fora da área nunca rejeita a marcação — grava como `PENDING_REVIEW`, pra análise humana.
+- **Upload de arquivo — primeira infra do projeto** (`FilesModule`, local em
+  `backend/storage/attachments/`, gitignored, sem Docker/nuvem): arquivo salvo com nome UUID
+  aleatório (nunca o nome original), metadados de imagem removidos (`sharp`), MIME real conferido
+  por assinatura binária — `detectRealMimeType()` (`files/file-signature.util.ts`), um checker
+  dependency-free escopado só a PDF/JPEG/PNG. **Não usa o pacote `file-type`**: a única versão
+  compatível com CJS (`16.5.4`) carrega uma DoS não corrigida
+  (`GHSA-5v7r-6r5c-r473`, parser ASF) sem fix disponível em toda a linha 16.x — descoberto e
+  substituído durante a própria implementação, antes de qualquer rota de rede expor o caminho.
+  Download via `GET /file-assets/:id?token=` exige um token HMAC-SHA256 curto (5min, reaproveita
+  `JWT_ACCESS_SECRET`) — toda resposta que referencia um anexo/foto já devolve um campo
+  `downloadUrl` pronto (path relativo com o token embutido, `buildFileDownloadPath()`), o frontend
+  nunca constrói um token sozinho (`getFileDownloadUrl()` em `src/lib/api.ts` só prefixa a origem
+  da API). **Pendência documentada:** essa geração de `downloadUrl` só foi cabeada pra
+  `TimeJustification` e (depois) `TimeEvent`/`TimeAdjustmentRequest` — nenhuma delas ficou sem, mas
+  vale conferir de novo se um endpoint novo passar a devolver um asset sem esse campo.
+- **Calendário de feriados** (`HolidaysModule`) — nacional + móvel via algoritmo de Páscoa (Gauss),
+  estadual (`STATE_HOLIDAYS`, todas as 27 UFs, cada uma com fonte/confiança documentada no próprio
+  código) e customizado por empresa. **Mesmo aviso já usado noutras pendências do projeto: é uma
+  base de referência, pesquisada e citada, não uma fonte oficial autoatualizável** — precisa de
+  revisão periódica, e feriados municipais não são semeados (empresa cadastra por cima). Um dia
+  feriado zera `expectedMinutes` na apuração, nunca conta falta.
+- **Apuração** (`TimeAttendanceCalculationService`) — pareia eventos por TIPO em sequência (nunca
+  posição), sem nenhuma regra de CLT embutida (sem multiplicador de hora extra, sem adicional
+  noturno automático — mecanismo configurável, nenhum valor aplicado por padrão). Janela do dia
+  civil é **consciente do fuso da empresa** (`Company.timezone`, `localMidnightUtc()` via
+  `Intl.DateTimeFormat`), não UTC bruto — sem isso, batidas entre 21h-23h59 (horário de Brasília)
+  cairiam no dia civil errado. Turno atravessando a meia-noite usa um buffer técnico de busca de
+  +48h (não uma regra trabalhista) que credita cada par ao dia em que ABRIU, não em que fechou —
+  corrige um bug real da versão inicial do plano, que não conseguia estruturalmente encontrar o
+  fechamento de um turno noturno. `WorkSchedule.weekDays` filtra o dia da semana esperado (sem
+  isso, um fim de semana dentro do período de vigência de uma escala seria contado como esperado).
+- **Ajustes** (`TimeAdjustmentRequest`/`TimeCorrection`) — aprovar sempre cria um `TimeEvent` NOVO
+  (`source: ADMIN_MANUAL`) numa transação (`runTenantInteractiveTransaction`) junto com um
+  `TimeCorrection` auditável (valor original + corrigido, quem pediu, quem revisou, motivo) — o
+  registro original nunca é alterado/apagado. Uma solicitação já processada nunca é reprocessada
+  (guard de status). Correção proativa (sem pedido prévio) reaproveita o MESMO `approve()`, criando
+  a solicitação já `PENDING` e aprovando na sequência — nunca uma escrita "silenciosa" separada.
+- **Justificativas e atestados** (`TimeJustification`) — `MEDICAL_CERTIFICATE` exige anexo; demais
+  tipos, opcional. Aprovar/rejeitar só muda status/revisão — **nunca** cria/altera um `TimeEvent`
+  (diferente de ajuste, de propósito: uma justificativa aprovada é só um registro analisado, não
+  corrige nada automaticamente). Atestado tratado como dado sensível de saúde (LGPD) — sem nenhum
+  campo de CID/diagnóstico no modelo, `description` é sempre texto livre não-estruturado.
+- **Frontend:** `[[TimeTracking]]` (`/app/ponto`, visão do funcionário) e `[[TimeTrackingAdmin]]`
+  (`/app/ponto-administracao`, nova, gated por módulo `RH` sem bypass de `ADMIN`) consomem o
+  backend real — ver as notas do vault pra detalhe de cada tela.
+- **Pendências documentadas** (mesmo destaque das outras pendências desta seção):
+  reconhecimento facial/biometria/PIN/dispositivo pré-autorizado — avaliados, não implementados;
+  política de retenção/exclusão automática de fotos e atestados — sem prazo definido; hierarquia de
+  superior com múltiplos níveis (skip-level) — só o superior direto administra, mitigado por
+  `ADMIN` sempre ter visão total; `FilesService.upload()` deixa vazar um `500` bruto (em vez de um
+  `400` limpo) quando `sharp` não consegue decodificar um buffer que passou pela checagem de
+  assinatura mas não é uma imagem válida de verdade — reproduzido ao vivo, não corrigido ainda; o
+  bloqueio de marcação duplicada (`time-clock.service.ts`, janela de 10s) é `findFirst`-então-
+  `create`, não uma trava real de banco — uma corrida de milissegundos entre duas requisições quase
+  simultâneas poderia teoricamente passar as duas; a aba de Correção Proativa da tela
+  administrativa lista todo funcionário da empresa (sem filtrar por quem o login atual gerencia,
+  já que não existe endpoint dedicado pra isso) — o backend segue sendo a fronteira real (`404`
+  visível se tentar corrigir alguém fora da própria autoridade), mas o seletor mostra mais opções
+  do que as que de fato funcionam; `npm run test:e2e` do backend não roda neste ambiente de dev por
+  falta de um banco `*_test` provisionado (préexistente a este módulo). **Verificação interativa em
+  navegador real não foi possível durante a implementação** (ferramenta de automação de navegador
+  desconectada nesta sessão) — toda a lógica foi verificada estaticamente
+  (`tsc`/lint/build/transform do Vite) e por rastreamento manual completo do fluxo de dados, e o
+  backend foi extensivamente testado ao vivo via HTTP real (duas empresas, hierarquia de superior,
+  ciclo de ponto completo com foto/localização reais, ajuste solicitado/aprovado/rejeitado,
+  justificativa com atestado, isolamento entre empresas em toda rota nova) — mas um percurso
+  clicando de verdade em `[[TimeTracking]]`/`[[TimeTrackingAdmin]]` num navegador ainda não
+  aconteceu e deveria ser tratado como pendente.
+  Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo todas as
+  decisões e o incidente de segurança acima).
 
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
