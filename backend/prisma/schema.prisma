@@ -23,29 +23,29 @@ enum SubscriptionStatus {
 }
 
 model Client {
-  id            String         @id @default(cuid())
-  name          String
-  category      String?
-  contact       String
-  email         String?
-  status        ClientStatus   @default(ACTIVE)
+  id                     String         @id @default(cuid())
+  name                   String
+  category               String?
+  contact                String
+  email                  String?
+  status                 ClientStatus   @default(ACTIVE)
   // Independent of `status`: whether this client's receivables/subscriptions
   // count toward the company-wide financial report (GET /reports/financial-summary).
   // Set explicitly when deactivating a client (PATCH /clients/:id/deactivate) —
   // never inferred from `status`. An inactive client can still have this true
   // (kept in reports) and, in principle, an active client could have it false.
-  includeInRevenueReport Boolean @default(true)
+  includeInRevenueReport Boolean        @default(true)
   // Null while status=ACTIVE. Set to now() by /deactivate, cleared by /restore.
   // Only clients with includeInRevenueReport=false are ever purged based on
   // this timestamp (see ClientsService.purgeExpiredTrash) — clients kept in
   // the report (includeInRevenueReport=true) stay inactive forever, never purged.
-  deactivatedAt DateTime?
-  companyId     String
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  receivables   Receivable[]
-  subscriptions Subscription[]
+  deactivatedAt          DateTime?
+  companyId              String
+  company                Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  receivables            Receivable[]
+  subscriptions          Subscription[]
 
   @@index([status])
   @@index([deactivatedAt])
@@ -53,26 +53,26 @@ model Client {
 }
 
 model Receivable {
-  id          String           @id @default(cuid())
-  clientId    String
+  id             String           @id @default(cuid())
+  clientId       String
   // Cascade is reachable via ClientsService.purgeExpiredTrash (the client
   // trash — 30-day auto-purge for clients deactivated with
   // includeInRevenueReport=false) — deleting a Client there deletes its
   // receivables/subscriptions too.
-  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client         Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   // Added for the RLS backstop (defense-in-depth migration): previously this
   // table was only scoped to a company indirectly, via `client.companyId`.
   // A direct, indexed companyId column is what lets the RLS policy on this
   // table be a simple, fast `"companyId" = current_setting(...)` check
   // instead of a subquery through Client. Backfilled from Client.companyId
   // at migration time — see the migration SQL for the exact backfill query.
-  companyId   String
-  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   // Null for manually-created receivables. Set only for charges generated via
   // Subscription.generateCharge — SetNull (not Cascade) so deleting a subscription
   // never deletes the historical financial records it already generated.
   subscriptionId String?
-  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  subscription   Subscription?    @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   // Which calendar month a subscription-generated charge covers. Set only when
   // subscriptionId is set. Enforced unique below so the database — not just
   // application code — rejects a second charge for the same subscription in the
@@ -81,13 +81,13 @@ model Receivable {
   // subscriptionId never collide with each other here).
   referenceYear  Int?
   referenceMonth Int?
-  description String
-  amount      Decimal          @db.Decimal(10, 2)
-  dueDate     DateTime         @db.Date
-  status      ReceivableStatus @default(PENDING)
-  paidAt      DateTime?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  description    String
+  amount         Decimal          @db.Decimal(10, 2)
+  dueDate        DateTime         @db.Date
+  status         ReceivableStatus @default(PENDING)
+  paidAt         DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@unique([subscriptionId, referenceYear, referenceMonth])
   @@index([clientId])
@@ -145,20 +145,20 @@ enum UserStatus {
 }
 
 model User {
-  id            String         @id @default(cuid())
-  companyId     String
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  email         String         @unique
-  passwordHash  String
-  role          UserRole
-  employeeId    String?        @unique
-  employee      Employee?      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  modules       AppModule[]
-  status        UserStatus     @default(ACTIVE)
-  mustChangePassword Boolean   @default(false)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  refreshTokens RefreshToken[]
+  id                 String         @id @default(cuid())
+  companyId          String
+  company            Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email              String         @unique
+  passwordHash       String
+  role               UserRole
+  employeeId         String?        @unique
+  employee           Employee?      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  modules            AppModule[]
+  status             UserStatus     @default(ACTIVE)
+  mustChangePassword Boolean        @default(false)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  refreshTokens      RefreshToken[]
 
   @@index([companyId])
 }
@@ -177,16 +177,27 @@ model RefreshToken {
 }
 
 model Company {
-  id                String          @id @default(cuid())
-  name              String
-  planTier          CompanyPlanTier @default(BASICO)
-  maxEmployeeLogins Int             @default(10)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  users             User[]
-  clients           Client[]
-  receivables       Receivable[]
-  subscriptions     Subscription[]
+  id                     String                  @id @default(cuid())
+  name                   String
+  planTier               CompanyPlanTier         @default(BASICO)
+  maxEmployeeLogins      Int                     @default(10)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  users                  User[]
+  clients                Client[]
+  receivables            Receivable[]
+  subscriptions          Subscription[]
+  timezone               String                  @default("America/Sao_Paulo")
+  state                  String?                 @db.Char(2) // UF — define quais feriados estaduais se aplicam; nulo = só nacionais
+  timeTrackingSettings   TimeTrackingSettings?
+  workLocations          WorkLocation[]
+  holidays               Holiday[] // só os de escopo COMPANY (customizados) pertencem de fato à empresa
+  timeEvents             TimeEvent[]
+  workSchedules          WorkSchedule[]
+  timeAdjustmentRequests TimeAdjustmentRequest[]
+  timeCorrections        TimeCorrection[]
+  timeJustifications     TimeJustification[]
+  fileAssets             FileAsset[]
 }
 
 model Role {
@@ -217,38 +228,46 @@ enum EmployeeStatus {
 }
 
 model Employee {
-  id                      String         @id @default(cuid())
+  id                      String                     @id @default(cuid())
   companyId               String
   roleId                  String
-  role                    Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  role                    Role                       @relation(fields: [roleId], references: [id], onDelete: Restrict)
   fullName                String
   cpf                     String
   email                   String?
   phone                   String?
   address                 String?
   contractType            ContractType
-  admissionDate           DateTime       @db.Date
-  terminationDate         DateTime?      @db.Date
-  status                  EmployeeStatus @default(ACTIVE)
+  admissionDate           DateTime                   @db.Date
+  terminationDate         DateTime?                  @db.Date
+  status                  EmployeeStatus             @default(ACTIVE)
   department              String
-  baseValue               Decimal        @db.Decimal(10, 2)
+  baseValue               Decimal                    @db.Decimal(10, 2)
   paymentDueDay           Int
-  payOnLastBusinessDay    Boolean        @default(false)
+  payOnLastBusinessDay    Boolean                    @default(false)
   bankDetails             String?
-  salaryRecurrenceEnabled Boolean        @default(true)
-  createdAt               DateTime       @default(now())
-  updatedAt               DateTime       @updatedAt
+  salaryRecurrenceEnabled Boolean                    @default(true)
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
   warnings                EmployeeWarning[]
   recurringPayments       EmployeeRecurringPayment[]
   payments                EmployeePayment[]
   vacationSchedules       VacationSchedule[]
   leaveSchedules          LeaveSchedule[]
   user                    User?
+  managerId               String?
+  manager                 Employee?                  @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports                 Employee[]                 @relation("EmployeeManager")
+  timeEvents              TimeEvent[]
+  workSchedules           WorkSchedule[]
+  timeAdjustmentRequests  TimeAdjustmentRequest[]
+  timeJustifications      TimeJustification[]
 
   @@unique([companyId, cpf])
   @@index([companyId])
   @@index([roleId])
   @@index([status])
+  @@index([managerId])
 }
 
 model EmployeeWarning {
@@ -294,21 +313,21 @@ model EmployeeRecurringPayment {
 }
 
 model EmployeePayment {
-  id                 String                   @id @default(cuid())
+  id                 String                    @id @default(cuid())
   companyId          String
   employeeId         String
-  employee           Employee                 @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee           Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   recurringPaymentId String?
   recurringPayment   EmployeeRecurringPayment? @relation(fields: [recurringPaymentId], references: [id], onDelete: SetNull)
   referenceYear      Int?
   referenceMonth     Int?
   description        String
-  amount             Decimal                  @db.Decimal(10, 2)
-  dueDate            DateTime                 @db.Date
-  status             EmployeePaymentStatus    @default(PENDING)
+  amount             Decimal                   @db.Decimal(10, 2)
+  dueDate            DateTime                  @db.Date
+  status             EmployeePaymentStatus     @default(PENDING)
   paidAt             DateTime?
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 
   @@unique([recurringPaymentId, referenceYear, referenceMonth])
   @@index([companyId])
@@ -326,17 +345,17 @@ enum VacationScheduleStatus {
 }
 
 model VacationSchedule {
-  id                     String                 @id @default(cuid())
-  companyId              String
-  employeeId             String
-  employee               Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  startDate              DateTime               @db.Date
-  endDate                DateTime               @db.Date
-  daysCount              Int
-  status                 VacationScheduleStatus @default(SCHEDULED)
-  notes                  String?
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
+  id         String                 @id @default(cuid())
+  companyId  String
+  employeeId String
+  employee   Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  startDate  DateTime               @db.Date
+  endDate    DateTime               @db.Date
+  daysCount  Int
+  status     VacationScheduleStatus @default(SCHEDULED)
+  notes      String?
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
 
   @@index([companyId])
   @@index([employeeId])
@@ -368,4 +387,285 @@ model LeaveSchedule {
   @@index([companyId])
   @@index([employeeId])
   @@index([status])
+}
+
+model TimeTrackingSettings {
+  id                     String   @id @default(cuid())
+  companyId              String   @unique
+  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  requirePhoto           Boolean  @default(true)
+  requireLocation        Boolean  @default(true)
+  allowLocationException Boolean  @default(false) // se true, localização ausente/imprecisa vira PENDING_REVIEW em vez de bloquear
+  allowExtraPeriods      Boolean  @default(true)
+  maxAttachmentSizeBytes Int      @default(5242880) // 5MB
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+// --- Eventos de ponto (flexível, imutável por design de aplicação) ---
+enum TimeEventType {
+  CLOCK_IN
+  BREAK_START
+  BREAK_END
+  CLOCK_OUT
+  EXTRA_IN
+  EXTRA_OUT
+}
+
+enum TimeEventSource {
+  WEB
+  MOBILE
+  ADMIN_MANUAL
+}
+
+enum TimeEventValidationStatus {
+  VALID
+  PENDING_REVIEW
+  CORRECTED
+}
+
+enum LocationStatus {
+  WITHIN_RANGE
+  OUT_OF_RANGE
+  IMPRECISE
+  UNAVAILABLE
+  NOT_REQUIRED
+}
+
+model TimeEvent {
+  id               String                    @id @default(cuid())
+  companyId        String
+  company          Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId       String
+  employee         Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type             TimeEventType
+  source           TimeEventSource           @default(WEB)
+  serverRecordedAt DateTime                  @default(now()) // horário oficial — nunca o do dispositivo
+  deviceReportedAt DateTime? // só auditoria, nunca fonte de verdade
+  latitude         Decimal?                  @db.Decimal(9, 6)
+  longitude        Decimal?                  @db.Decimal(9, 6)
+  accuracyMeters   Decimal?                  @db.Decimal(8, 2)
+  locationStatus   LocationStatus            @default(NOT_REQUIRED)
+  workLocationId   String?
+  workLocation     WorkLocation?             @relation(fields: [workLocationId], references: [id], onDelete: SetNull)
+  photoAssetId     String?
+  photoAsset       FileAsset?                @relation(fields: [photoAssetId], references: [id], onDelete: SetNull)
+  validationStatus TimeEventValidationStatus @default(VALID)
+  notes            String?
+  metadata         Json? // ex.: { isMobileUserAgent: true } — nunca dado sensível
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  correctionsAsOriginal  TimeCorrection[]        @relation("OriginalEvent")
+  correctionsAsCorrected TimeCorrection[]        @relation("CorrectedEvent")
+  // Back-relation required by Prisma for TimeAdjustmentRequest.relatedEvent
+  // (spec gap not covered by the plan's pre-flight interface fixes — added
+  // here as the minimal, mechanical fix to make the schema valid).
+  adjustmentRequests     TimeAdjustmentRequest[]
+
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([employeeId, serverRecordedAt])
+  @@index([validationStatus])
+}
+
+// Nenhum endpoint de PATCH/DELETE é exposto para TimeEvent — imutabilidade garantida na
+// camada de aplicação (mesmo espírito já usado no projeto para Receivable histórico).
+
+// --- Jornada de trabalho ---
+model WorkSchedule {
+  id                       String    @id @default(cuid())
+  companyId                String
+  company                  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId               String
+  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  name                     String // rótulo livre pro admin (ex.: "Comercial 8h-18h")
+  weekDays                 Int[] // 0=domingo..6=sábado
+  expectedStartTime        String // "HH:mm", hora local da empresa
+  expectedEndTime          String // "HH:mm" — se < expectedStartTime, jornada atravessa a meia-noite
+  breakMinutes             Int       @default(0)
+  dailyMinutes             Int // carga diária esperada
+  weeklyMinutes            Int // carga semanal esperada
+  toleranceMinutes         Int       @default(0)
+  allowOvertime            Boolean   @default(false)
+  maxOvertimeMinutesPerDay Int?
+  nightShift               Boolean   @default(false) // sinalização informativa; sem cálculo de adicional
+  validFrom                DateTime  @db.Date
+  validTo                  DateTime? @db.Date // nulo = vigente indefinidamente
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([employeeId, validFrom])
+}
+
+// --- Locais de trabalho / geofencing (opcional por empresa) ---
+model WorkLocation {
+  id           String      @id @default(cuid())
+  companyId    String
+  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  latitude     Decimal     @db.Decimal(9, 6)
+  longitude    Decimal     @db.Decimal(9, 6)
+  radiusMeters Int
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  timeEvents   TimeEvent[]
+
+  @@index([companyId])
+}
+
+// --- Solicitação de ajuste ---
+enum TimeAdjustmentType {
+  ADD_MISSING_PUNCH
+  CORRECT_TIME
+  REMOVE_PUNCH
+}
+
+enum TimeAdjustmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model TimeAdjustmentRequest {
+  id                 String               @id @default(cuid())
+  companyId          String
+  company            Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId         String // quem solicitou
+  employee           Employee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  targetDate         DateTime             @db.Date
+  relatedEventId     String?
+  relatedEvent       TimeEvent?           @relation(fields: [relatedEventId], references: [id], onDelete: SetNull)
+  type               TimeAdjustmentType
+  requestedEventType TimeEventType?
+  requestedTime      DateTime?
+  reason             String
+  justification      String?
+  attachmentAssetId  String?
+  attachmentAsset    FileAsset?           @relation(fields: [attachmentAssetId], references: [id], onDelete: SetNull)
+  status             TimeAdjustmentStatus @default(PENDING)
+  reviewedByUserId   String?
+  reviewNote         String?
+  reviewedAt         DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  correction TimeCorrection?
+
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([status])
+}
+
+// --- Trilha de auditoria da correção aprovada (nunca sobrescreve o TimeEvent original) ---
+model TimeCorrection {
+  id                    String                @id @default(cuid())
+  companyId             String
+  company               Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  adjustmentRequestId   String                @unique
+  adjustmentRequest     TimeAdjustmentRequest @relation(fields: [adjustmentRequestId], references: [id], onDelete: Cascade)
+  originalEventId       String?
+  originalEvent         TimeEvent?            @relation("OriginalEvent", fields: [originalEventId], references: [id], onDelete: SetNull)
+  originalValue         Json? // snapshot legível (tipo/horário antigo), pra histórico sem depender da relação
+  correctedEventId      String
+  correctedEvent        TimeEvent             @relation("CorrectedEvent", fields: [correctedEventId], references: [id], onDelete: Cascade)
+  correctedValue        Json
+  requestedByEmployeeId String
+  reviewedByUserId      String
+  reason                String
+  createdAt             DateTime              @default(now())
+
+  @@index([companyId])
+}
+
+// --- Justificativas e atestados ---
+enum JustificationType {
+  ABSENCE
+  INCOMPLETE_DAY
+  ADJUSTMENT_SUPPORT
+  MEDICAL_CERTIFICATE
+  OTHER
+}
+
+enum JustificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model TimeJustification {
+  id                String              @id @default(cuid())
+  companyId         String
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  relatedDate       DateTime?           @db.Date
+  periodStart       DateTime?           @db.Date
+  periodEnd         DateTime?           @db.Date
+  type              JustificationType
+  description       String
+  attachmentAssetId String?
+  attachmentAsset   FileAsset?          @relation(fields: [attachmentAssetId], references: [id], onDelete: SetNull)
+  status            JustificationStatus @default(PENDING)
+  reviewedByUserId  String?
+  reviewNote        String?
+  reviewedAt        DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([companyId])
+  @@index([employeeId])
+  @@index([status])
+}
+
+// --- Arquivos (primeira infra de upload do projeto) ---
+enum FileAssetPurpose {
+  TIME_PUNCH_PHOTO
+  ADJUSTMENT_ATTACHMENT
+  JUSTIFICATION_ATTACHMENT
+}
+
+model FileAsset {
+  id               String           @id @default(cuid())
+  companyId        String
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  uploadedByUserId String
+  originalFilename String // sanitizado, só metadado — nunca usado como caminho em disco
+  mimeType         String
+  sizeBytes        Int
+  storagePath      String // caminho interno relativo — nunca exposto ao cliente
+  purpose          FileAssetPurpose
+  createdAt        DateTime         @default(now())
+
+  timeEventPhotos          TimeEvent[]
+  adjustmentAttachments    TimeAdjustmentRequest[]
+  justificationAttachments TimeJustification[]
+
+  @@index([companyId])
+}
+
+// --- Feriados ---
+enum HolidayScope {
+  NATIONAL
+  STATE
+  COMPANY
+}
+
+model Holiday {
+  id        String       @id @default(cuid())
+  scope     HolidayScope
+  state     String?      @db.Char(2) // só quando scope=STATE
+  companyId String? // só quando scope=COMPANY
+  company   Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  date      DateTime     @db.Date
+  name      String
+  createdAt DateTime     @default(now())
+
+  @@unique([scope, state, companyId, date])
+  @@index([date])
+  @@index([companyId])
 }
