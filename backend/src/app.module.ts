@@ -22,6 +22,9 @@ import { ReceivablesModule } from './receivables/receivables.module';
 import { ReportsModule } from './reports/reports.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { UsersModule } from './users/users.module';
+import { WorkSchedulesModule } from './work-schedules/work-schedules.module';
+import { WorkLocationsModule } from './work-locations/work-locations.module';
+import { TimeTrackingSettingsModule } from './time-tracking-settings/time-tracking-settings.module';
 
 @Module({
   imports: [
@@ -69,6 +72,9 @@ import { UsersModule } from './users/users.module';
     SubscriptionsModule,
     ReportsModule,
     UsersModule,
+    WorkSchedulesModule,
+    WorkLocationsModule,
+    TimeTrackingSettingsModule,
   ],
   providers: [
     // JwtAuthGuard já respeita @Public() (Task 3) — nega por padrão em toda
