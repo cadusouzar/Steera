@@ -617,7 +617,7 @@ git commit -m "feat(backend): add national/state holiday calendar (HolidaysModul
 **Interfaces:**
 - Produces: `Employee.managerId` (validado: mesma empresa, não pode ser o próprio id, não pode
   criar um ciclo direto de 2 nós onde A gerencia B e B gerencia A); `PATCH /auth/me/employee-link`;
-  `TimeManagementAuthService.canManage(currentUser: AuthenticatedUser, targetEmployeeId: string): Promise<boolean>` — `true` se `role === 'ADMIN'`, ou se `currentUser.employeeId` (resolvido via `User`) é o `managerId` direto do funcionário-alvo.
+  `TimeManagementAuthService.canManage(currentUser: AuthenticatedUser, targetEmployeeId: string): Promise<boolean>` — `true` se `role === 'ADMIN'`, ou se `currentUser.employeeId` (resolvido via `User`) é o `managerId` direto do funcionário-alvo. `TimeManagementAuthService.resolveOwnEmployee(currentUser: AuthenticatedUser): Promise<Employee>` — resolve o `Employee` vinculado ao login atual (lança `ForbiddenException` se não houver vínculo ou se o funcionário estiver `INACTIVE`). Este é o único lugar do projeto que resolve "o funcionário do login atual" — todo módulo que precisa disso (Tasks 6, 7, 8, 9) injeta `TimeManagementAuthService` e chama este método, em vez de cada um reimplementar a mesma checagem.
 
 - [ ] **Passo 1: `managerId` nos DTOs e serviço de Funcionários**
 
@@ -659,7 +659,8 @@ Devolve o perfil atualizado (mesmo formato de `getProfile()`).
 - [ ] **Passo 5: `TimeManagementAuthService`, compartilhado por toda task administrativa depois desta**
 
 ```ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Employee } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -688,6 +689,21 @@ export class TimeManagementAuthService {
       // já estabelecido em todo o resto do backend (RolesService, ReceivablesService, etc.).
     }
   }
+
+  // Único lugar do projeto que resolve "o Employee vinculado ao login atual" — todo módulo que
+  // precisa bater o ponto/gerenciar o próprio ponto (Tasks 6, 7, 8, 9) injeta este serviço e chama
+  // este método, em vez de cada um reimplementar a mesma checagem de vínculo/status.
+  async resolveOwnEmployee(currentUser: AuthenticatedUser): Promise<Employee> {
+    const record = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
+    if (!record?.employeeId) {
+      throw new ForbiddenException('Seu login ainda não está vinculado a um cadastro de funcionário — vincule antes de continuar');
+    }
+    const employee = await this.prisma.employee.findUnique({ where: { id: record.employeeId } });
+    if (!employee || employee.status !== 'ACTIVE') {
+      throw new ForbiddenException('Funcionário inativo não pode realizar esta ação');
+    }
+    return employee;
+  }
 }
 ```
 
@@ -696,6 +712,9 @@ export class TimeManagementAuthService {
 Casos mínimos: `ADMIN` sempre pode; `EMPLOYEE` que é o `managerId` direto do alvo pode; `EMPLOYEE`
 sem `employeeId` (login não vinculado) nunca pode; `EMPLOYEE` de outra empresa nunca pode (o filtro
 `companyId` no `findFirst` já garante isso); `EMPLOYEE` que não é superior direto do alvo não pode.
+Para `resolveOwnEmployee`: devolve o `Employee` quando o login tem vínculo ativo; lança
+`ForbiddenException` quando não há `employeeId` vinculado; lança `ForbiddenException` quando o
+`Employee` vinculado está `INACTIVE`.
 
 - [ ] **Passo 7: testes/build/lint, commit**
 
@@ -751,9 +770,18 @@ formato `HH:mm`; rejeita `weekDays` com valor fora de 0-6; lista filtrando por `
 - [ ] **Passo 3: `WorkLocationsModule` — espelhar o mesmo padrão, mais simples (sem vínculo a funcionário, é da empresa toda)**
 
 CRUD direto: `id, companyId, name, latitude, longitude, radiusMeters, active`. `@Roles('ADMIN')`
-em toda mutação, leitura liberada pra qualquer login com módulo `RH`.
+em toda mutação, leitura liberada pra qualquer login com módulo `RH`. Além do CRUD padrão,
+`WorkLocationsService` produz um método extra, consumido pela Task 6 (`TimeClockService`, batida):
+```ts
+findAllActive(): Promise<WorkLocation[]> {
+  return this.companyContext.getCurrentCompanyId().then((companyId) =>
+    this.prisma.workLocation.findMany({ where: { companyId, active: true } }),
+  );
+}
+```
 
-- [ ] **Passo 4: teste de `WorkLocationsService`**
+- [ ] **Passo 4: teste de `WorkLocationsService`**, incluindo `findAllActive()` (devolve só os
+ativos da empresa atual, nunca de outra empresa).
 
 - [ ] **Passo 5: `TimeTrackingSettingsModule` — upsert de linha única por empresa**
 
@@ -891,11 +919,12 @@ export function haversineDistanceMeters(lat1: number, lon1: number, lat2: number
 - [ ] **Passo 5: `TimeClockService`**
 
 ```ts
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { CompanyContextService } from '../company/company-context.service';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { TimeTrackingSettingsService } from '../time-tracking-settings/time-tracking-settings.service';
 import { WorkLocationsService } from '../work-locations/work-locations.service';
 import { CreatePunchDto } from './dto/create-punch.dto';
@@ -904,6 +933,9 @@ import { computeOpenState, getNextAllowedType, validateTransition } from './time
 
 const DUPLICATE_WINDOW_MS = 10_000; // bloqueio de curto prazo contra clique duplo/requisição repetida
 
+// "Resolver meu próprio Employee vinculado" (assert de vínculo + status ACTIVE) NÃO é
+// reimplementado aqui — vem de TimeManagementAuthService.resolveOwnEmployee (Task 4), o único
+// lugar do projeto que faz essa checagem, reutilizado também pelas Tasks 7/8/9.
 @Injectable()
 export class TimeClockService {
   constructor(
@@ -912,19 +944,8 @@ export class TimeClockService {
     private readonly files: FilesService,
     private readonly settings: TimeTrackingSettingsService,
     private readonly workLocations: WorkLocationsService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
   ) {}
-
-  private async assertEmployeeLink(user: AuthenticatedUser) {
-    const record = await this.prisma.user.findUnique({ where: { id: user.userId } });
-    if (!record?.employeeId) {
-      throw new ForbiddenException('Seu login ainda não está vinculado a um cadastro de funcionário — vincule antes de bater o ponto');
-    }
-    const employee = await this.prisma.employee.findUnique({ where: { id: record.employeeId } });
-    if (!employee || employee.status !== 'ACTIVE') {
-      throw new ForbiddenException('Funcionário inativo não pode registrar ponto');
-    }
-    return employee;
-  }
 
   private async getTodayOpenState(employeeId: string) {
     // "Hoje" pra fins de sequência olha as últimas 24h de eventos, não a data civil — cobre
@@ -938,7 +959,7 @@ export class TimeClockService {
   }
 
   async getStatus(user: AuthenticatedUser) {
-    const employee = await this.assertEmployeeLink(user);
+    const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
     const settings = await this.settings.getOrCreateDefault(user.companyId);
     const { state } = await this.getTodayOpenState(employee.id);
     return {
@@ -953,7 +974,7 @@ export class TimeClockService {
     dto: CreatePunchDto,
     photo: { buffer: Buffer; originalname: string; mimetype: string; size: number } | undefined,
   ) {
-    const employee = await this.assertEmployeeLink(user);
+    const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
     const settings = await this.settings.getOrCreateDefault(user.companyId);
 
     // Bloqueio de curto prazo contra duplo clique / requisição repetida (inclusive de dois
@@ -1027,7 +1048,7 @@ export class TimeClockService {
   }
 
   async listOwnPunches(user: AuthenticatedUser, from?: string, to?: string) {
-    const employee = await this.assertEmployeeLink(user);
+    const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
     return this.prisma.timeEvent.findMany({
       where: {
         employeeId: employee.id,
@@ -1270,10 +1291,11 @@ a meia-noite (jornada iniciada às 22h com `CLOCK_OUT` às 06h do dia seguinte, 
 
 - [ ] **Passo 3: rota `GET /time-clock/summary`**
 
+`TimeClockController` ganha `TimeManagementAuthService` injetado (mesmo serviço da Task 4):
 ```ts
 @Get('summary')
 async getSummary(@CurrentUser() user: AuthenticatedUser, @Query('year') year: string, @Query('month') month: string) {
-  const employee = await this.timeClock.resolveOwnEmployee(user); // pequeno helper novo, reaproveitando assertEmployeeLink
+  const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
   return this.calculation.calculateMonthlySummary(employee.id, Number(year), Number(month));
 }
 ```
@@ -1298,8 +1320,9 @@ git commit -m "feat(backend): add attendance calculation service (type-paired, m
 - Create: `backend/src/time-adjustments/dto/{create-adjustment-request,review-adjustment-request,proactive-correction}.dto.ts`
 
 **Interfaces:**
-- Consumes: `TimeManagementAuthService.assertCanManage()`, `runTenantInteractiveTransaction`,
-  `FilesService.upload()`.
+- Consumes: `TimeManagementAuthService.assertCanManage()` e `.resolveOwnEmployee()` (Task 4 —
+  `TimeAdjustmentsService` injeta `TimeManagementAuthService` no construtor, mesmo padrão de
+  `TimeClockService` na Task 6), `runTenantInteractiveTransaction`, `FilesService.upload()`.
 - Produces: `POST /time-adjustment-requests`, `GET /time-adjustment-requests/me`,
   `PATCH /time-adjustment-requests/:id/cancel`, `GET /time-adjustment-requests` (admin/superior,
   paginado/filtrado por status), `PATCH /time-adjustment-requests/:id/approve|reject`,
@@ -1309,7 +1332,7 @@ git commit -m "feat(backend): add attendance calculation service (type-paired, m
 
 ```ts
 async create(user: AuthenticatedUser, dto: CreateAdjustmentRequestDto, attachment?: MulterFile) {
-  const employee = await this.resolveOwnEmployee(user);
+  const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
   let attachmentAssetId: string | undefined;
   if (attachment) {
     const asset = await this.files.upload(user.companyId, user.userId, attachment, 'ADJUSTMENT_ATTACHMENT');
@@ -1332,7 +1355,7 @@ async create(user: AuthenticatedUser, dto: CreateAdjustmentRequestDto, attachmen
 }
 
 async cancel(user: AuthenticatedUser, id: string) {
-  const employee = await this.resolveOwnEmployee(user);
+  const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
   const request = await this.prisma.timeAdjustmentRequest.findFirst({ where: { id, employeeId: employee.id } });
   if (!request) throw new NotFoundException(`Solicitação ${id} não encontrada`);
   if (request.status !== 'PENDING') throw new ConflictException('Só é possível cancelar solicitações pendentes');
@@ -1459,6 +1482,9 @@ git commit -m "feat(backend): add TimeAdjustmentsModule (request/approve/reject/
 - Create: `backend/src/time-justifications/dto/{create-justification,review-justification}.dto.ts`
 
 **Interfaces:**
+- Consumes: `TimeManagementAuthService.assertCanManage()` e `.resolveOwnEmployee()` (Task 4 —
+  injetado no construtor, mesmo padrão de `TimeAdjustmentsService` na Task 8 — nunca reimplementar
+  essa checagem aqui), `FilesService.upload()`.
 - Produces: `POST /time-justifications` (multipart, anexo opcional/obrigatório conforme
   `type`), `GET /time-justifications/me`, `GET /time-justifications` (admin/superior),
   `PATCH /time-justifications/:id/approve|reject`.
