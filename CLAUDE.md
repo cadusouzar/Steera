@@ -412,17 +412,30 @@ solicitações de ajuste, justificativas/atestados e configuração administrati
   reconhecimento facial/biometria/PIN/dispositivo pré-autorizado — avaliados, não implementados;
   política de retenção/exclusão automática de fotos e atestados — sem prazo definido; hierarquia de
   superior com múltiplos níveis (skip-level) — só o superior direto administra, mitigado por
-  `ADMIN` sempre ter visão total; `FilesService.upload()` deixa vazar um `500` bruto (em vez de um
-  `400` limpo) quando `sharp` não consegue decodificar um buffer que passou pela checagem de
-  assinatura mas não é uma imagem válida de verdade — reproduzido ao vivo, não corrigido ainda; o
-  bloqueio de marcação duplicada (`time-clock.service.ts`, janela de 10s) é `findFirst`-então-
-  `create`, não uma trava real de banco — uma corrida de milissegundos entre duas requisições quase
-  simultâneas poderia teoricamente passar as duas; a aba de Correção Proativa da tela
-  administrativa lista todo funcionário da empresa (sem filtrar por quem o login atual gerencia,
-  já que não existe endpoint dedicado pra isso) — o backend segue sendo a fronteira real (`404`
-  visível se tentar corrigir alguém fora da própria autoridade), mas o seletor mostra mais opções
-  do que as que de fato funcionam; `npm run test:e2e` do backend não roda neste ambiente de dev por
-  falta de um banco `*_test` provisionado (préexistente a este módulo).
+  `ADMIN` sempre ter visão total.
+- **Corrigidos numa revisão de pendências pós-final (14/09/2026), a pedido do usuário — nenhum
+  destes segue em aberto:**
+  1. `FilesService.upload()` deixava vazar um `500` bruto quando `sharp` não conseguia decodificar
+     um buffer que tinha passado pela checagem de assinatura mas não era uma imagem válida de
+     verdade — agora um `400` limpo (`try/catch` em volta da chamada ao `sharp`).
+  2. A aba de Correção Proativa da tela administrativa listava todo funcionário da empresa no
+     seletor, mesmo pra um superior que só consegue corrigir seus subordinados diretos (o backend
+     já bloqueava com `404`, mas o seletor confundia). Nova
+     `TimeManagementAuthService.listManageableEmployees()` (reaproveita
+     `getManageableEmployeeIds()`) + `GET /time-management/manageable-employees` — o seletor agora
+     mostra só quem o login atual de fato consegue corrigir.
+  3. O bloqueio de marcação duplicada (`time-clock.service.ts`, janela de 10s) era
+     `findFirst`-então-`create` sem nenhuma trava real — uma corrida de milissegundos entre duas
+     requisições quase simultâneas do mesmo funcionário podia deixar passar as duas. Corrigido com
+     um `pg_advisory_xact_lock` do Postgres escopado por funcionário, dentro de
+     `runTenantInteractiveTransaction`. Verificado ao vivo: 5 requisições verdadeiramente
+     simultâneas (disparadas em paralelo) contra o mesmo funcionário — exatamente 1 criou o evento,
+     confirmado direto no banco.
+  4. `npm run test:e2e` não rodava por falta de configuração (o banco `quickflow_test` já existia
+     localmente, mas estava com migrations atrasadas e nada apontava o comando pra ele). Aplicadas
+     as migrations faltantes, criado `backend/.env.test` (gitignored, mesmo padrão de `.env`) +
+     `.env.test.example`, e o script `test:e2e` agora usa `node --env-file=.env.test` (sem
+     dependência nova). Verificado rodando duas vezes seguidas sem colisão: 9/9 testes, 2 suites.
   **Verificação interativa em navegador real: feita (14/09/2026), depois de reconectar a ferramenta
   de automação de navegador nesta sessão.** Todo o ciclo do funcionário (`[[TimeTracking]]`: status
   → confirmação → localização → marcação → detalhe de marcação → solicitação de ajuste → cancelar) e
