@@ -33,7 +33,7 @@ export class TimeManagementAuthService {
     });
     if (!target) return false;
 
-    if (currentUser.role === 'ADMIN') return true;
+    if (currentUser.role === 'ADMIN' && currentUser.hasFullPontoAccess) return true;
 
     const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
     if (!currentUserRecord?.employeeId) return false;
@@ -75,7 +75,7 @@ export class TimeManagementAuthService {
   // que o login atual pode gerenciar, pra usar direto num `where: { employeeId: { in: [...] } }`.
   // 'ALL' sinaliza ADMIN (não precisa materializar a lista inteira de funcionários da empresa).
   async getManageableEmployeeIds(currentUser: AuthenticatedUser): Promise<string[] | 'ALL'> {
-    if (currentUser.role === 'ADMIN') return 'ALL';
+    if (currentUser.role === 'ADMIN' && currentUser.hasFullPontoAccess) return 'ALL';
 
     const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
     if (!currentUserRecord?.employeeId) return [];
@@ -107,5 +107,15 @@ export class TimeManagementAuthService {
       select: { id: true, fullName: true },
       orderBy: { fullName: 'asc' },
     });
+  }
+
+  // Ações sem "um funcionário-alvo" pra checar via canManage() — editar o padrão da empresa de
+  // TimeTrackingSettings/WorkSchedule, mutar WorkLocation, e o endpoint de ligar/desligar
+  // hasFullPontoAccess de outro login. Síncrono de propósito (sem consulta ao banco) — o dado já
+  // está inteiro no AuthenticatedUser vindo do JWT.
+  assertHasFullPontoAccess(user: AuthenticatedUser): void {
+    if (user.role !== 'ADMIN' || !user.hasFullPontoAccess) {
+      throw new NotFoundException('Recurso não encontrado');
+    }
   }
 }

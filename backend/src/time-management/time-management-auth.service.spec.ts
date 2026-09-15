@@ -83,6 +83,27 @@ describe('TimeManagementAuthService', () => {
 
       expect(result).toBe(false);
     });
+
+    it('ADMIN with hasFullPontoAccess: false behaves exactly like an EMPLOYEE manager (no automatic bypass)', async () => {
+      const limitedAdmin: AuthenticatedUser = { ...admin, hasFullPontoAccess: false };
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-admin', employeeId: 'employee-manager-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', managerId: 'employee-manager-1' });
+
+      const result = await service.canManage(limitedAdmin, 'target-1');
+
+      expect(result).toBe(true); // direct manager, so still true — but via the manager path, not the bypass
+      expect(prisma.user.findUnique).toHaveBeenCalled(); // proves it did NOT take the early-return bypass branch
+    });
+
+    it('ADMIN with hasFullPontoAccess: false cannot manage someone who is not their own direct report', async () => {
+      const limitedAdmin: AuthenticatedUser = { ...admin, hasFullPontoAccess: false };
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-admin', employeeId: 'employee-manager-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', managerId: 'someone-else' });
+
+      const result = await service.canManage(limitedAdmin, 'target-1');
+
+      expect(result).toBe(false);
+    });
   });
 
   describe('assertCanManage', () => {
@@ -154,6 +175,16 @@ describe('TimeManagementAuthService', () => {
       const result = await service.getManageableEmployeeIds(employeeLogin);
       expect(result).toEqual([]);
     });
+
+    it("returns direct reports, not 'ALL', for ADMIN with hasFullPontoAccess: false", async () => {
+      const limitedAdmin: AuthenticatedUser = { ...admin, hasFullPontoAccess: false };
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-admin', employeeId: 'employee-manager-1' });
+      prisma.employee.findMany.mockResolvedValue([{ id: 'report-1' }]);
+
+      const result = await service.getManageableEmployeeIds(limitedAdmin);
+
+      expect(result).toEqual(['report-1']);
+    });
   });
 
   describe('listManageableEmployees', () => {
@@ -194,6 +225,21 @@ describe('TimeManagementAuthService', () => {
 
       expect(result).toEqual([]);
       expect(prisma.employee.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('assertHasFullPontoAccess', () => {
+    it('does not throw for ADMIN with hasFullPontoAccess: true', () => {
+      expect(() => service.assertHasFullPontoAccess(admin)).not.toThrow();
+    });
+
+    it('throws NotFoundException for ADMIN with hasFullPontoAccess: false', () => {
+      const limitedAdmin: AuthenticatedUser = { ...admin, hasFullPontoAccess: false };
+      expect(() => service.assertHasFullPontoAccess(limitedAdmin)).toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException for any EMPLOYEE login, regardless of hasFullPontoAccess', () => {
+      expect(() => service.assertHasFullPontoAccess(employeeLogin)).toThrow(NotFoundException);
     });
   });
 });
