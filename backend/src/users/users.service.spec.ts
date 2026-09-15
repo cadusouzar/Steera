@@ -17,7 +17,17 @@ describe('UsersService', () => {
       },
       company: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },
-      $transaction: jest.fn((ops) => Promise.all(ops)),
+      // Suporta os dois estilos de $transaction usados neste service: array (block(), via
+      // runTenantTransaction) e callback (updatePontoAccess() desligando acesso, via
+      // runTenantInteractiveTransaction) — mesmo padrão já usado em auth.service.spec.ts. Sem
+      // contexto de tenant ativo (ALS) nestes testes, as duas funções helper delegam direto pra
+      // este mock, então `tx` dentro do callback é o próprio objeto `prisma` do teste.
+      $transaction: jest.fn((arg) => (typeof arg === 'function' ? arg(prisma) : Promise.all(arg))),
+      // Chamado por runTenantInteractiveTransaction antes do callback (set_config da RLS) e pelo
+      // pg_advisory_xact_lock em updatePontoAccess — não é exercitado por nenhuma asserção própria
+      // na maioria dos testes, só precisa existir pra `tx.$executeRaw` não quebrar como
+      // `undefined()`.
+      $executeRaw: jest.fn().mockResolvedValue(undefined),
     };
     const module = await Test.createTestingModule({
       providers: [UsersService, { provide: PrismaService, useValue: prisma }],
@@ -171,6 +181,43 @@ describe('UsersService', () => {
     it('throws BadRequestException when the target is not an ADMIN login', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'EMPLOYEE', hasFullPontoAccess: true });
       await expect(service.updatePontoAccess('company-1', 'target-1', false)).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    // Regressão do achado de revisão (15/09/2026): a versão original fazia count() e update() como
+    // duas queries separadas, SEM nenhuma trava — duas requisições concorrentes desligando dois
+    // admins DIFERENTES, com exatamente 2 full-access admins restantes, podiam ambas ler
+    // count === 2, ambas passar o guard, e ambas escrever false, zerando os admins de acesso total
+    // da empresa (estado irrecuperável sem acesso direto ao banco). Simula a corrida real via
+    // mockResolvedValueOnce sequencial (mesmo padrão da regressão equivalente em
+    // time-clock.service.spec.ts para a corrida de marcação duplicada): a PRIMEIRA tentativa a
+    // recontar (dentro do lock) ainda vê os 2 admins originais e escreve; a SEGUNDA só recontra
+    // DEPOIS (a mesma trava — pg_advisory_xact_lock escopado por companyId — serializa as duas) e
+    // já vê 1, refletindo o commit da primeira, sendo corretamente rejeitada.
+    it('serializes two concurrent attempts to turn off two different admins when exactly 2 remain — exactly one succeeds, one is rejected', async () => {
+      prisma.user.findFirst.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve({ id: where.id, companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: true }),
+      );
+      prisma.user.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+      prisma.user.update.mockResolvedValue({ id: 'updated' });
+
+      const results = await Promise.allSettled([
+        service.updatePontoAccess('company-1', 'target-1', false),
+        service.updatePontoAccess('company-1', 'target-2', false),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toBeInstanceOf(BadRequestException);
+      // Só a vencedora chega a escrever — a perdedora é barrada pela recontagem, dentro do lock,
+      // antes de qualquer update.
+      expect(prisma.user.update).toHaveBeenCalledTimes(1);
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: { hasFullPontoAccess: false } });
+      // As duas tentativas de fato disputaram o lock (não só a vencedora) e as duas recontaram —
+      // é essa recontagem-dentro-do-lock, e não uma checagem antiga em cache, que barra a segunda.
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+      expect(prisma.user.count).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { runTenantTransaction } from '../prisma/tenant-rls.extension';
+import { runTenantInteractiveTransaction, runTenantTransaction } from '../prisma/tenant-rls.extension';
 import { hashPassword } from '../auth/password.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -148,8 +148,27 @@ export class UsersService {
     if (target.role !== 'ADMIN') {
       throw new BadRequestException('hasFullPontoAccess só tem efeito em logins ADMIN');
     }
-    if (!hasFullPontoAccess) {
-      const fullAccessCount = await this.prisma.user.count({
+
+    if (hasFullPontoAccess) {
+      await this.prisma.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess: true } });
+      return;
+    }
+
+    // Achado em revisão (15/09/2026): a versão original fazia count() e update() como duas
+    // queries separadas, sem nenhuma trava — duas requisições concorrentes desligando DOIS admins
+    // diferentes, com exatamente 2 full-access admins restantes, podiam ambas ler count === 2,
+    // ambas passar o guard, e ambas escrever false, deixando a empresa com ZERO admins de acesso
+    // total (estado irrecuperável sem acesso direto ao banco). Mesmo padrão já usado em
+    // TimeClockService.createPunch para a corrida de marcação duplicada:
+    // pg_advisory_xact_lock dentro de runTenantInteractiveTransaction, recontando a condição
+    // DENTRO da mesma transação travada. Trava escopada por EMPRESA (hashtext(companyId)), não
+    // por usuário — o invariante protegido ("pelo menos um full-access admin") é por empresa, não
+    // por login, então duas requisições da MESMA empresa (mesmo mexendo em admins diferentes)
+    // precisam serializar entre si; duas requisições de empresas DIFERENTES nunca se bloqueiam.
+    await runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
+
+      const fullAccessCount = await tx.user.count({
         where: { companyId, role: 'ADMIN', hasFullPontoAccess: true },
       });
       if (fullAccessCount <= 1) {
@@ -157,7 +176,8 @@ export class UsersService {
           'A empresa precisa manter pelo menos um login ADMIN com acesso total ao Controle de Ponto',
         );
       }
-    }
-    await this.prisma.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess } });
+
+      await tx.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess: false } });
+    });
   }
 }
