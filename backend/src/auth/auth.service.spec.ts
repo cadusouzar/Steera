@@ -9,6 +9,7 @@ import * as passwordUtil from './password.util';
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: any;
+  let jwtService: any;
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
 
   beforeEach(async () => {
@@ -32,6 +33,7 @@ describe('AuthService', () => {
       providers: [AuthService, { provide: PrismaService, useValue: prisma }, { provide: JwtService, useValue: { sign: jest.fn(() => 'signed.jwt.token') } }],
     }).compile();
     service = module.get(AuthService);
+    jwtService = module.get(JwtService);
     jest.clearAllMocks();
   });
 
@@ -50,6 +52,24 @@ describe('AuthService', () => {
     prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h' });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
     await expect(service.login({ email: 'x@x.com', password: 'errada' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('signs hasFullPontoAccess into the access token payload', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['DASHBOARD'], status: 'ACTIVE',
+      passwordHash: 'h', mustChangePassword: false, hasFullPontoAccess: true,
+    });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+    prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+    const result = await service.login({ email: 'x@x.com', password: 'y' }, fakeRes);
+
+    expect(result.accessToken).toBe('signed.jwt.token');
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({ hasFullPontoAccess: true }),
+      expect.anything(),
+    );
+    expect(result.user.hasFullPontoAccess).toBe(true);
   });
 
   it('refresh rejects when no cookie value is provided', async () => {

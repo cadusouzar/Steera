@@ -12,10 +12,10 @@ describe('TimeManagementAuthService', () => {
   };
 
   const admin: AuthenticatedUser = {
-    userId: 'user-admin', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false,
+    userId: 'user-admin', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: true,
   };
   const employeeLogin: AuthenticatedUser = {
-    userId: 'user-employee', companyId: 'company-1', role: 'EMPLOYEE', modules: [], mustChangePassword: false,
+    userId: 'user-employee', companyId: 'company-1', role: 'EMPLOYEE', modules: [], mustChangePassword: false, hasFullPontoAccess: true,
   };
 
   beforeEach(async () => {

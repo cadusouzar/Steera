@@ -22,6 +22,7 @@ describe('FilesController', () => {
     role: 'ADMIN',
     modules: [],
     mustChangePassword: false,
+    hasFullPontoAccess: true,
   };
 
   function fakeResponse() {

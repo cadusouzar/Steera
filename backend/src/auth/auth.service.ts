@@ -25,6 +25,7 @@ export class AuthService {
     role: string;
     modules: string[];
     mustChangePassword: boolean;
+    hasFullPontoAccess: boolean;
   }) {
     return this.jwt.sign(
       {
@@ -33,6 +34,7 @@ export class AuthService {
         role: user.role,
         modules: user.modules,
         mustChangePassword: user.mustChangePassword,
+        hasFullPontoAccess: user.hasFullPontoAccess,
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m', algorithm: 'HS256' },
     );
@@ -102,6 +104,7 @@ export class AuthService {
       user: {
         id: user.id, email: user.email, role: user.role, modules: user.modules,
         mustChangePassword: user.mustChangePassword, employeeId: user.employeeId,
+        hasFullPontoAccess: user.hasFullPontoAccess,
       },
     };
   }
@@ -125,6 +128,7 @@ export class AuthService {
       user: {
         id: user.id, email: user.email, role: user.role, modules: user.modules,
         mustChangePassword: user.mustChangePassword, employeeId: user.employeeId,
+        hasFullPontoAccess: user.hasFullPontoAccess,
       },
     };
   }
@@ -211,6 +215,7 @@ export class AuthService {
       modules: user.modules,
       mustChangePassword: user.mustChangePassword,
       employeeId: user.employeeId,
+      hasFullPontoAccess: user.hasFullPontoAccess,
     };
   }
 

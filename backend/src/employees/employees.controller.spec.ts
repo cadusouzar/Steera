@@ -53,6 +53,7 @@ describe('EmployeesController#findOne', () => {
       role: 'ADMIN',
       modules: [],
       mustChangePassword: false,
+      hasFullPontoAccess: true,
     });
     expect(result.cpf).toBe('12345678900');
     expect(result.bankDetails).toBe('segredo-bancario');
@@ -65,6 +66,7 @@ describe('EmployeesController#findOne', () => {
       role: 'EMPLOYEE',
       modules: ['RH'],
       mustChangePassword: false,
+      hasFullPontoAccess: true,
     });
     expect(result.cpf).toBe('12345678900');
   });
@@ -77,6 +79,7 @@ describe('EmployeesController#findOne', () => {
         role: 'EMPLOYEE',
         modules: ['DASHBOARD'],
         mustChangePassword: false,
+        hasFullPontoAccess: true,
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(service.findOne).not.toHaveBeenCalled();
@@ -92,7 +95,7 @@ describe('EmployeesController — aggregated time-tracking admin views', () => {
   let timeClock: { listForEmployeeAdmin: jest.Mock };
   let calculation: { calculateMonthlySummary: jest.Mock };
 
-  const user: AuthenticatedUser = { userId: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['RH'], mustChangePassword: false };
+  const user: AuthenticatedUser = { userId: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['RH'], mustChangePassword: false, hasFullPontoAccess: true };
 
   beforeEach(() => {
     timeManagementAuth = { assertCanManage: jest.fn().mockResolvedValue(undefined) };

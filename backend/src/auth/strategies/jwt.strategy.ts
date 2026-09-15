@@ -8,6 +8,7 @@ export interface JwtPayload {
   role: 'ADMIN' | 'EMPLOYEE';
   modules: string[];
   mustChangePassword: boolean;
+  hasFullPontoAccess: boolean;
 }
 
 @Injectable()
@@ -30,6 +31,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: payload.role,
       modules: payload.modules,
       mustChangePassword: payload.mustChangePassword,
+      hasFullPontoAccess: payload.hasFullPontoAccess,
     };
   }
 }

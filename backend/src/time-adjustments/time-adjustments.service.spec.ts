@@ -11,13 +11,13 @@ jest.mock('../prisma/tenant-rls.extension', () => ({
 }));
 
 const employeeUser: AuthenticatedUser = {
-  userId: 'user-1', companyId: 'company-1', role: 'EMPLOYEE', modules: ['RH'], mustChangePassword: false,
+  userId: 'user-1', companyId: 'company-1', role: 'EMPLOYEE', modules: ['RH'], mustChangePassword: false, hasFullPontoAccess: true,
 };
 const managerUser: AuthenticatedUser = {
-  userId: 'user-manager', companyId: 'company-1', role: 'EMPLOYEE', modules: ['RH'], mustChangePassword: false,
+  userId: 'user-manager', companyId: 'company-1', role: 'EMPLOYEE', modules: ['RH'], mustChangePassword: false, hasFullPontoAccess: true,
 };
 const adminUser: AuthenticatedUser = {
-  userId: 'user-admin', companyId: 'company-1', role: 'ADMIN', modules: ['RH'], mustChangePassword: false,
+  userId: 'user-admin', companyId: 'company-1', role: 'ADMIN', modules: ['RH'], mustChangePassword: false, hasFullPontoAccess: true,
 };
 
 const employee = { id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' };

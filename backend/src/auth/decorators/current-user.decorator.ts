@@ -6,6 +6,7 @@ export interface AuthenticatedUser {
   role: 'ADMIN' | 'EMPLOYEE';
   modules: string[];
   mustChangePassword: boolean;
+  hasFullPontoAccess: boolean;
 }
 
 export const CurrentUser = createParamDecorator(
