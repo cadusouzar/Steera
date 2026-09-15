@@ -15,6 +15,12 @@ export interface CurrentUser {
   // /auth/me/employee-link) — TimeTracking.tsx usa isso pra decidir entre o
   // fluxo normal de bater ponto e o estado vazio "vincule seu cadastro".
   employeeId: string | null;
+  // true pra um ADMIN (sempre) ou um EMPLOYEE marcado explicitamente com
+  // acesso administrativo total ao módulo de Ponto (ver
+  // PATCH /companies/me/users/:id/ponto-access) — usado pelo frontend pra
+  // decidir entre a visão "minha equipe" (escopada por managerId) e a visão
+  // "empresa inteira" das telas administrativas de Ponto.
+  hasFullPontoAccess: boolean;
 }
 
 interface ApiUser {
@@ -24,6 +30,7 @@ interface ApiUser {
   modules: string[];
   mustChangePassword: boolean;
   employeeId: string | null;
+  hasFullPontoAccess: boolean;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -48,6 +55,7 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     modules: user.modules,
     mustChangePassword: user.mustChangePassword,
     employeeId: user.employeeId,
+    hasFullPontoAccess: user.hasFullPontoAccess,
   };
 }
 

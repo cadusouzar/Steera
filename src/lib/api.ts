@@ -811,6 +811,7 @@ interface ApiSystemUser {
   employeeId: string | null;
   modules: string[];
   status: 'ACTIVE' | 'BLOCKED';
+  hasFullPontoAccess: boolean;
 }
 
 export interface SystemUser {
@@ -820,6 +821,7 @@ export interface SystemUser {
   employeeId: string | null;
   modules: string[];
   status: 'active' | 'blocked';
+  hasFullPontoAccess: boolean;
 }
 
 function mapSystemUser(u: ApiSystemUser): SystemUser {
@@ -830,6 +832,7 @@ function mapSystemUser(u: ApiSystemUser): SystemUser {
     employeeId: u.employeeId ?? null,
     modules: u.modules,
     status: u.status.toLowerCase() as SystemUser['status'],
+    hasFullPontoAccess: u.hasFullPontoAccess,
   };
 }
 
@@ -862,6 +865,13 @@ export async function blockSystemUser(id: string): Promise<void> {
 
 export async function unblockSystemUser(id: string): Promise<void> {
   await request(`/companies/me/users/${id}/unblock`, { method: 'PATCH' });
+}
+
+export async function updatePontoAccess(userId: string, hasFullPontoAccess: boolean): Promise<void> {
+  await request(`/companies/me/users/${userId}/ponto-access`, {
+    method: 'PATCH',
+    body: JSON.stringify({ hasFullPontoAccess }),
+  });
 }
 
 // ---- Reports ----
@@ -944,7 +954,8 @@ interface ApiTimeJustification {
 }
 interface ApiWorkSchedule {
   id: string;
-  employeeId: string;
+  employeeId: string | null;
+  managerId: string | null;
   name: string;
   weekDays: number[];
   expectedStartTime: string;
@@ -973,6 +984,7 @@ interface ApiTimeTrackingSettings {
   allowLocationException: boolean;
   allowExtraPeriods: boolean;
   maxAttachmentSizeBytes: number;
+  managerId: string | null;
 }
 
 // ---- Shapes the UI works with ----
@@ -1043,7 +1055,8 @@ export interface JustificationRecord {
 }
 export interface WorkScheduleRecord {
   id: string;
-  employeeId: string;
+  employeeId: string | null;
+  managerId: string | null;
   name: string;
   weekDays: number[];
   expectedStartTime: string;
@@ -1072,6 +1085,7 @@ export interface TimeTrackingSettingsRecord {
   allowLocationException: boolean;
   allowExtraPeriods: boolean;
   maxAttachmentSizeBytes: number;
+  managerId: string | null;
 }
 
 function mapTimePunch(e: ApiTimeEvent): TimePunch {
@@ -1132,6 +1146,7 @@ function mapWorkSchedule(s: ApiWorkSchedule): WorkScheduleRecord {
   return {
     id: s.id,
     employeeId: s.employeeId,
+    managerId: s.managerId,
     name: s.name,
     weekDays: s.weekDays,
     expectedStartTime: s.expectedStartTime,
@@ -1164,6 +1179,7 @@ function mapTimeTrackingSettings(s: ApiTimeTrackingSettings): TimeTrackingSettin
     allowLocationException: s.allowLocationException,
     allowExtraPeriods: s.allowExtraPeriods,
     maxAttachmentSizeBytes: s.maxAttachmentSizeBytes,
+    managerId: s.managerId,
   };
 }
 
@@ -1393,14 +1409,17 @@ export async function listManageableEmployees(): Promise<{ id: string; fullName:
 }
 
 // ---- Configuração administrativa (jornadas, locais de trabalho, regras da empresa) ----
-export async function listWorkSchedules(employeeId?: string): Promise<WorkScheduleRecord[]> {
-  const qs = employeeId ? `?employeeId=${employeeId}&pageSize=100` : '?pageSize=100';
-  const res = await request<Paginated<ApiWorkSchedule>>(`/work-schedules${qs}`);
+export async function listWorkSchedules(params?: { employeeId?: string; managerId?: string }): Promise<WorkScheduleRecord[]> {
+  const qs = new URLSearchParams({ pageSize: '100' });
+  if (params?.employeeId) qs.set('employeeId', params.employeeId);
+  if (params?.managerId) qs.set('managerId', params.managerId);
+  const res = await request<Paginated<ApiWorkSchedule>>(`/work-schedules?${qs.toString()}`);
   return res.items.map(mapWorkSchedule);
 }
 
 export async function createWorkSchedule(input: {
-  employeeId: string;
+  employeeId?: string;
+  managerId?: string;
   name: string;
   weekDays: number[];
   expectedStartTime: string;
@@ -1423,6 +1442,7 @@ export async function updateWorkSchedule(
   id: string,
   input: Partial<{
     employeeId: string;
+    managerId: string;
     name: string;
     weekDays: number[];
     expectedStartTime: string;
@@ -1467,8 +1487,9 @@ export async function updateWorkLocation(
   return mapWorkLocation(l);
 }
 
-export async function getTimeTrackingSettings(): Promise<TimeTrackingSettingsRecord> {
-  const s = await request<ApiTimeTrackingSettings>('/time-tracking-settings');
+export async function getTimeTrackingSettings(managerId?: string): Promise<TimeTrackingSettingsRecord> {
+  const qs = managerId ? `?managerId=${managerId}` : '';
+  const s = await request<ApiTimeTrackingSettings>(`/time-tracking-settings${qs}`);
   return mapTimeTrackingSettings(s);
 }
 
