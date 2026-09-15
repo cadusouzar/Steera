@@ -602,6 +602,37 @@ revisadas individualmente).
   erro da tela, sem crash; e criar um padrão de empresa como fundador, confirmando que um terceiro
   funcionário sem gerente e sem jornada própria também passou a mostrar horas esperadas. Todos os 8
   passos confirmados com resultado real observado na tela, nenhum assumido.
+- **Revogar `hasFullPontoAccess` não invalida na hora um JWT já emitido:** como `role`/`modules`, o
+  flag viaja como claim do access token, então um login que acabou de ser restringido continua com
+  acesso total por até 15min (até o token expirar ou o próximo `/auth/refresh`) — mesmo tradeoff de
+  defasagem já documentado para os outros claims, registrado explicitamente aqui porque este campo
+  existe justamente para ser desligado como restrição ao vivo; revogação imediata de verdade exigiria
+  uma blocklist de tokens, deliberadamente fora de escopo.
+- **Revisão final da branch inteira (15/09/2026) — achados corrigidos numa única onda:**
+  (C1) `GET /time-tracking-settings?managerId=` criava a sobrescrita do time só por ser LIDO (o
+  frontend chama isso ao abrir a aba), fixando o time inteiro nos defaults do *schema* em vez do
+  padrão da empresa: leitura virou somente-leitura com fallback para o padrão da empresa (campo novo
+  `inherited` na resposta diz ao frontend que o valor é herdado) e a primeira ESCRITA de um superior
+  agora semeia a linha nova como cópia dos valores atuais da empresa.
+  (C2) Frontend e backend discordavam do significado de `hasFullPontoAccess` — a coluna nasce `true`
+  para toda linha, `EMPLOYEE` inclusive, e o frontend lia o booleano cru sem checar `role`, então um
+  gerente `EMPLOYEE` (a persona deste plano) entrava na tela administrativa achando ter acesso total e
+  tomava `404` em toda mutação; o backend passou a expor sempre o valor EFETIVO
+  (`role === 'ADMIN' && flag`, ver `backend/src/auth/ponto-access.util.ts`) no JWT, em todo objeto
+  `user` e na listagem de logins — a semântica da coluna no banco e a trava do último admin seguem
+  inalteradas.
+  (I1) `WorkSchedulesService.update()` autorizava só o tier NOVO: agora autoriza o atual **e** o
+  novo, fechando o "roubo" de uma jornada que o chamador nem consegue listar.
+  (I2) "tenho time próprio" no frontend vinha de `listManageableEmployees().length > 0`, que para um
+  admin de acesso total é a empresa inteira — novo `GET /time-management/has-direct-reports`
+  (`TimeManagementAuthService.hasDirectReports`, sempre a consulta por `managerId`, sem o bypass
+  `'ALL'`).
+  (I4) nenhum teste ou passeio de navegador tinha usado um login `role: EMPLOYEE` — daí o C2 ter
+  passado por 12 revisões de task; a suíte ganhou um bloco dedicado a essa persona.
+  Menores da mesma onda: `@Max(20MB)` em `maxAttachmentSizeBytes` (configurável por time desde este
+  plano), `companyId` explícito nas três consultas de `getScheduleForDate` (defesa em profundidade
+  junto do RLS) e tratamento de `P2002` no find-then-create de `TimeTrackingSettings` (os índices
+  únicos são parciais, então não há `upsert` possível — a corrida relê em vez de vazar um 500).
 
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo

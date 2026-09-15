@@ -98,13 +98,18 @@ export class TimeAttendanceCalculationService {
   //
   // Três níveis, sem propagação em cadeia em nenhum passo: individual → padrão do time do
   // superior DIRETO → padrão da empresa inteira → nenhum (expectedMinutes: 0, comportamento de
-  // hoje, inalterado). Achado + implementado na revisão de escopo de 15/09/2026. Não escopa por
-  // companyId no `where` (mantém a mesma característica de antes — depende do RLS).
-  private async getScheduleForDate(employeeId: string, date: Date) {
+  // hoje, inalterado). Achado + implementado na revisão de escopo de 15/09/2026.
+  //
+  // `companyId` vai explícito nos três níveis (defesa em profundidade, somado ao RLS): o nível de
+  // EMPRESA em especial filtra só por `employeeId: null, managerId: null`, ou seja, o padrão de
+  // QUALQUER empresa casaria o `where` se o contexto de tenant do RLS algum dia faltasse — é
+  // exatamente a classe de consulta sem filtro de empresa que motivou o backstop de RLS.
+  private async getScheduleForDate(employeeId: string, date: Date, companyId: string | undefined) {
     const localDayOfWeek = date.getUTCDay(); // `date` já é um "dia calendário" (UTC-midnight-encoded) — getUTCDay() dá o dia da semana pretendido, sem depender do fuso da empresa.
+    const companyScope = companyId ? { companyId } : {};
 
     const individualCandidates = await this.prisma.workSchedule.findMany({
-      where: { employeeId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
+      where: { ...companyScope, employeeId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
       orderBy: { validFrom: 'desc' },
     });
     const individual = individualCandidates.find((s) => s.weekDays.includes(localDayOfWeek));
@@ -113,7 +118,7 @@ export class TimeAttendanceCalculationService {
     const employee = await this.prisma.employee.findUnique({ where: { id: employeeId }, select: { managerId: true } });
     if (employee?.managerId) {
       const teamCandidates = await this.prisma.workSchedule.findMany({
-        where: { managerId: employee.managerId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
+        where: { ...companyScope, managerId: employee.managerId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
         orderBy: { validFrom: 'desc' },
       });
       const teamDefault = teamCandidates.find((s) => s.weekDays.includes(localDayOfWeek));
@@ -121,7 +126,7 @@ export class TimeAttendanceCalculationService {
     }
 
     const companyCandidates = await this.prisma.workSchedule.findMany({
-      where: { employeeId: null, managerId: null, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
+      where: { ...companyScope, employeeId: null, managerId: null, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
       orderBy: { validFrom: 'desc' },
     });
     return companyCandidates.find((s) => s.weekDays.includes(localDayOfWeek)) ?? null;
@@ -146,7 +151,7 @@ export class TimeAttendanceCalculationService {
         where: { employeeId, serverRecordedAt: { gte: windowStart, lt: fetchEnd } },
         orderBy: { serverRecordedAt: 'asc' },
       }),
-      this.getScheduleForDate(employeeId, date),
+      this.getScheduleForDate(employeeId, date, employee?.companyId),
       this.holidays.isHoliday(date),
       this.prisma.vacationSchedule.findFirst({
         where: { employeeId, startDate: { lte: date }, endDate: { gte: date }, status: { not: 'CANCELLED' } },
