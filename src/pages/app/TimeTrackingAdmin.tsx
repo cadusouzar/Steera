@@ -12,6 +12,7 @@ import {
   type EmployeeListItem, type TimePunch, type AdjustmentRequestRecord, type JustificationRecord,
   type TimePunchType, type WorkScheduleRecord, type WorkLocationRecord, type TimeTrackingSettingsRecord,
 } from '../../lib/api';
+import { getCurrentUser } from '../../lib/auth';
 
 const PUNCH_TYPE_LABELS: Record<TimePunchType, string> = {
   clock_in: 'Entrada', break_start: 'Saída Almoço', break_end: 'Volta Almoço',
@@ -112,7 +113,7 @@ const TimeTrackingAdmin = () => {
             {activeTab === 'adjustments' && <AdjustmentsTab employeeName={employeeName} />}
             {activeTab === 'justifications' && <JustificationsTab employeeName={employeeName} />}
             {activeTab === 'correction' && <CorrectionTab />}
-            {activeTab === 'settings' && <SettingsTab employees={employees} />}
+            {activeTab === 'settings' && <SettingsTab />}
           </>
         )}
       </motion.div>
@@ -506,26 +507,53 @@ function CorrectionTab() {
 }
 
 // ==== Configuração ====
-function SettingsTab({ employees }: { employees: EmployeeListItem[] }) {
+function SettingsTab() {
+  const myHasFullPontoAccess = getCurrentUser()?.hasFullPontoAccess ?? false;
+  const [myOwnEmployeeId] = useState<string | null>(getCurrentUser()?.employeeId ?? null);
+  const [manageableCount, setManageableCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    listManageableEmployees().then((list) => setManageableCount(list.length)).catch(() => setManageableCount(0));
+  }, []);
+
+  if (manageableCount === null) {
+    return <div className="py-8 flex items-center justify-center text-muted"><Loader2 className="animate-spin" size={24} /></div>;
+  }
+
+  // Um ADMIN com hasFullPontoAccess sempre vê "manageableCount" como a empresa inteira (via
+  // getManageableEmployeeIds's 'ALL') — usamos isso só pra saber se HÁ alguém a gerenciar, não pra
+  // decidir se o usuário tem um "próprio time" no sentido de managerId. A seção "Minha equipe" só
+  // faz sentido quando o próprio login está vinculado a um Employee (myOwnEmployeeId) que aparece
+  // como managerId de alguém — aproximamos isso checando se manageableCount > 0 E myOwnEmployeeId
+  // existe; um ADMIN de acesso total sem Employee vinculado nunca tem "minha equipe" própria.
+  const hasOwnTeam = manageableCount > 0 && !!myOwnEmployeeId;
+
   return (
     <div className="space-y-8">
-      <SettingsPanel />
-      <WorkSchedulesPanel employees={employees} />
-      <WorkLocationsPanel />
+      <SettingsPanel hasFullPontoAccess={myHasFullPontoAccess} hasOwnTeam={hasOwnTeam} myOwnEmployeeId={myOwnEmployeeId} />
+      <WorkSchedulesPanel hasFullPontoAccess={myHasFullPontoAccess} hasOwnTeam={hasOwnTeam} myOwnEmployeeId={myOwnEmployeeId} />
+      <WorkLocationsPanel canEdit={myHasFullPontoAccess} />
     </div>
   );
 }
 
-function SettingsPanel() {
+function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { hasFullPontoAccess: boolean; hasOwnTeam: boolean; myOwnEmployeeId: string | null }) {
+  // 'company' só é uma opção pra quem tem hasFullPontoAccess; 'team' só é uma opção pra quem tem
+  // hasOwnTeam. Quem tem as duas alterna; quem só tem uma vê só aquela, sem seletor.
+  const [scope, setScope] = useState<'company' | 'team'>(hasFullPontoAccess ? 'company' : 'team');
   const [settings, setSettings] = useState<TimeTrackingSettingsRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    getTimeTrackingSettings().then(setSettings).catch((err) => setError(err instanceof Error ? err.message : 'Erro ao carregar configurações.')).finally(() => setLoading(false));
-  }, []);
+  const load = useCallback(() => {
+    setLoading(true);
+    setError('');
+    const managerId = scope === 'team' ? (myOwnEmployeeId ?? undefined) : undefined;
+    getTimeTrackingSettings(managerId).then(setSettings).catch((err) => setError(err instanceof Error ? err.message : 'Erro ao carregar configurações.')).finally(() => setLoading(false));
+  }, [scope, myOwnEmployeeId]);
+  useEffect(() => { load(); }, [load]);
 
   const toggle = (key: keyof TimeTrackingSettingsRecord) => {
     if (!settings) return;
@@ -538,7 +566,8 @@ function SettingsPanel() {
     setSaving(true);
     setError('');
     try {
-      const updated = await updateTimeTrackingSettings(settings);
+      const managerId = scope === 'team' ? (myOwnEmployeeId ?? undefined) : undefined;
+      const updated = await updateTimeTrackingSettings({ ...settings, managerId });
       setSettings(updated);
       setSaved(true);
     } catch (err) {
@@ -548,10 +577,29 @@ function SettingsPanel() {
     }
   };
 
+  if (!hasFullPontoAccess && !hasOwnTeam) {
+    return (
+      <div className="glass-panel rounded-3xl border border-border/60 p-6 md:p-8 shadow-sm">
+        <h2 className="text-lg font-heading font-bold text-foreground mb-1">Regras da empresa</h2>
+        <p className="text-sm text-muted">Você ainda não gerencia nenhum funcionário — nada para configurar aqui.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-panel rounded-3xl border border-border/60 p-6 md:p-8 shadow-sm">
-      <h2 className="text-lg font-heading font-bold text-foreground mb-1">Regras da empresa</h2>
-      <p className="text-sm text-muted mb-6">Nenhuma regra vem pré-definida — configure o que sua empresa exige para bater ponto.</p>
+      <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+        <h2 className="text-lg font-heading font-bold text-foreground">Regras da empresa</h2>
+        {hasFullPontoAccess && hasOwnTeam && (
+          <div className="flex gap-1 bg-secondary/30 rounded-lg p-1">
+            <button onClick={() => setScope('company')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'company' ? 'bg-primary text-white' : 'text-muted'}`}>Padrão da empresa</button>
+            <button onClick={() => setScope('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'team' ? 'bg-primary text-white' : 'text-muted'}`}>Minha equipe</button>
+          </div>
+        )}
+      </div>
+      <p className="text-sm text-muted mb-6">
+        {scope === 'company' ? 'Nenhuma regra vem pré-definida — configure o que sua empresa exige para bater ponto.' : 'Vale só para os seus subordinados diretos, sobrescrevendo o padrão da empresa.'}
+      </p>
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 text-sm">{error}</div>}
       {loading || !settings ? (
         <div className="py-8 flex items-center justify-center text-muted"><Loader2 className="animate-spin" size={24} /></div>
@@ -581,22 +629,40 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
   );
 }
 
-function WorkSchedulesPanel({ employees }: { employees: EmployeeListItem[] }) {
+function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { hasFullPontoAccess: boolean; hasOwnTeam: boolean; myOwnEmployeeId: string | null }) {
+  // Escopado a "quem eu de fato consigo administrar" (mesmo raciocínio já usado em CorrectionTab),
+  // nunca a listagem completa da empresa — usado só como fonte do seletor "Individual".
+  const [manageableEmployees, setManageableEmployees] = useState<{ id: string; fullName: string }[]>([]);
+  useEffect(() => { listManageableEmployees().then(setManageableEmployees).catch(() => setManageableEmployees([])); }, []);
+
   const [items, setItems] = useState<WorkScheduleRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [tier, setTier] = useState<'company' | 'team' | 'individual'>(hasFullPontoAccess ? 'company' : 'individual');
   const [form, setForm] = useState({
     employeeId: '', name: '', weekDays: [1, 2, 3, 4, 5] as number[],
     expectedStartTime: '08:00', expectedEndTime: '17:00', breakMinutes: 60,
     dailyMinutes: 480, weeklyMinutes: 2400, validFrom: new Date().toISOString().slice(0, 10),
   });
 
+  // GET /work-schedules sem NENHUM filtro exige hasFullPontoAccess (404 pra quem não tem — ver
+  // WorkSchedulesController.findAll) — um superior restrito nunca pode listar "tudo", só o próprio
+  // padrão de time (managerId=myOwnEmployeeId) e as jornadas individuais de quem ele administra
+  // (uma chamada por employeeId, já que a API não aceita uma lista de ids). Full access continua
+  // pedindo tudo de uma vez (inclui todos os níveis da empresa inteira).
   const load = useCallback(() => {
     setLoading(true);
-    listWorkSchedules().then(setItems).catch((err) => setError(err instanceof Error ? err.message : 'Erro ao carregar jornadas.')).finally(() => setLoading(false));
-  }, []);
+    setError('');
+    const fetchAll = hasFullPontoAccess
+      ? listWorkSchedules()
+      : Promise.all([
+          hasOwnTeam && myOwnEmployeeId ? listWorkSchedules({ managerId: myOwnEmployeeId }) : Promise.resolve([]),
+          ...manageableEmployees.map((e) => listWorkSchedules({ employeeId: e.id })),
+        ]).then((lists) => lists.flat());
+    fetchAll.then(setItems).catch((err) => setError(err instanceof Error ? err.message : 'Erro ao carregar jornadas.')).finally(() => setLoading(false));
+  }, [hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId, manageableEmployees]);
   useEffect(() => { load(); }, [load]);
 
   const toggleWeekDay = (d: number) => {
@@ -605,11 +671,16 @@ function WorkSchedulesPanel({ employees }: { employees: EmployeeListItem[] }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.employeeId || !form.name.trim() || form.weekDays.length === 0) return;
+    if (!form.name.trim() || form.weekDays.length === 0) return;
+    if (tier === 'individual' && !form.employeeId) return;
     setSaving(true);
     setError('');
     try {
-      await createWorkSchedule(form);
+      await createWorkSchedule({
+        ...form,
+        employeeId: tier === 'individual' ? form.employeeId : undefined,
+        managerId: tier === 'team' ? (myOwnEmployeeId ?? undefined) : undefined,
+      });
       setShowForm(false);
       load();
     } catch (err) {
@@ -617,6 +688,12 @@ function WorkSchedulesPanel({ employees }: { employees: EmployeeListItem[] }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const rowLabel = (s: WorkScheduleRecord) => {
+    if (s.employeeId) return manageableEmployees.find((e) => e.id === s.employeeId)?.fullName ?? s.employeeId;
+    if (s.managerId) return 'Padrão do time';
+    return 'Padrão da empresa';
   };
 
   return (
@@ -627,16 +704,23 @@ function WorkSchedulesPanel({ employees }: { employees: EmployeeListItem[] }) {
           <Plus size={16} /> Nova Jornada
         </button>
       </div>
-      <p className="text-sm text-muted mb-6">Uma jornada por funcionário e período de vigência — usada para calcular horas esperadas e faltas.</p>
+      <p className="text-sm text-muted mb-6">Três níveis — padrão da empresa, padrão do time, ou individual — o mais específico sempre vence.</p>
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 text-sm">{error}</div>}
 
       {showForm && (
         <form onSubmit={submit} className="mb-6 p-5 bg-secondary/10 border border-border/50 rounded-2xl space-y-4">
+          <div className="flex gap-1 bg-secondary/30 rounded-lg p-1 w-fit">
+            {hasFullPontoAccess && <button type="button" onClick={() => setTier('company')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'company' ? 'bg-primary text-white' : 'text-muted'}`}>Empresa</button>}
+            {(hasFullPontoAccess || hasOwnTeam) && <button type="button" onClick={() => setTier('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'team' ? 'bg-primary text-white' : 'text-muted'}`}>Meu time</button>}
+            <button type="button" onClick={() => setTier('individual')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'individual' ? 'bg-primary text-white' : 'text-muted'}`}>Individual</button>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <select required value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} className="bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground">
-              <option value="">Funcionário...</option>
-              {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}</option>)}
-            </select>
+            {tier === 'individual' && (
+              <select required value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} className="bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground">
+                <option value="">Funcionário...</option>
+                {manageableEmployees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}</option>)}
+              </select>
+            )}
             <input required placeholder="Nome (ex: Comercial 8h-17h)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground" />
           </div>
           <div className="flex gap-1.5 flex-wrap">
@@ -671,11 +755,11 @@ function WorkSchedulesPanel({ employees }: { employees: EmployeeListItem[] }) {
         <p className="text-sm text-muted italic py-4">Nenhuma jornada configurada ainda.</p>
       ) : (
         <table className="w-full text-left border-collapse">
-          <thead><tr className="border-b border-border/40"><Th>Funcionário</Th><Th>Nome</Th><Th>Dias</Th><Th>Horário</Th><Th>Carga diária</Th></tr></thead>
+          <thead><tr className="border-b border-border/40"><Th>Nível</Th><Th>Nome</Th><Th>Dias</Th><Th>Horário</Th><Th>Carga diária</Th></tr></thead>
           <tbody className="divide-y divide-border/40">
             {items.map((s) => (
               <tr key={s.id}>
-                <Td>{employees.find((e) => e.id === s.employeeId)?.fullName ?? s.employeeId}</Td>
+                <Td>{rowLabel(s)}</Td>
                 <Td>{s.name}</Td>
                 <Td>{s.weekDays.map((d) => WEEKDAY_LABELS[d]).join(', ')}</Td>
                 <Td>{s.expectedStartTime} - {s.expectedEndTime}</Td>
@@ -689,7 +773,7 @@ function WorkSchedulesPanel({ employees }: { employees: EmployeeListItem[] }) {
   );
 }
 
-function WorkLocationsPanel() {
+function WorkLocationsPanel({ canEdit }: { canEdit: boolean }) {
   const [items, setItems] = useState<WorkLocationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -733,14 +817,16 @@ function WorkLocationsPanel() {
     <div className="glass-panel rounded-3xl border border-border/60 p-6 md:p-8 shadow-sm">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-lg font-heading font-bold text-foreground">Locais de trabalho</h2>
-        <button onClick={() => setShowForm((s) => !s)} className="text-sm font-medium text-primary hover:text-primary/80 flex items-center gap-1">
-          <Plus size={16} /> Novo Local
-        </button>
+        {canEdit && (
+          <button onClick={() => setShowForm((s) => !s)} className="text-sm font-medium text-primary hover:text-primary/80 flex items-center gap-1">
+            <Plus size={16} /> Novo Local
+          </button>
+        )}
       </div>
       <p className="text-sm text-muted mb-6">Opcional — sem nenhum local configurado, a distância nunca é usada para validar uma marcação.</p>
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 text-sm">{error}</div>}
 
-      {showForm && (
+      {showForm && canEdit && (
         <form onSubmit={submit} className="mb-6 p-5 bg-secondary/10 border border-border/50 rounded-2xl space-y-3">
           <input required placeholder="Nome (ex: Sede)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground" />
           <div className="grid grid-cols-3 gap-3">
@@ -769,9 +855,11 @@ function WorkLocationsPanel() {
                 <Td>{l.radiusMeters}m</Td>
                 <Td>{l.active ? <Badge tone="green">Ativo</Badge> : <Badge tone="gray">Inativo</Badge>}</Td>
                 <Td className="text-right">
-                  <button onClick={() => toggleActive(l)} className="text-xs font-medium text-primary hover:text-primary/80">
-                    {l.active ? 'Desativar' : 'Ativar'}
-                  </button>
+                  {canEdit && (
+                    <button onClick={() => toggleActive(l)} className="text-xs font-medium text-primary hover:text-primary/80">
+                      {l.active ? 'Desativar' : 'Ativar'}
+                    </button>
+                  )}
                 </Td>
               </tr>
             ))}
