@@ -133,4 +133,44 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue(null);
     await expect(service.unblock('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  describe('updatePontoAccess', () => {
+    it('turns hasFullPontoAccess on for a target ADMIN login in the same company', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: false });
+      prisma.user.count.mockResolvedValue(2); // irrelevant when turning ON, only checked when turning OFF
+      prisma.user.update.mockResolvedValue({ id: 'target-1' });
+
+      await service.updatePontoAccess('company-1', 'target-1', true);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: { hasFullPontoAccess: true } });
+    });
+
+    it('rejects turning it off when the target is the last ADMIN with hasFullPontoAccess: true in the company', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: true });
+      prisma.user.count.mockResolvedValue(1); // only this one left
+
+      await expect(service.updatePontoAccess('company-1', 'target-1', false)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('allows turning it off when at least one other full-access ADMIN remains', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: true });
+      prisma.user.count.mockResolvedValue(2);
+      prisma.user.update.mockResolvedValue({ id: 'target-1' });
+
+      await service.updatePontoAccess('company-1', 'target-1', false);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: { hasFullPontoAccess: false } });
+    });
+
+    it('throws NotFoundException when the target does not exist in this company', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.updatePontoAccess('company-1', 'target-1', true)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws BadRequestException when the target is not an ADMIN login', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'EMPLOYEE', hasFullPontoAccess: true });
+      await expect(service.updatePontoAccess('company-1', 'target-1', false)).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
 });

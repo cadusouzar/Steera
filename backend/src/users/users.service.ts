@@ -22,6 +22,7 @@ const SAFE_USER_SELECT = {
   modules: true,
   status: true,
   mustChangePassword: true,
+  hasFullPontoAccess: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -134,5 +135,29 @@ export class UsersService {
       where: { id: companyId },
       data: { planTier: dto.planTier, maxEmployeeLogins: PLAN_LIMITS[dto.planTier] },
     });
+  }
+
+  // Achado + corrigido na revisão de escopo de 15/09/2026: um login ADMIN de uma empresa pequena/
+  // média muitas vezes é só um gerente de confiança, não o dono — este campo deixa a empresa
+  // restringir logins ADMIN específicos a "administrar só quem eu comando" dentro do Controle de
+  // Ponto (ver TimeManagementAuthService.assertHasFullPontoAccess/canManage). Trava contra deixar a
+  // empresa sem NENHUM admin de acesso total, o que só seria recuperável por edição direta no banco.
+  async updatePontoAccess(companyId: string, targetUserId: string, hasFullPontoAccess: boolean): Promise<void> {
+    const target = await this.prisma.user.findFirst({ where: { id: targetUserId, companyId } });
+    if (!target) throw new NotFoundException(`Login ${targetUserId} não encontrado nesta empresa`);
+    if (target.role !== 'ADMIN') {
+      throw new BadRequestException('hasFullPontoAccess só tem efeito em logins ADMIN');
+    }
+    if (!hasFullPontoAccess) {
+      const fullAccessCount = await this.prisma.user.count({
+        where: { companyId, role: 'ADMIN', hasFullPontoAccess: true },
+      });
+      if (fullAccessCount <= 1) {
+        throw new BadRequestException(
+          'A empresa precisa manter pelo menos um login ADMIN com acesso total ao Controle de Ponto',
+        );
+      }
+    }
+    await this.prisma.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess } });
   }
 }

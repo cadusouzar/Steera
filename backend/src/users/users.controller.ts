@@ -3,13 +3,18 @@ import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdatePontoAccessDto } from './dto/update-ponto-access.dto';
 import { UsersService } from './users.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('companies/me/users')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
+  ) {}
 
   @Get()
   findAll(@CurrentUser() user: AuthenticatedUser) {
@@ -41,4 +46,17 @@ export class UsersController {
     return this.users.unblock(user.companyId, id);
   }
 
+  // Sem @Roles('ADMIN') de propósito — assertHasFullPontoAccess já exige role
+  // === 'ADMIN' (e mais: hasFullPontoAccess === true), uma checagem mais
+  // estrita que subsome a do decorator.
+  @Patch(':id/ponto-access')
+  @HttpCode(204)
+  updatePontoAccess(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePontoAccessDto,
+  ) {
+    this.timeManagementAuth.assertHasFullPontoAccess(user);
+    return this.users.updatePontoAccess(user.companyId, id, dto.hasFullPontoAccess);
+  }
 }
