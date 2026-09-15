@@ -155,4 +155,45 @@ describe('TimeManagementAuthService', () => {
       expect(result).toEqual([]);
     });
   });
+
+  describe('listManageableEmployees', () => {
+    it('returns every ACTIVE employee in the company for ADMIN, without an id filter', async () => {
+      prisma.employee.findMany.mockResolvedValue([{ id: 'e1', fullName: 'Ana' }, { id: 'e2', fullName: 'Beto' }]);
+
+      const result = await service.listManageableEmployees(admin);
+
+      expect(result).toEqual([{ id: 'e1', fullName: 'Ana' }, { id: 'e2', fullName: 'Beto' }]);
+      expect(prisma.employee.findMany).toHaveBeenCalledWith({
+        where: { companyId: 'company-1', status: 'ACTIVE' },
+        select: { id: true, fullName: true },
+        orderBy: { fullName: 'asc' },
+      });
+    });
+
+    it('returns only direct reports for a manager, filtered by id', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.findMany
+        .mockResolvedValueOnce([{ id: 'report-1' }]) // getManageableEmployeeIds' own query
+        .mockResolvedValueOnce([{ id: 'report-1', fullName: 'Carlos' }]); // the name-resolving query
+
+      const result = await service.listManageableEmployees(employeeLogin);
+
+      expect(result).toEqual([{ id: 'report-1', fullName: 'Carlos' }]);
+      expect(prisma.employee.findMany).toHaveBeenLastCalledWith({
+        where: { companyId: 'company-1', status: 'ACTIVE', id: { in: ['report-1'] } },
+        select: { id: true, fullName: true },
+        orderBy: { fullName: 'asc' },
+      });
+    });
+
+    it('returns [] without querying employees when a manager has no direct reports', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.findMany.mockResolvedValueOnce([]); // getManageableEmployeeIds' own query
+
+      const result = await service.listManageableEmployees(employeeLogin);
+
+      expect(result).toEqual([]);
+      expect(prisma.employee.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
 });

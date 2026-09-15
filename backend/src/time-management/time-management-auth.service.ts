@@ -86,4 +86,26 @@ export class TimeManagementAuthService {
     });
     return reports.map((r) => r.id);
   }
+
+  // Achado na revisão final de 14/09/2026: a aba de Correção Proativa da tela administrativa
+  // usava `GET /employees` (a listagem completa da empresa, correta pra outras telas) como fonte
+  // do seletor de funcionário, mostrando mais opções do que as que um superior direto de fato
+  // consegue corrigir (o backend já bloqueava a tentativa com 404, mas o seletor confundia o
+  // usuário oferecendo opções que nunca funcionariam). Reaproveita getManageableEmployeeIds() —
+  // nunca uma segunda implementação da mesma regra — só some as strings-id por uma consulta com
+  // nome, e só devolve funcionários ATIVOS (corrigir o ponto de alguém desligado não faz sentido).
+  async listManageableEmployees(currentUser: AuthenticatedUser): Promise<{ id: string; fullName: string }[]> {
+    const manageable = await this.getManageableEmployeeIds(currentUser);
+    if (manageable !== 'ALL' && manageable.length === 0) return [];
+
+    return this.prisma.employee.findMany({
+      where: {
+        companyId: currentUser.companyId,
+        status: 'ACTIVE',
+        ...(manageable === 'ALL' ? {} : { id: { in: manageable } }),
+      },
+      select: { id: true, fullName: true },
+      orderBy: { fullName: 'asc' },
+    });
+  }
 }

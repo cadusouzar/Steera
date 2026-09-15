@@ -51,8 +51,16 @@ export class FilesService {
 
     let bufferToStore = file.buffer;
     if (realMime === 'image/jpeg' || realMime === 'image/png') {
-      // Remove EXIF (pode conter GPS/modelo do aparelho) re-codificando a imagem.
-      bufferToStore = await sharp(file.buffer).rotate().toBuffer();
+      // Remove EXIF (pode conter GPS/modelo do aparelho) re-codificando a imagem. Um buffer pode
+      // passar na checagem de assinatura (magic bytes corretos) e ainda assim não ser uma imagem
+      // válida de verdade (truncada/corrompida) — sharp lança nesse caso, e sem o try/catch isso
+      // vazava como um 500 bruto pro cliente em vez de um 400 limpo (achado ao vivo, corrigido na
+      // revisão final de 14/09/2026).
+      try {
+        bufferToStore = await sharp(file.buffer).rotate().toBuffer();
+      } catch {
+        throw new BadRequestException('Não foi possível processar a imagem enviada — o arquivo pode estar corrompido');
+      }
     }
 
     await mkdir(STORAGE_ROOT, { recursive: true });

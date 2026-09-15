@@ -1383,6 +1383,15 @@ export async function listTimeInconsistencies(): Promise<TimePunch[]> {
   return events.map(mapTimePunch);
 }
 
+// Achado na revisão final de 14/09/2026: a aba de Correção Proativa usava listEmployees() (a
+// listagem completa da empresa) como fonte do seletor de funcionário, mostrando mais opções do que
+// as que um superior direto de fato consegue corrigir. Esta função é escopada no backend por
+// TimeManagementAuthService.getManageableEmployeeIds() — ADMIN vê todos, um superior vê só seus
+// subordinados diretos.
+export async function listManageableEmployees(): Promise<{ id: string; fullName: string }[]> {
+  return request<{ id: string; fullName: string }[]>('/time-management/manageable-employees');
+}
+
 // ---- Configuração administrativa (jornadas, locais de trabalho, regras da empresa) ----
 export async function listWorkSchedules(employeeId?: string): Promise<WorkScheduleRecord[]> {
   const qs = employeeId ? `?employeeId=${employeeId}&pageSize=100` : '?pageSize=100';

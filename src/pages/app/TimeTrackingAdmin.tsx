@@ -5,7 +5,7 @@ import {
   Check, X, Loader2, Plus, Paperclip, Wrench,
 } from 'lucide-react';
 import {
-  listEmployees, listTimeInconsistencies, listPendingAdjustmentRequests, approveAdjustmentRequest,
+  listEmployees, listManageableEmployees, listTimeInconsistencies, listPendingAdjustmentRequests, approveAdjustmentRequest,
   rejectAdjustmentRequest, listJustificationsForReview, reviewJustification, proactiveCorrection,
   listCompanyTimeEvents, listWorkSchedules, createWorkSchedule, listWorkLocations, createWorkLocation,
   updateWorkLocation, getTimeTrackingSettings, updateTimeTrackingSettings, fetchProtectedFileObjectUrl,
@@ -111,7 +111,7 @@ const TimeTrackingAdmin = () => {
             {activeTab === 'inconsistencies' && <InconsistenciesTab employeeName={employeeName} />}
             {activeTab === 'adjustments' && <AdjustmentsTab employeeName={employeeName} />}
             {activeTab === 'justifications' && <JustificationsTab employeeName={employeeName} />}
-            {activeTab === 'correction' && <CorrectionTab employees={employees} />}
+            {activeTab === 'correction' && <CorrectionTab />}
             {activeTab === 'settings' && <SettingsTab employees={employees} />}
           </>
         )}
@@ -367,7 +367,16 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
 }
 
 // ==== Correção Proativa ====
-function CorrectionTab({ employees }: { employees: EmployeeListItem[] }) {
+function CorrectionTab() {
+  // Escopado a "quem eu de fato consigo corrigir" (ADMIN vê todos, superior vê só seus
+  // subordinados diretos) — nunca a listagem completa da empresa (listEmployees/EmployeeListItem),
+  // que mostrava mais opções do que as que um superior direto conseguia de fato usar (achado na
+  // revisão final de 14/09/2026, ver DECISOES-TECNICAS.md).
+  const [manageableEmployees, setManageableEmployees] = useState<{ id: string; fullName: string }[]>([]);
+  useEffect(() => {
+    listManageableEmployees().then(setManageableEmployees).catch(() => setManageableEmployees([]));
+  }, []);
+
   const [employeeId, setEmployeeId] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [type, setType] = useState<AdjustmentRequestRecord['type']>('correct_time');
@@ -436,7 +445,7 @@ function CorrectionTab({ employees }: { employees: EmployeeListItem[] }) {
             <label className="block text-xs font-semibold text-foreground/90 mb-2 uppercase tracking-wider">Funcionário *</label>
             <select required value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className="w-full bg-background border border-border rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-primary text-foreground">
               <option value="">Selecione...</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
+              {manageableEmployees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
             </select>
           </div>
           <div>

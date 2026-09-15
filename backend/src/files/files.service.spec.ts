@@ -168,6 +168,21 @@ describe('FilesService', () => {
       });
     });
 
+    // Regressão de um bug real reproduzido ao vivo (revisão final, 14/09/2026): um buffer com a
+    // assinatura binária correta (passa em detectRealMimeType) mas corrompido demais pra sharp
+    // decodificar de verdade vazava como um 500 bruto em vez de um 400 limpo.
+    it('rejects with a clean 400 (never a raw 500) when sharp cannot decode a buffer that passed the signature check', async () => {
+      detectRealMimeType.mockReturnValue('image/jpeg');
+      sharpMock.mockReturnValueOnce({ rotate: () => ({ toBuffer: () => Promise.reject(new Error('unsupported image format')) }) });
+      const file = { buffer: Buffer.from('corrupted-jpeg-bytes'), originalname: 'foto.jpg', mimetype: 'image/jpeg', size: 20 };
+
+      await expect(
+        service.upload('company-1', 'user-1', file, FileAssetPurpose.TIME_PUNCH_PHOTO),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(writeFile).not.toHaveBeenCalled();
+      expect(prisma.fileAsset.create).not.toHaveBeenCalled();
+    });
+
     it('accepts a real PNG', async () => {
       detectRealMimeType.mockReturnValue('image/png');
       const file = { buffer: Buffer.from('fake-png-bytes'), originalname: 'foto.png', mimetype: 'image/png', size: 14 };
