@@ -9,6 +9,7 @@ import {
   rejectAdjustmentRequest, listJustificationsForReview, reviewJustification, proactiveCorrection,
   listCompanyTimeEvents, listWorkSchedules, createWorkSchedule, listWorkLocations, createWorkLocation,
   updateWorkLocation, getTimeTrackingSettings, updateTimeTrackingSettings, fetchProtectedFileObjectUrl,
+  hasDirectReports,
   type EmployeeListItem, type TimePunch, type AdjustmentRequestRecord, type JustificationRecord,
   type TimePunchType, type WorkScheduleRecord, type WorkLocationRecord, type TimeTrackingSettingsRecord,
 } from '../../lib/api';
@@ -510,23 +511,25 @@ function CorrectionTab() {
 function SettingsTab() {
   const myHasFullPontoAccess = getCurrentUser()?.hasFullPontoAccess ?? false;
   const [myOwnEmployeeId] = useState<string | null>(getCurrentUser()?.employeeId ?? null);
-  const [manageableCount, setManageableCount] = useState<number | null>(null);
+  const [ownTeam, setOwnTeam] = useState<boolean | null>(null);
 
+  // GET /time-management/has-direct-reports, não listManageableEmployees().length (corrigido na
+  // revisão final de 15/09/2026): pra um ADMIN de acesso total a listagem devolve a empresa
+  // INTEIRA (bypass 'ALL' de getManageableEmployeeIds), então qualquer admin com um Employee
+  // vinculado via o botão "Minha equipe" mesmo sem nenhum subordinado direto — e a configuração de
+  // time salva ali não valeria pra ninguém. Este endpoint responde exatamente "alguém ATIVO tem o
+  // meu Employee como managerId?", independente de hasFullPontoAccess/role.
   useEffect(() => {
-    listManageableEmployees().then((list) => setManageableCount(list.length)).catch(() => setManageableCount(0));
+    hasDirectReports().then(setOwnTeam).catch(() => setOwnTeam(false));
   }, []);
 
-  if (manageableCount === null) {
+  if (ownTeam === null) {
     return <div className="py-8 flex items-center justify-center text-muted"><Loader2 className="animate-spin" size={24} /></div>;
   }
 
-  // Um ADMIN com hasFullPontoAccess sempre vê "manageableCount" como a empresa inteira (via
-  // getManageableEmployeeIds's 'ALL') — usamos isso só pra saber se HÁ alguém a gerenciar, não pra
-  // decidir se o usuário tem um "próprio time" no sentido de managerId. A seção "Minha equipe" só
-  // faz sentido quando o próprio login está vinculado a um Employee (myOwnEmployeeId) que aparece
-  // como managerId de alguém — aproximamos isso checando se manageableCount > 0 E myOwnEmployeeId
-  // existe; um ADMIN de acesso total sem Employee vinculado nunca tem "minha equipe" própria.
-  const hasOwnTeam = manageableCount > 0 && !!myOwnEmployeeId;
+  // "Minha equipe" também exige o próprio login estar vinculado a um Employee — sem isso não há
+  // managerId nenhum pra escopar a configuração.
+  const hasOwnTeam = ownTeam && !!myOwnEmployeeId;
 
   return (
     <div className="space-y-8">
@@ -600,6 +603,14 @@ function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { ha
       <p className="text-sm text-muted mb-6">
         {scope === 'company' ? 'Nenhuma regra vem pré-definida — configure o que sua empresa exige para bater ponto.' : 'Vale só para os seus subordinados diretos, sobrescrevendo o padrão da empresa.'}
       </p>
+      {/* Abrir esta aba NUNCA cria a configuração de time (a leitura é somente leitura desde a
+          revisão de 15/09/2026) — enquanto a equipe não tiver regras próprias, o que aparece aqui
+          é o padrão da empresa, e é o primeiro "Salvar" que cria a sobrescrita. */}
+      {scope === 'team' && settings?.inherited && (
+        <div className="rounded-xl border border-border/60 bg-secondary/20 p-4 mb-4 text-sm text-muted">
+          Sua equipe ainda não tem regras próprias — os valores abaixo estão <strong className="text-foreground/80">herdados do padrão da empresa</strong>. Ao salvar, eles passam a valer só para os seus subordinados diretos.
+        </div>
+      )}
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 text-sm">{error}</div>}
       {loading || !settings ? (
         <div className="py-8 flex items-center justify-center text-muted"><Loader2 className="animate-spin" size={24} /></div>

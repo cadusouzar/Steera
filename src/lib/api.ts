@@ -985,6 +985,11 @@ interface ApiTimeTrackingSettings {
   allowExtraPeriods: boolean;
   maxAttachmentSizeBytes: number;
   managerId: string | null;
+  // true quando a leitura de um escopo de time caiu no padrão da EMPRESA por ainda não existir
+  // sobrescrita própria daquele superior — a leitura nunca cria a sobrescrita (ver
+  // TimeTrackingSettingsService.getScoped no backend). Só aparece no GET; nunca é reenviado no
+  // PATCH (ver updateTimeTrackingSettings).
+  inherited?: boolean;
 }
 
 // ---- Shapes the UI works with ----
@@ -1086,6 +1091,9 @@ export interface TimeTrackingSettingsRecord {
   allowExtraPeriods: boolean;
   maxAttachmentSizeBytes: number;
   managerId: string | null;
+  // Ver ApiTimeTrackingSettings.inherited — usado só pra exibir "herdado do padrão da empresa" na
+  // aba de Configuração; nunca vai de volta no PATCH.
+  inherited: boolean;
 }
 
 function mapTimePunch(e: ApiTimeEvent): TimePunch {
@@ -1180,6 +1188,7 @@ function mapTimeTrackingSettings(s: ApiTimeTrackingSettings): TimeTrackingSettin
     allowExtraPeriods: s.allowExtraPeriods,
     maxAttachmentSizeBytes: s.maxAttachmentSizeBytes,
     managerId: s.managerId,
+    inherited: s.inherited ?? false,
   };
 }
 
@@ -1493,11 +1502,33 @@ export async function getTimeTrackingSettings(managerId?: string): Promise<TimeT
   return mapTimeTrackingSettings(s);
 }
 
+// Corpo montado campo a campo, NUNCA espalhando o objeto recebido: a validação de whitelist do
+// Nest rejeita com 400 qualquer propriedade desconhecida no PATCH (foi exatamente esse o bug de
+// "Salvar" encontrado na verificação em navegador de 14/09/2026, quando campos crus da resposta
+// vazavam de volta no corpo). `inherited`, novo em 15/09/2026, é mais um campo que só existe na
+// LEITURA e jamais pode voltar aqui.
 export async function updateTimeTrackingSettings(
   input: Partial<TimeTrackingSettingsRecord>,
 ): Promise<TimeTrackingSettingsRecord> {
-  const s = await request<ApiTimeTrackingSettings>('/time-tracking-settings', { method: 'PATCH', body: JSON.stringify(input) });
+  const body: Record<string, unknown> = {
+    requirePhoto: input.requirePhoto,
+    requireLocation: input.requireLocation,
+    allowLocationException: input.allowLocationException,
+    allowExtraPeriods: input.allowExtraPeriods,
+    maxAttachmentSizeBytes: input.maxAttachmentSizeBytes,
+  };
+  // managerId só quando de fato há um escopo de time — `null` (padrão da empresa) é omitido, não
+  // enviado, porque o DTO do backend só aceita string.
+  if (typeof input.managerId === 'string') body.managerId = input.managerId;
+  const s = await request<ApiTimeTrackingSettings>('/time-tracking-settings', { method: 'PATCH', body: JSON.stringify(body) });
   return mapTimeTrackingSettings(s);
+}
+
+// "Eu tenho subordinados diretos?" — pergunta diferente de listManageableEmployees() (que, pra um
+// ADMIN de acesso total, devolve a empresa inteira). Ver TimeManagementAuthService.hasDirectReports.
+export async function hasDirectReports(): Promise<boolean> {
+  const res = await request<{ hasDirectReports: boolean }>('/time-management/has-direct-reports');
+  return res.hasDirectReports;
 }
 
 // ---- Vínculo do próprio login a um Employee (admin que ainda não pode bater ponto) ----
