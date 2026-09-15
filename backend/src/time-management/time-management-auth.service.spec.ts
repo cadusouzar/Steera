@@ -1,6 +1,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { TimeManagementAuthService } from './time-management-auth.service';
 
@@ -21,7 +22,7 @@ describe('TimeManagementAuthService', () => {
   beforeEach(async () => {
     prisma = {
       user: { findUnique: jest.fn() },
-      employee: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
+      employee: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     };
     const module = await Test.createTestingModule({
       providers: [TimeManagementAuthService, { provide: PrismaService, useValue: prisma }],
@@ -228,6 +229,36 @@ describe('TimeManagementAuthService', () => {
     });
   });
 
+  // Achado I2 da revisão final (15/09/2026): o frontend derivava "tenho time próprio" de
+  // listManageableEmployees().length > 0, que pra um ADMIN de acesso total é a empresa INTEIRA.
+  describe('hasDirectReports', () => {
+    it('queries direct reports for a full-access ADMIN too — never takes the ALL bypass', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-admin', employeeId: 'employee-admin-1' });
+      prisma.employee.count.mockResolvedValue(0);
+
+      const result = await service.hasDirectReports(admin);
+
+      expect(result).toBe(false); // admin de acesso total SEM subordinados diretos
+      expect(prisma.employee.count).toHaveBeenCalledWith({
+        where: { managerId: 'employee-admin-1', companyId: 'company-1', status: 'ACTIVE' },
+      });
+    });
+
+    it('returns true for a login whose linked Employee is the managerId of someone active', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.count.mockResolvedValue(2);
+
+      expect(await service.hasDirectReports(employeeLogin)).toBe(true);
+    });
+
+    it('returns false (without querying employees) when the login has no linked Employee', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-admin', employeeId: null });
+
+      expect(await service.hasDirectReports(admin)).toBe(false);
+      expect(prisma.employee.count).not.toHaveBeenCalled();
+    });
+  });
+
   describe('assertHasFullPontoAccess', () => {
     it('does not throw for ADMIN with hasFullPontoAccess: true', () => {
       expect(() => service.assertHasFullPontoAccess(admin)).not.toThrow();
@@ -240,6 +271,66 @@ describe('TimeManagementAuthService', () => {
 
     it('throws NotFoundException for any EMPLOYEE login, regardless of hasFullPontoAccess', () => {
       expect(() => service.assertHasFullPontoAccess(employeeLogin)).toThrow(NotFoundException);
+    });
+  });
+
+  // Achado I4 da revisão final (15/09/2026): TODO teste e toda a verificação em navegador deste
+  // plano usaram logins ADMIN (de acesso total ou restrito) — nunca um login EMPLOYEE-gerente, que
+  // é exatamente a persona pra quem o plano existe. Foi por isso que o C2 (frontend e backend
+  // discordando do significado de hasFullPontoAccess) passou por 12 revisões de task.
+  describe('EMPLOYEE-role manager (a persona nunca exercitada antes desta revisão)', () => {
+    // O flag EFETIVO que um login EMPLOYEE chega a ver é sempre false — normalizado na borda de
+    // auth (ver effectiveHasFullPontoAccess), mesmo com a coluna do banco em `true`, que é como
+    // TODA linha nasce. Este teste ancora as duas pontas: o valor normalizado e a consequência
+    // dele nos guards deste serviço.
+    const employeeManagerFromJwt: AuthenticatedUser = {
+      ...employeeLogin,
+      hasFullPontoAccess: effectiveHasFullPontoAccess({ role: 'EMPLOYEE', hasFullPontoAccess: true }),
+    };
+
+    it('never carries an effective hasFullPontoAccess of true, even with the DB column set to true', () => {
+      expect(employeeManagerFromJwt.hasFullPontoAccess).toBe(false);
+    });
+
+    it('is denied every full-access action (company-wide settings/schedules, work locations, ponto-access toggle)', () => {
+      expect(() => service.assertHasFullPontoAccess(employeeManagerFromJwt)).toThrow(NotFoundException);
+    });
+
+    it('can still manage its OWN direct reports (the whole point of the persona)', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'report-1', companyId: 'company-1', managerId: 'employee-manager-1' });
+
+      expect(await service.canManage(employeeManagerFromJwt, 'report-1')).toBe(true);
+    });
+
+    it('cannot manage someone who is not its direct report', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'other-1', companyId: 'company-1', managerId: 'someone-else' });
+
+      expect(await service.canManage(employeeManagerFromJwt, 'other-1')).toBe(false);
+    });
+
+    it('sees only its direct reports in the manageable list, never the whole company', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.findMany
+        .mockResolvedValueOnce([{ id: 'report-1' }])
+        .mockResolvedValueOnce([{ id: 'report-1', fullName: 'Carlos' }]);
+
+      const result = await service.listManageableEmployees(employeeManagerFromJwt);
+
+      expect(result).toEqual([{ id: 'report-1', fullName: 'Carlos' }]);
+      expect(prisma.employee.findMany).toHaveBeenLastCalledWith({
+        where: { companyId: 'company-1', status: 'ACTIVE', id: { in: ['report-1'] } },
+        select: { id: true, fullName: true },
+        orderBy: { fullName: 'asc' },
+      });
+    });
+
+    it('does have a team of its own (hasDirectReports), which is what unlocks the team-scoped config', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-employee', employeeId: 'employee-manager-1' });
+      prisma.employee.count.mockResolvedValue(1);
+
+      expect(await service.hasDirectReports(employeeManagerFromJwt)).toBe(true);
     });
   });
 });

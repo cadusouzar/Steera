@@ -109,6 +109,23 @@ export class TimeManagementAuthService {
     });
   }
 
+  // Responde só "o Employee vinculado ao login atual aparece como managerId de alguém ATIVO?" —
+  // deliberadamente SEM o bypass 'ALL' de getManageableEmployeeIds. Achado na revisão final de
+  // 15/09/2026: o frontend derivava "tenho time próprio" de `listManageableEmployees().length > 0`,
+  // que pra um ADMIN de acesso total devolve a empresa INTEIRA — então qualquer admin com um
+  // Employee vinculado via o botão "Minha equipe" mesmo sem nenhum subordinado direto, e a
+  // configuração de time que ele salvasse ali não valeria pra ninguém. Esta consulta é sempre a
+  // mesma do ramo EMPLOYEE de getManageableEmployeeIds, só que incondicional.
+  async hasDirectReports(currentUser: AuthenticatedUser): Promise<boolean> {
+    const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
+    if (!currentUserRecord?.employeeId) return false;
+
+    const count = await this.prisma.employee.count({
+      where: { managerId: currentUserRecord.employeeId, companyId: currentUser.companyId, status: 'ACTIVE' },
+    });
+    return count > 0;
+  }
+
   // Ações sem "um funcionário-alvo" pra checar via canManage() — editar o padrão da empresa de
   // TimeTrackingSettings/WorkSchedule, mutar WorkLocation, e o endpoint de ligar/desligar
   // hasFullPontoAccess de outro login. Síncrono de propósito (sem consulta ao banco) — o dado já

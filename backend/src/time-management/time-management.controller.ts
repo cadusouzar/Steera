@@ -15,4 +15,13 @@ export class TimeManagementController {
   listManageableEmployees(@CurrentUser() user: AuthenticatedUser) {
     return this.timeManagementAuth.listManageableEmployees(user);
   }
+
+  // Endpoint próprio (em vez de mudar o formato de resposta de manageable-employees, consumido em
+  // 3 lugares do frontend): "eu tenho um time PRÓPRIO?" é uma pergunta diferente de "quem eu posso
+  // administrar?" — pra um ADMIN de acesso total a segunda devolve a empresa inteira. Ver
+  // TimeManagementAuthService.hasDirectReports.
+  @Get('has-direct-reports')
+  async hasDirectReports(@CurrentUser() user: AuthenticatedUser) {
+    return { hasDirectReports: await this.timeManagementAuth.hasDirectReports(user) };
+  }
 }
