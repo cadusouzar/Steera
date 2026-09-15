@@ -179,8 +179,16 @@ describe('WorkSchedulesService', () => {
       });
       // canManage() do TimeManagementAuthService consulta employee.findFirst escopado por empresa
       // pra achar o alvo — aqui simula que 'employee-new' existe na empresa, mas não é gerenciável
-      // por employeeManagerLogin (managerId do alvo não bate com o employeeId do login atual).
-      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-new', companyId: 'company-1', managerId: 'employee-outro-gerente' });
+      // por employeeManagerLogin (managerId do alvo não bate com o employeeId do login atual),
+      // enquanto 'employee-old' (o tier ATUAL, autorizado primeiro desde o fix I1) é subordinado
+      // direto dele — isolando que a rejeição vem MESMO do tier novo.
+      prisma.employee.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve({
+          id: where.id,
+          companyId: 'company-1',
+          managerId: where.id === 'employee-old' ? 'employee-mgr-1' : 'employee-outro-gerente',
+        }),
+      );
       prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
 
       const dto = { employeeId: 'employee-new' };
@@ -193,7 +201,8 @@ describe('WorkSchedulesService', () => {
       prisma.workSchedule.findFirst.mockResolvedValue({
         id: 'ws-1', companyId: 'company-1', employeeId: 'employee-old', managerId: null,
       });
-      // 'employee-new' é subordinado direto do Employee vinculado a employeeManagerLogin.
+      // 'employee-new' e 'employee-old' são os dois subordinados diretos do Employee vinculado a
+      // employeeManagerLogin — o caller pode autorar tanto o tier atual quanto o novo.
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-new', companyId: 'company-1', managerId: 'employee-mgr-1' });
       prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
       prisma.workSchedule.update.mockResolvedValue({ id: 'ws-1', employeeId: 'employee-new' });
@@ -206,6 +215,98 @@ describe('WorkSchedulesService', () => {
         where: { id: 'ws-1' },
         data: expect.objectContaining({ employeeId: 'employee-new' }),
       });
+    });
+  });
+
+  // Achado I1 da revisão final (15/09/2026): update() autorizava SÓ o tier novo, nunca o atual —
+  // um superior que nem consegue ver o agendamento (findAll/findOne negam) podia mesmo assim
+  // "roubá-lo" via PATCH, bastando saber o id e ser capaz de autorar o tier de destino.
+  describe('update — authorizes BOTH the current tier and the new tier', () => {
+    // Quem o login atual gerencia: só 'employee-meu'. 'employee-alheio' é subordinado de outro.
+    const mockEmployeesByManager = () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
+      prisma.employee.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(
+          where.id === 'employee-meu'
+            ? { id: 'employee-meu', companyId: 'company-1', managerId: 'employee-mgr-1' }
+            : { id: where.id, companyId: 'company-1', managerId: 'employee-outro-gerente' },
+        ),
+      );
+    };
+
+    it('rejects converting the COMPANY-WIDE default into the calling manager\'s own team schedule (can author the new tier, not the old one)', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-company-wide', companyId: 'company-1', employeeId: null, managerId: null,
+      });
+      mockEmployeesByManager();
+
+      await expect(
+        service.update('ws-company-wide', { managerId: 'employee-mgr-1' }, employeeManagerLogin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.workSchedule.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects re-homing ANOTHER manager's team schedule to the calling manager's own team", async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-team-other', companyId: 'company-1', employeeId: null, managerId: 'employee-someone-else',
+      });
+      mockEmployeesByManager();
+
+      await expect(
+        service.update('ws-team-other', { managerId: 'employee-mgr-1' }, employeeManagerLogin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.workSchedule.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects stealing an individual schedule of an employee the caller does NOT manage, by pointing it at one they DO", async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-alheio', companyId: 'company-1', employeeId: 'employee-alheio', managerId: null,
+      });
+      mockEmployeesByManager();
+
+      await expect(
+        service.update('ws-alheio', { employeeId: 'employee-meu' }, employeeManagerLogin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.workSchedule.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects the opposite direction too: a schedule the caller CAN touch, moved to a tier they cannot author', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-meu', companyId: 'company-1', employeeId: 'employee-meu', managerId: null,
+      });
+      mockEmployeesByManager();
+
+      await expect(
+        service.update('ws-meu', { employeeId: 'employee-alheio' }, employeeManagerLogin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.workSchedule.update).not.toHaveBeenCalled();
+    });
+
+    it('allows a plain edit (no tier change) of a schedule the caller already owns', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-meu-time', companyId: 'company-1', employeeId: null, managerId: 'employee-mgr-1',
+      });
+      mockEmployeesByManager();
+      prisma.workSchedule.update.mockResolvedValue({ id: 'ws-meu-time', name: 'Novo nome' });
+
+      await service.update('ws-meu-time', { name: 'Novo nome' }, employeeManagerLogin);
+
+      expect(prisma.workSchedule.update).toHaveBeenCalledWith({
+        where: { id: 'ws-meu-time' },
+        data: expect.objectContaining({ name: 'Novo nome' }),
+      });
+    });
+
+    it('a full-access ADMIN can still re-home any schedule across tiers', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-company-wide', companyId: 'company-1', employeeId: null, managerId: null,
+      });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-mgr-1', companyId: 'company-1', managerId: null });
+      prisma.workSchedule.update.mockResolvedValue({ id: 'ws-company-wide', managerId: 'employee-mgr-1' });
+
+      await service.update('ws-company-wide', { managerId: 'employee-mgr-1' }, admin);
+
+      expect(prisma.workSchedule.update).toHaveBeenCalled();
     });
   });
 

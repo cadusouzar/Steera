@@ -119,6 +119,18 @@ export class WorkSchedulesService {
 
   async update(id: string, dto: UpdateWorkScheduleDto, currentUser: AuthenticatedUser): Promise<WorkSchedule> {
     const schedule = await this.assertExists(id);
+    // DUAS autorizações, não uma (achado na revisão final de 15/09/2026): a versão anterior
+    // autorizava só o tier NOVO, então um superior restrito que nem consegue VER esta jornada
+    // (findAll/findOne negam corretamente) podia mesmo assim "roubá-la" via PATCH — bastava saber
+    // o id e ser capaz de autorar o tier de destino (ex.: repontar o padrão de time de OUTRO
+    // superior, ou o padrão da empresa inteira, pro próprio time). O tier ATUAL prova que o caller
+    // já podia mexer nesta jornada; o tier NOVO prova que pode movê-la pra lá.
+    await this.assertValidTierAndAuthorized(
+      currentUser,
+      schedule.companyId,
+      schedule.employeeId ?? undefined,
+      schedule.managerId ?? undefined,
+    );
     const nextEmployeeId = dto.employeeId !== undefined ? dto.employeeId : (schedule.employeeId ?? undefined);
     const nextManagerId = dto.managerId !== undefined ? dto.managerId : (schedule.managerId ?? undefined);
     await this.assertValidTierAndAuthorized(currentUser, schedule.companyId, nextEmployeeId, nextManagerId);
