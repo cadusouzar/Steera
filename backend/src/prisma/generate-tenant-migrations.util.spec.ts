@@ -1,4 +1,6 @@
-import { splitMigrationSqlByTenant } from '../../scripts/generate-tenant-migrations';
+import { existsSync } from 'fs';
+import { join } from 'path';
+import { NOOP_WHEN_REPLAYED_FROM_EMPTY, splitMigrationSqlByTenant } from '../../scripts/generate-tenant-migrations';
 
 const TENANT_TABLES = ['Client', 'Employee'] as const;
 
@@ -82,5 +84,28 @@ describe('splitMigrationSqlByTenant', () => {
     expect(result).toContain('pg_advisory_lock');
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+// Regressão: 20260911003303_restore_client_trash_columns e
+// 20260911003700_restore_receivable_subscription_link são migrations de REMEDIAÇÃO de um
+// incidente real no banco de dev compartilhado (um `db push --accept-data-loss` apagou colunas que
+// uma migration ANTERIOR na mesma sequência já tinha criado). Cada uma re-adiciona algo que já
+// existe desde uma migration mais antiga — redundante (e um erro real de "coluna já existe") quando
+// replicada do zero contra um schema de tenant novo, que nunca sofreu o incidente. Descoberto ao
+// rodar o replay completo do histórico de tenant contra um schema descartável (Task 4).
+describe('NOOP_WHEN_REPLAYED_FROM_EMPTY', () => {
+  it('contém exatamente as duas migrations de remediação de incidente conhecidas', () => {
+    expect(NOOP_WHEN_REPLAYED_FROM_EMPTY).toEqual([
+      '20260911003303_restore_client_trash_columns',
+      '20260911003700_restore_receivable_subscription_link',
+    ]);
+  });
+
+  it('não gera pasta em prisma/tenant-migrations/ pra nenhuma das duas migrations de remediação', () => {
+    const tenantMigrationsDir = join(__dirname, '..', '..', 'prisma', 'tenant-migrations');
+    for (const name of NOOP_WHEN_REPLAYED_FROM_EMPTY) {
+      expect(existsSync(join(tenantMigrationsDir, name))).toBe(false);
+    }
   });
 });

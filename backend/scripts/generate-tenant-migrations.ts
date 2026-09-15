@@ -6,6 +6,22 @@ import { TENANT_TABLE_NAMES } from '../src/prisma/tenant-table-names';
 const MAIN_MIGRATIONS_DIR = join(__dirname, '..', 'prisma', 'migrations');
 const TENANT_MIGRATIONS_DIR = join(__dirname, '..', 'prisma', 'tenant-migrations');
 
+// Migrations de REMEDIAÇÃO de um incidente real no banco compartilhado de dev (um
+// `db push --accept-data-loss` acidental apagou colunas que uma migration ANTERIOR já tinha
+// criado — ver o comentário de cada arquivo original pra o relato completo do incidente). Cada uma
+// só re-adiciona algo que uma migration mais antiga NA MESMA sequência já criou — perfeitamente
+// correto pra "consertar" o banco real que sofreu o incidente (que nunca teve seu
+// `_prisma_migrations` alterado, então o Prisma nunca soube que precisava reaplicar nada sozinho),
+// mas redundante — e por isso um erro de "coluna já existe" — quando replicado do zero contra um
+// schema de tenant novo, que nunca passou pelo incidente e já tem a coluna certa desde a migration
+// original. Achado ao rodar de verdade o replay completo contra um schema descartável (Task 4) —
+// nenhuma migration futura deve precisar entrar nesta lista a menos que sofra o mesmíssimo padrão
+// (remediar um incidente específico do banco real, não uma mudança de schema genuína).
+export const NOOP_WHEN_REPLAYED_FROM_EMPTY = [
+  '20260911003303_restore_client_trash_columns',
+  '20260911003700_restore_receivable_subscription_link',
+];
+
 // Classifica cada comando SQL de uma migration como "de uma tabela de tenant" (mantido) ou "de uma
 // tabela central" (removido). Olha só pra tabela PRINCIPAL de cada comando (a que está sendo
 // criada/alterada/indexada) — uma referência de FK a uma tabela central dentro de um comando de
@@ -73,6 +89,7 @@ function main() {
 
   const migrationNames = listMigrationNames(MAIN_MIGRATIONS_DIR);
   for (const name of migrationNames) {
+    if (NOOP_WHEN_REPLAYED_FROM_EMPTY.includes(name)) continue; // remediação de incidente — ver comentário acima
     const sql = readMigrationSql(MAIN_MIGRATIONS_DIR, name);
     const filtered = splitMigrationSqlByTenant(sql, TENANT_TABLE_NAMES);
     if (filtered.trim().length === 0) continue; // migration inteira era central — nenhum arquivo gerado pra ela
