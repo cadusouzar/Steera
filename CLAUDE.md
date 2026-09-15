@@ -76,11 +76,12 @@ npm run test:e2e          # teste de integração (precisa de PostgreSQL local r
 **Arquitetura:** 4 módulos financeiros (`ClientsModule`, `ReceivablesModule`, `SubscriptionsModule`,
 `ReportsModule`) + `PrismaModule` global + 8 módulos de Recursos Humanos (`CompanyModule`,
 `RolesModule`, `EmployeesModule`, `EmployeeWarningsModule`, `EmployeePaymentsModule`,
-`EmployeeRecurringPaymentsModule`, `VacationsModule`, `LeavesModule`) + 8 módulos de Controle de
+`EmployeeRecurringPaymentsModule`, `VacationsModule`, `LeavesModule`) + 9 módulos de Controle de
 Ponto (`TimeClockModule`, `TimeAdjustmentsModule`, `TimeJustificationsModule`,
 `WorkSchedulesModule`, `WorkLocationsModule`, `TimeTrackingSettingsModule`, `HolidaysModule`,
-`FilesModule`, este último compartilhado com o resto do backend) + `TimeManagementAuthModule`
-(autorização compartilhada por hierarquia de superior). "Overdue" em lançamentos/pagamentos é
+`FilesModule`, este último compartilhado com o resto do backend, e `AuditLogModule`) +
+`TimeManagementAuthModule` (autorização compartilhada por hierarquia de superior). "Overdue" em
+lançamentos/pagamentos é
 sempre derivado em runtime (nunca persistido). Ver `[[ARQUITETURA]]`, `[[BANCO-DE-DADOS]]`,
 `[[API]]`, `[[AMBIENTE-LOCAL]]` e `[[DECISOES-TECNICAS]]` no vault (`B:\Quickflow\Quickflow`) para
 detalhes.
@@ -460,19 +461,23 @@ solicitações de ajuste, justificativas/atestados e configuração administrati
      900_000}})` em `time-clock.controller.ts`. Verificado ao vivo: 33 requisições rápidas contra
      uma empresa de teste real — as primeiras 30 retornam `400` (bloqueadas pela regra de negócio de
      10s entre marcações, não pelo rate limit), a partir da 31ª retornam `429`.
-  2. **Pendência real, não corrigida — decisão do usuário necessária:** a spec também exige uma
-     auditoria de ações relevantes (marcação criada, tentativa duplicada rejeitada, fora de área,
-     falha de foto/localização exigida, solicitação/aprovação/rejeição/correção, envio/acesso a
-     atestado) "registrando só metadados, nunca conteúdo de imagem/atestado no log." Confirmado por
-     inspeção direta: não existe nenhum modelo `AuditLog` ou equivalente em lugar nenhum do backend.
-     Vários itens já são cobertos implicitamente pelos próprios registros existentes (um
-     `TimeEvent`/`TimeAdjustmentRequest` criado já É seu próprio registro de "criado"), mas três não
-     são cobertos por nada: tentativa de marcação duplicada rejeitada (o guard de 10s simplesmente
-     descarta a tentativa, sem deixar rastro), marcação rejeitada por falta de foto/localização
-     exigida (mesma coisa), e acesso a um anexo/atestado via `GET /file-assets/:id` (nenhum registro
-     de quem baixou o quê e quando). Não corrigido nesta revisão porque implementar isso de verdade
-     (novo modelo Prisma + migration + instrumentar ~4 serviços + decidir retenção) é uma feature
-     nova de escopo real, não um bug de uma linha — fica como pendência explícita esperando decisão.
+  2. **Log de auditoria ausente — implementado a pedido do usuário, mesma revisão.** A spec também
+     exige uma auditoria de ações relevantes (marcação criada, tentativa duplicada rejeitada, fora
+     de área, falha de foto/localização exigida, solicitação/aprovação/rejeição/correção, envio/
+     acesso a atestado) "registrando só metadados, nunca conteúdo de imagem/atestado no log."
+     Confirmado por inspeção direta: não existia nenhum modelo `AuditLog` em lugar nenhum do
+     backend. Vários itens já são cobertos implicitamente pelos próprios registros existentes (um
+     `TimeEvent`/`TimeAdjustmentRequest` criado já É seu próprio registro de "criado"), então o novo
+     modelo `AuditLog` (`backend/src/audit-log/`, RLS igual às outras tabelas do módulo) cobre
+     deliberadamente só os 3 pontos que não deixavam rastro nenhum: tentativa de marcação duplicada
+     rejeitada (`PUNCH_DUPLICATE_REJECTED`), marcação rejeitada por falta de foto/localização
+     exigida (`PUNCH_VALIDATION_REJECTED`), e acesso a um anexo/atestado via
+     `GET /file-assets/:id` (`FILE_ACCESSED`, nunca registra conteúdo do arquivo). Não duplica log
+     das ações que já têm seu próprio registro durável, pra nunca manter dois registros divergentes
+     do mesmo evento. `AuditLogService.record()` nunca lança — uma falha ao gravar o log nunca pode
+     derrubar a ação de negócio que está sendo registrada. Verificado ao vivo contra o banco real:
+     uma tentativa duplicada, uma marcação sem foto obrigatória, e um download real de anexo cada um
+     gerou a linha `AuditLog` esperada.
   Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo
   todas as decisões, o incidente de segurança do `canManage()`, e os quatro achados acima).
 
