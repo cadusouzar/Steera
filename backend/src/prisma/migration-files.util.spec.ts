@@ -25,8 +25,11 @@ describe('listMigrationNames', () => {
 
   it('devolve lista vazia para um diretório vazio (não lança)', () => {
     const empty = mkdtempSync(join(tmpdir(), 'migrations-empty-'));
-    expect(listMigrationNames(empty)).toEqual([]);
-    rmSync(empty, { recursive: true, force: true });
+    try {
+      expect(listMigrationNames(empty)).toEqual([]);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });
 
