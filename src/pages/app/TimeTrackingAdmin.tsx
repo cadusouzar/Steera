@@ -380,6 +380,7 @@ function CorrectionTab({ employees }: { employees: EmployeeListItem[] }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!employeeId || !targetDate) { setDayEvents([]); return; }
@@ -388,7 +389,7 @@ function CorrectionTab({ employees }: { employees: EmployeeListItem[] }) {
       .then((res) => setDayEvents(res.items))
       .catch(() => setDayEvents([]))
       .finally(() => setLoadingEvents(false));
-  }, [employeeId, targetDate]);
+  }, [employeeId, targetDate, refreshKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -410,6 +411,7 @@ function CorrectionTab({ employees }: { employees: EmployeeListItem[] }) {
       setReason('');
       setRelatedEventId('');
       setRequestedTime('');
+      setRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível registrar a correção.');
     } finally {
