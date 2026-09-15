@@ -5,6 +5,7 @@ import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { buildFileDownloadPath } from '../files/download-token.util';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { TimeTrackingSettingsService } from '../time-tracking-settings/time-tracking-settings.service';
 import { WorkLocationsService } from '../work-locations/work-locations.service';
@@ -38,15 +39,28 @@ export class TimeClockService {
     return { ...event, downloadUrl: event.photoAssetId ? buildFileDownloadPath(event.photoAssetId) : null };
   }
 
-  private async getTodayOpenState(employeeId: string) {
+  // `client` opcional (default: this.prisma) — o mesmo helper é reusado dentro da transação
+  // travada de createPunch() (recebendo `tx`, não `this.prisma`) para a checagem autoritativa,
+  // sem duplicar a query.
+  private async getTodayOpenState(employeeId: string, client: { timeEvent: { findMany: PrismaService['timeEvent']['findMany'] } } = this.prisma) {
     // "Hoje" pra fins de sequência olha as últimas 24h de eventos, não a data civil — cobre
     // jornada que atravessa a meia-noite sem confundir com o dia civil seguinte.
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const events = await this.prisma.timeEvent.findMany({
+    const events = await client.timeEvent.findMany({
       where: { employeeId, serverRecordedAt: { gte: since } },
       orderBy: { serverRecordedAt: 'asc' },
     });
     return { events, state: computeOpenState(events) };
+  }
+
+  private async findRecentPunch(
+    employeeId: string,
+    client: { timeEvent: { findFirst: PrismaService['timeEvent']['findFirst'] } } = this.prisma,
+  ) {
+    return client.timeEvent.findFirst({
+      where: { employeeId, serverRecordedAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) } },
+      orderBy: { serverRecordedAt: 'desc' },
+    });
   }
 
   async getStatus(user: AuthenticatedUser) {
@@ -68,13 +82,13 @@ export class TimeClockService {
     const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
     const settings = await this.settings.getOrCreateDefault(user.companyId);
 
-    // Bloqueio de curto prazo contra duplo clique / requisição repetida (inclusive de dois
-    // dispositivos quase simultâneos) — server-side, incondicional, independente do `type`
+    // Pré-checagem rápida (sem trava), fora da transação — evita fazer todo o resto do trabalho
+    // (upload de foto, geofencing) só pra descobrir depois que era uma duplicata óbvia. Não é a
+    // checagem que de fato impede a corrida (ver a checagem autoritativa dentro da transação
+    // travada, mais abaixo) — bloqueio de curto prazo contra duplo clique / requisição repetida
+    // (inclusive de dois dispositivos quase simultâneos), incondicional, independente do `type`
     // solicitado (uma segunda batida de tipo DIFERENTE dentro da janela também é bloqueada).
-    const recent = await this.prisma.timeEvent.findFirst({
-      where: { employeeId: employee.id, serverRecordedAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) } },
-      orderBy: { serverRecordedAt: 'desc' },
-    });
+    const recent = await this.findRecentPunch(employee.id);
     if (recent) {
       // Único caso deste método que não cria NENHUM TimeEvent - sem este log, a tentativa
       // simplesmente desaparece sem deixar rastro (achado na revisão final de 14/09/2026).
@@ -158,21 +172,47 @@ export class TimeClockService {
         ? 'PENDING_REVIEW'
         : 'VALID';
 
-    const event = await this.prisma.timeEvent.create({
-      data: {
-        companyId: user.companyId,
-        employeeId: employee.id,
-        type: dto.type,
-        source: dto.isMobile ? 'MOBILE' : 'WEB',
-        deviceReportedAt: dto.deviceReportedAt ? new Date(dto.deviceReportedAt) : undefined,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        accuracyMeters: dto.accuracyMeters,
-        locationStatus,
-        workLocationId,
-        photoAssetId,
-        validationStatus,
-      },
+    // Recheca a duplicidade + cria, atomicamente, dentro de um advisory lock do Postgres escopado
+    // por funcionário (pg_advisory_xact_lock — liberado sozinho no commit/rollback da transação,
+    // nunca precisa de um "unlock" explícito). Fecha a corrida real que a pré-checagem acima
+    // (findFirst-então-create, sem nenhuma trava) não conseguia impedir: duas requisições quase
+    // simultâneas do mesmo funcionário podiam passar as duas pela pré-checagem antes de qualquer
+    // uma criar seu evento. Achado na revisão final de 14/09/2026, corrigido a pedido do usuário —
+    // escopo deliberadamente restrito a fechar essa corrida específica (a mesma que a pré-checagem
+    // já tentava cobrir), não uma revalidação completa da máquina de sequência aqui dentro.
+    // Duas requisições para FUNCIONÁRIOS DIFERENTES nunca se bloqueiam entre si (hashtext(id) dá
+    // uma chave de lock diferente por funcionário).
+    const event = await runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${employee.id})::bigint)`;
+
+      const stillRecent = await this.findRecentPunch(employee.id, tx);
+      if (stillRecent) {
+        await this.auditLog.record({
+          companyId: user.companyId,
+          action: 'PUNCH_DUPLICATE_REJECTED',
+          employeeId: employee.id,
+          performedByUserId: user.userId,
+          metadata: { requestedType: dto.type },
+        });
+        throw new BadRequestException('Aguarde alguns segundos antes de registrar outra marcação');
+      }
+
+      return tx.timeEvent.create({
+        data: {
+          companyId: user.companyId,
+          employeeId: employee.id,
+          type: dto.type,
+          source: dto.isMobile ? 'MOBILE' : 'WEB',
+          deviceReportedAt: dto.deviceReportedAt ? new Date(dto.deviceReportedAt) : undefined,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          accuracyMeters: dto.accuracyMeters,
+          locationStatus,
+          workLocationId,
+          photoAssetId,
+          validationStatus,
+        },
+      });
     });
 
     const { state: newState } = await this.getTodayOpenState(employee.id);

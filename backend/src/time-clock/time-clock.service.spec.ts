@@ -10,6 +10,14 @@ import { TimeTrackingSettingsService } from '../time-tracking-settings/time-trac
 import { WorkLocationsService } from '../work-locations/work-locations.service';
 import { TimeClockService } from './time-clock.service';
 
+// `tx` (o argumento passado pra função de callback) é sempre o mesmo objeto mock `prisma` deste
+// arquivo — cada teste que já configura prisma.timeEvent.findFirst/findMany/create continua
+// funcionando sem mudança nenhuma, já que a trava/transação são só um wrapper em volta das
+// mesmas chamadas.
+jest.mock('../prisma/tenant-rls.extension', () => ({
+  runTenantInteractiveTransaction: jest.fn(),
+}));
+
 const user: AuthenticatedUser = {
   userId: 'user-1',
   companyId: 'company-1',
@@ -34,7 +42,7 @@ const photo = { buffer: Buffer.from('fake'), originalname: 'foto.jpg', mimetype:
 
 describe('TimeClockService', () => {
   let service: TimeClockService;
-  let prisma: { timeEvent: Record<string, jest.Mock> };
+  let prisma: { timeEvent: Record<string, jest.Mock>; $executeRaw: jest.Mock };
   let filesService: { upload: jest.Mock };
   let settingsService: { getOrCreateDefault: jest.Mock };
   let workLocationsService: { findAllActive: jest.Mock };
@@ -44,7 +52,10 @@ describe('TimeClockService', () => {
   beforeEach(async () => {
     prisma = {
       timeEvent: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
+      $executeRaw: jest.fn().mockResolvedValue(undefined),
     };
+    const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
+    (runTenantInteractiveTransaction as jest.Mock).mockImplementation((_p: unknown, fn: (tx: unknown) => unknown) => fn(prisma));
     filesService = { upload: jest.fn().mockResolvedValue({ id: 'asset-1' }) };
     settingsService = { getOrCreateDefault: jest.fn().mockResolvedValue(baseSettings) };
     workLocationsService = { findAllActive: jest.fn().mockResolvedValue([]) };
@@ -148,6 +159,31 @@ describe('TimeClockService', () => {
         employeeId: 'employee-1',
         performedByUserId: 'user-1',
         metadata: { requestedType: 'BREAK_START' },
+      });
+    });
+
+    // Regressão do achado da revisão final de 14/09/2026: a checagem original era
+    // findFirst-então-create sem nenhuma trava — duas requisições quase simultâneas do mesmo
+    // funcionário podiam passar as duas pela checagem antes de qualquer uma criar seu evento.
+    // Simula exatamente essa corrida: a pré-checagem (fora da trava) não vê nada, mas por quando o
+    // código entra na transação travada, outra requisição concorrente já criou um evento —
+    // a checagem AUTORITATIVA (dentro do lock) precisa pegar isso e nunca criar o segundo evento.
+    it('rejects even when the unlocked pre-check passed but a concurrent request already created an event by the time the advisory lock is acquired (the actual race the lock exists to close)', async () => {
+      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requireLocation: false });
+      prisma.timeEvent.findFirst
+        .mockResolvedValueOnce(null) // pré-checagem, sem trava: nada visto ainda
+        .mockResolvedValueOnce({ id: 'event-from-concurrent-request', serverRecordedAt: new Date() }); // checagem autoritativa, já dentro do lock
+
+      await expect(service.createPunch(user, { type: 'CLOCK_IN' }, photo)).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(prisma.timeEvent.create).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).toHaveBeenCalled(); // o lock foi de fato adquirido antes da checagem final
+      expect(auditLog.record).toHaveBeenCalledWith({
+        companyId: 'company-1',
+        action: 'PUNCH_DUPLICATE_REJECTED',
+        employeeId: 'employee-1',
+        performedByUserId: 'user-1',
+        metadata: { requestedType: 'CLOCK_IN' },
       });
     });
 
