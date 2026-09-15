@@ -421,12 +421,7 @@ solicitações de ajuste, justificativas/atestados e configuração administrati
   já que não existe endpoint dedicado pra isso) — o backend segue sendo a fronteira real (`404`
   visível se tentar corrigir alguém fora da própria autoridade), mas o seletor mostra mais opções
   do que as que de fato funcionam; `npm run test:e2e` do backend não roda neste ambiente de dev por
-  falta de um banco `*_test` provisionado (préexistente a este módulo); o `useEffect` que carrega as
-  marcações existentes na aba de Correção Proativa não reexecuta após um envio bem-sucedido para o
-  mesmo funcionário/data (chave de dependência não inclui um contador de sucesso), mostrando
-  "nenhuma marcação encontrada" de forma obsoleta até a página ser recarregada — o dado em si está
-  correto (confirmado ao vivo), é só a lista de marcações-candidatas que fica desatualizada dentro
-  da mesma sessão de formulário.
+  falta de um banco `*_test` provisionado (préexistente a este módulo).
   **Verificação interativa em navegador real: feita (14/09/2026), depois de reconectar a ferramenta
   de automação de navegador nesta sessão.** Todo o ciclo do funcionário (`[[TimeTracking]]`: status
   → confirmação → localização → marcação → detalhe de marcação → solicitação de ajuste → cancelar) e
@@ -446,8 +441,13 @@ solicitações de ajuste, justificativas/atestados e configuração administrati
      interfaces TypeScript, e esse mesmo objeto era reenviado no `PATCH`, rejeitado pela validação
      de whitelist do Nest. Corrigido construindo o objeto explicitamente com só os 5 campos.
   Ambos reproduzidos ao vivo, corrigidos, e re-verificados ao vivo (200 em vez de 401/400) antes de
-  seguir. Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo
-  todas as decisões, o incidente de segurança do `canManage()`, e os dois bugs acima).
+  seguir. Um terceiro bug menor, também encontrado nessa verificação e corrigido a pedido do
+  usuário: o `useEffect` que carrega as marcações existentes na aba de Correção Proativa não
+  reexecutava após um envio bem-sucedido para o mesmo funcionário/data, mostrando "nenhuma marcação
+  encontrada" de forma obsoleta até a página ser recarregada (o dado em si sempre esteve correto) —
+  corrigido com um `refreshKey` incluído na dependência do efeito.
+  Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo
+  todas as decisões, o incidente de segurança do `canManage()`, e os três bugs acima).
 
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
