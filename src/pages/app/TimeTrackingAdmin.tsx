@@ -711,7 +711,7 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }:
         <form onSubmit={submit} className="mb-6 p-5 bg-secondary/10 border border-border/50 rounded-2xl space-y-4">
           <div className="flex gap-1 bg-secondary/30 rounded-lg p-1 w-fit">
             {hasFullPontoAccess && <button type="button" onClick={() => setTier('company')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'company' ? 'bg-primary text-white' : 'text-muted'}`}>Empresa</button>}
-            {(hasFullPontoAccess || hasOwnTeam) && <button type="button" onClick={() => setTier('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'team' ? 'bg-primary text-white' : 'text-muted'}`}>Meu time</button>}
+            {hasOwnTeam && <button type="button" onClick={() => setTier('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'team' ? 'bg-primary text-white' : 'text-muted'}`}>Meu time</button>}
             <button type="button" onClick={() => setTier('individual')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'individual' ? 'bg-primary text-white' : 'text-muted'}`}>Individual</button>
           </div>
           <div className="grid grid-cols-2 gap-3">
