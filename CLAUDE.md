@@ -446,8 +446,35 @@ solicitações de ajuste, justificativas/atestados e configuração administrati
   reexecutava após um envio bem-sucedido para o mesmo funcionário/data, mostrando "nenhuma marcação
   encontrada" de forma obsoleta até a página ser recarregada (o dado em si sempre esteve correto) —
   corrigido com um `refreshKey` incluído na dependência do efeito.
+- **Revisão final do módulo inteiro (14/09/2026):** feita diretamente (não por um agente separado,
+  indisponível por limite de uso na semana), relendo a spec inteira ("Autorização e isolamento" e
+  "Segurança e LGPD") palavra por palavra contra o código já mesclado — não só contra o texto de
+  cada task individual, que é exatamente o tipo de lacuna que só aparece numa revisão de ponta a
+  ponta. Encontrou:
+  1. **`POST /time-clock/punches` não tinha NENHUM rate limit**, apesar da spec exigir isso
+     explicitamente ("aplicado ao endpoint de criação de evento"). `ThrottlerGuard` neste projeto
+     nunca é global — cada rota que precisa dele se registra explicitamente (mesmo padrão do
+     `AuthController`) — e o plano de implementação, ao ser redigido a partir da spec, simplesmente
+     nunca mencionou "rate limit" em lugar nenhum, então nenhuma task chegou a receber essa
+     instrução. **Corrigido**: `@UseGuards(ThrottlerGuard)` + `@Throttle({default: {limit: 30, ttl:
+     900_000}})` em `time-clock.controller.ts`. Verificado ao vivo: 33 requisições rápidas contra
+     uma empresa de teste real — as primeiras 30 retornam `400` (bloqueadas pela regra de negócio de
+     10s entre marcações, não pelo rate limit), a partir da 31ª retornam `429`.
+  2. **Pendência real, não corrigida — decisão do usuário necessária:** a spec também exige uma
+     auditoria de ações relevantes (marcação criada, tentativa duplicada rejeitada, fora de área,
+     falha de foto/localização exigida, solicitação/aprovação/rejeição/correção, envio/acesso a
+     atestado) "registrando só metadados, nunca conteúdo de imagem/atestado no log." Confirmado por
+     inspeção direta: não existe nenhum modelo `AuditLog` ou equivalente em lugar nenhum do backend.
+     Vários itens já são cobertos implicitamente pelos próprios registros existentes (um
+     `TimeEvent`/`TimeAdjustmentRequest` criado já É seu próprio registro de "criado"), mas três não
+     são cobertos por nada: tentativa de marcação duplicada rejeitada (o guard de 10s simplesmente
+     descarta a tentativa, sem deixar rastro), marcação rejeitada por falta de foto/localização
+     exigida (mesma coisa), e acesso a um anexo/atestado via `GET /file-assets/:id` (nenhum registro
+     de quem baixou o quê e quando). Não corrigido nesta revisão porque implementar isso de verdade
+     (novo modelo Prisma + migration + instrumentar ~4 serviços + decidir retenção) é uma feature
+     nova de escopo real, não um bug de uma linha — fica como pendência explícita esperando decisão.
   Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo
-  todas as decisões, o incidente de segurança do `canManage()`, e os três bugs acima).
+  todas as decisões, o incidente de segurança do `canManage()`, e os quatro achados acima).
 
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
