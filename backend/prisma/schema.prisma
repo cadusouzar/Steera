@@ -156,6 +156,7 @@ model User {
   modules            AppModule[]
   status             UserStatus     @default(ACTIVE)
   mustChangePassword Boolean        @default(false)
+  hasFullPontoAccess Boolean        @default(true)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   refreshTokens      RefreshToken[]
@@ -189,7 +190,7 @@ model Company {
   subscriptions          Subscription[]
   timezone               String                  @default("America/Sao_Paulo")
   state                  String?                 @db.Char(2) // UF — define quais feriados estaduais se aplicam; nulo = só nacionais
-  timeTrackingSettings   TimeTrackingSettings?
+  timeTrackingSettings   TimeTrackingSettings[]
   workLocations          WorkLocation[]
   holidays               Holiday[] // só os de escopo COMPANY (customizados) pertencem de fato à empresa
   timeEvents             TimeEvent[]
@@ -229,40 +230,42 @@ enum EmployeeStatus {
 }
 
 model Employee {
-  id                      String                     @id @default(cuid())
-  companyId               String
-  roleId                  String
-  role                    Role                       @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  fullName                String
-  cpf                     String
-  email                   String?
-  phone                   String?
-  address                 String?
-  contractType            ContractType
-  admissionDate           DateTime                   @db.Date
-  terminationDate         DateTime?                  @db.Date
-  status                  EmployeeStatus             @default(ACTIVE)
-  department              String
-  baseValue               Decimal                    @db.Decimal(10, 2)
-  paymentDueDay           Int
-  payOnLastBusinessDay    Boolean                    @default(false)
-  bankDetails             String?
-  salaryRecurrenceEnabled Boolean                    @default(true)
-  createdAt               DateTime                   @default(now())
-  updatedAt               DateTime                   @updatedAt
-  warnings                EmployeeWarning[]
-  recurringPayments       EmployeeRecurringPayment[]
-  payments                EmployeePayment[]
-  vacationSchedules       VacationSchedule[]
-  leaveSchedules          LeaveSchedule[]
-  user                    User?
-  managerId               String?
-  manager                 Employee?                  @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
-  reports                 Employee[]                 @relation("EmployeeManager")
-  timeEvents              TimeEvent[]
-  workSchedules           WorkSchedule[]
-  timeAdjustmentRequests  TimeAdjustmentRequest[]
-  timeJustifications      TimeJustification[]
+  id                            String                     @id @default(cuid())
+  companyId                     String
+  roleId                        String
+  role                          Role                       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  fullName                      String
+  cpf                           String
+  email                         String?
+  phone                         String?
+  address                       String?
+  contractType                  ContractType
+  admissionDate                 DateTime                   @db.Date
+  terminationDate               DateTime?                  @db.Date
+  status                        EmployeeStatus             @default(ACTIVE)
+  department                    String
+  baseValue                     Decimal                    @db.Decimal(10, 2)
+  paymentDueDay                 Int
+  payOnLastBusinessDay          Boolean                    @default(false)
+  bankDetails                   String?
+  salaryRecurrenceEnabled       Boolean                    @default(true)
+  createdAt                     DateTime                   @default(now())
+  updatedAt                     DateTime                   @updatedAt
+  warnings                      EmployeeWarning[]
+  recurringPayments             EmployeeRecurringPayment[]
+  payments                      EmployeePayment[]
+  vacationSchedules             VacationSchedule[]
+  leaveSchedules                LeaveSchedule[]
+  user                          User?
+  managerId                     String?
+  manager                       Employee?                  @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports                       Employee[]                 @relation("EmployeeManager")
+  timeEvents                    TimeEvent[]
+  workSchedules                 WorkSchedule[]
+  workScheduleDefaults          WorkSchedule[]             @relation("WorkScheduleManager")
+  timeTrackingSettingsOverrides TimeTrackingSettings[]
+  timeAdjustmentRequests        TimeAdjustmentRequest[]
+  timeJustifications            TimeJustification[]
 
   @@unique([companyId, cpf])
   @@index([companyId])
@@ -391,16 +394,21 @@ model LeaveSchedule {
 }
 
 model TimeTrackingSettings {
-  id                     String   @id @default(cuid())
-  companyId              String   @unique
-  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  requirePhoto           Boolean  @default(true)
-  requireLocation        Boolean  @default(true)
-  allowLocationException Boolean  @default(false) // se true, localização ausente/imprecisa vira PENDING_REVIEW em vez de bloquear
-  allowExtraPeriods      Boolean  @default(true)
-  maxAttachmentSizeBytes Int      @default(5242880) // 5MB
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  id                     String    @id @default(cuid())
+  companyId              String
+  company                Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  managerId              String?
+  manager                Employee? @relation(fields: [managerId], references: [id], onDelete: Cascade)
+  requirePhoto           Boolean   @default(true)
+  requireLocation        Boolean   @default(true)
+  allowLocationException Boolean   @default(false) // se true, localização ausente/imprecisa vira PENDING_REVIEW em vez de bloquear
+  allowExtraPeriods      Boolean   @default(true)
+  maxAttachmentSizeBytes Int       @default(5242880) // 5MB
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([companyId])
+  @@index([managerId])
 }
 
 // --- Eventos de ponto (flexível, imutável por design de aplicação) ---
@@ -478,8 +486,10 @@ model WorkSchedule {
   id                       String    @id @default(cuid())
   companyId                String
   company                  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employeeId               String
-  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employeeId               String?
+  employee                 Employee? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  managerId                String?
+  manager                  Employee? @relation("WorkScheduleManager", fields: [managerId], references: [id], onDelete: Cascade)
   name                     String // rótulo livre pro admin (ex.: "Comercial 8h-18h")
   weekDays                 Int[] // 0=domingo..6=sábado
   expectedStartTime        String // "HH:mm", hora local da empresa
@@ -499,6 +509,7 @@ model WorkSchedule {
   @@index([companyId])
   @@index([employeeId])
   @@index([employeeId, validFrom])
+  @@index([managerId])
 }
 
 // --- Locais de trabalho / geofencing (opcional por empresa) ---
