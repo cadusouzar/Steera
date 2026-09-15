@@ -20,9 +20,10 @@ Duas lacunas concretas motivaram este design, levantadas em conversa:
    próprio time. Não existe hoje nenhuma forma de restringir um `ADMIN` específico a "administrar só
    quem eu comando", mesmo que seja essa a intenção de quem criou aquele login.
 
-Este design resolve as duas coisas com o mesmo mecanismo: uma configuração de dois níveis
-(padrão da empresa + sobrescrita por superior), e uma forma explícita de dizer que um login `ADMIN`
-específico deve ser tratado, dentro do Controle de Ponto, exatamente como um superior comum.
+Este design resolve as duas coisas com o mesmo mecanismo: uma configuração em camadas (padrão da
+empresa + sobrescrita por superior, com jornada de trabalho ganhando uma terceira camada individual
+por funcionário), e uma forma explícita de dizer que um login `ADMIN` específico deve ser tratado,
+dentro do Controle de Ponto, exatamente como um superior comum.
 
 ## Escopo
 
@@ -57,7 +58,7 @@ model User {
 - Não afeta `modules`/leitura de outras telas do sistema — só a autorização dentro do Controle de
   Ponto (ver seção "Autorização" abaixo).
 
-### `WorkSchedule` — dois níveis (time + individual), sem nível "empresa toda"
+### `WorkSchedule` — três níveis (empresa + time + individual)
 
 ```prisma
 model WorkSchedule {
@@ -69,17 +70,28 @@ model WorkSchedule {
 }
 ```
 
-- Exatamente um dos dois (`employeeId` XOR `managerId`) é preenchido — nunca os dois, nunca nenhum.
-  Validado na aplicação (DTO com `@ValidateIf`/checagem cruzada), não como `CHECK` de banco — mesmo
-  padrão de validação já usado no resto do backend pra invariantes deste tipo.
+- No máximo um dos dois (`employeeId`/`managerId`) é preenchido por linha — nunca os dois ao mesmo
+  tempo. As três combinações válidas: só `employeeId` (individual), só `managerId` (padrão do
+  time), nenhum dos dois (padrão da empresa inteira). Validado na aplicação (DTO com
+  `@ValidateIf`/checagem cruzada), não como `CHECK` de banco — mesmo padrão de validação já usado
+  no resto do backend pra invariantes deste tipo.
 - Uma linha com `managerId` é o "padrão do time": aplica-se a **todos os subordinados diretos**
   daquele `Employee`, automaticamente — sem precisar criar uma linha por funcionário.
-- Uma linha com `employeeId` continua sendo individual: sobrescreve o padrão do time só pra aquela
-  pessoa (ex.: alguém em meio período dentro de um time que por padrão é período integral).
-- **Não existe** um terceiro nível "padrão da empresa inteira" para jornada — sem jornada de time
-  nem individual, o comportamento continua o de hoje (`expectedMinutes = 0`, dia mostrado como
-  "Folga"). Decisão deliberada: jornada de trabalho é inerentemente uma decisão de time/indivíduo,
-  não faz sentido ter uma "jornada padrão" genérica pra empresa toda.
+- Uma linha com `employeeId` continua sendo individual: sobrescreve o padrão do time (ou o padrão
+  da empresa, se o time não tiver um) só pra aquela pessoa (ex.: alguém em meio período dentro de um
+  time que por padrão é período integral).
+- Uma linha sem `employeeId` nem `managerId` é o **padrão da empresa inteira** — cobre o caso de uma
+  empresa nova onde ninguém ainda configurou nada por time/indivíduo, mas já tem gente batendo
+  ponto. **Só quem tem `hasFullPontoAccess` pode criar/editar essa linha** (mesma checagem de
+  `assertHasFullPontoAccess` usada pra `TimeTrackingSettings`/`WorkLocation`) — um superior comum ou
+  ADMIN sem acesso total nunca mexe nela.
+- Ordem de resolução em `getScheduleForDate` (ver "Fluxos" abaixo): individual → padrão do time do
+  superior direto → padrão da empresa → nenhum (comportamento de hoje, `expectedMinutes = 0`, dia
+  mostrado como "Folga").
+- Sem checagem de sobreposição entre linhas do mesmo nível (ex.: dois padrões de empresa com
+  `weekDays` conflitantes) — mesma limitação já existente hoje pra jornadas individuais (`
+  getScheduleForDate` escolhe a de `validFrom` mais recente entre as candidatas), não uma lacuna
+  nova introduzida por este design.
 
 ### `TimeTrackingSettings` — dois níveis (empresa + por time)
 
@@ -153,13 +165,17 @@ assertHasFullPontoAccess(user: AuthenticatedUser): void {
 }
 ```
 
-### Quem pode criar um "padrão de time" em nome de outro superior
+### Quem pode criar cada nível de `WorkSchedule`/`TimeTrackingSettings`
 
-Ao criar uma linha `WorkSchedule`/`TimeTrackingSettings` com `managerId` preenchido:
-- Se `managerId` corresponde ao próprio `Employee` vinculado do chamador → sempre permitido (é
-  autoatendimento, "estou configurando meu próprio time").
-- Caso contrário → exige `assertHasFullPontoAccess(user)` (só quem tem acesso total pode montar o
-  padrão de time de OUTRO superior em nome dele — ex.: RH ajudando a configurar).
+Ao criar uma linha:
+- **Sem `employeeId` nem `managerId`** (padrão da empresa, só existe pra `WorkSchedule`/
+  `TimeTrackingSettings`) → sempre exige `assertHasFullPontoAccess(user)`.
+- **Com `managerId` preenchido** (padrão de time): se `managerId` corresponde ao próprio `Employee`
+  vinculado do chamador → sempre permitido (autoatendimento, "estou configurando meu próprio
+  time"); caso contrário → exige `assertHasFullPontoAccess(user)` (só quem tem acesso total pode
+  montar o padrão de time de OUTRO superior em nome dele — ex.: RH ajudando a configurar).
+- **Com `employeeId` preenchido** (individual, só existe pra `WorkSchedule`): mesma checagem já
+  existente, `assertCanManage(user, employeeId)`.
 
 ### Novo endpoint: `PATCH /companies/me/users/:id/ponto-access`
 
@@ -199,19 +215,21 @@ async getEffectiveSettingsForEmployee(employeeId: string, companyId: string): Pr
 }
 ```
 
-Mesma lógica de fallback (uma consulta a mais, direto pelo `managerId`, sem propagação em cadeia)
-se aplica a `TimeAttendanceCalculationService.getScheduleForDate()` pra `WorkSchedule`: procura
-primeiro uma linha `employeeId` correspondente; sem achar, procura uma linha `managerId` igual ao
-`Employee.managerId` do funcionário; sem achar nenhuma das duas, `expectedMinutes = 0` (comportamento
-de hoje, inalterado).
+Lógica de fallback equivalente, com um nível a mais, se aplica a
+`TimeAttendanceCalculationService.getScheduleForDate()` pra `WorkSchedule` (sem propagação em cadeia
+em nenhum dos passos — sempre o superior **direto**, nunca um nível acima): procura primeiro uma
+linha `employeeId` correspondente; sem achar, procura uma linha `managerId` igual ao
+`Employee.managerId` do funcionário; sem achar nenhuma das duas, procura a linha "padrão da empresa"
+(sem `employeeId` nem `managerId`); sem nenhuma das três, `expectedMinutes = 0` (comportamento de
+hoje, inalterado).
 
 ### Tela de Configuração — o que cada tipo de login vê
 
 | Situação do login | Regras da empresa | Jornadas de trabalho | Locais de trabalho |
 |---|---|---|---|
-| `ADMIN` com `hasFullPontoAccess`, sem `Employee` vinculado ou sem subordinados | Só "padrão da empresa" | Sem seção "meu time" (não tem time) — pode criar/editar jornada individual ou de time de **qualquer** funcionário da empresa, por ter acesso total | Vê/edita todos |
-| `ADMIN` com `hasFullPontoAccess`, **com** subordinados diretos | Alterna entre "Padrão da empresa" e "Minha equipe" (as duas editáveis) | Mesma coisa da linha acima, mais uma seção "meu time" pra si mesmo | Vê/edita todos |
-| `ADMIN` sem `hasFullPontoAccess`, OU `EMPLOYEE` com subordinados | Só "Minha equipe" (sem visibilidade da linha da empresa) | Só cria/edita jornada (time ou individual) dos próprios subordinados diretos | Só visualiza a lista (pra escolher um local ao configurar um subordinado) — não cria/edita |
+| `ADMIN` com `hasFullPontoAccess`, sem `Employee` vinculado ou sem subordinados | Só "padrão da empresa" | Edita o "padrão da empresa"; sem seção "meu time" (não tem time); pode criar/editar jornada individual ou de time de **qualquer** funcionário/superior da empresa, por ter acesso total | Vê/edita todos |
+| `ADMIN` com `hasFullPontoAccess`, **com** subordinados diretos | Alterna entre "Padrão da empresa" e "Minha equipe" (as duas editáveis) | Edita o "padrão da empresa" e tem uma seção "meu time" pra si mesmo, além de poder configurar qualquer outro funcionário/superior | Vê/edita todos |
+| `ADMIN` sem `hasFullPontoAccess`, OU `EMPLOYEE` com subordinados | Só "Minha equipe" (sem visibilidade da linha da empresa) | Só cria/edita jornada (time ou individual) dos próprios subordinados diretos — nunca vê nem edita o "padrão da empresa" | Só visualiza a lista (pra escolher um local ao configurar um subordinado) — não cria/edita |
 | Sem subordinados e sem `hasFullPontoAccess` | Nada pra configurar (estado vazio) | Nada pra configurar (estado vazio) | Só visualiza |
 
 ## Segurança e LGPD
@@ -246,12 +264,17 @@ nova, evitando um lockout operacional.
   `EMPLOYEE` recebem `404`.
 - Endpoint de toggle: rejeita desligar o último `hasFullPontoAccess: true` da empresa; rejeita alvo
   que não é `ADMIN`; rejeita alvo de outra empresa (`404`).
-- `getEffectiveSettingsForEmployee`/`getScheduleForDate`: funcionário com superior que tem
-  sobrescrita própria usa a sobrescrita; funcionário cujo superior não tem sobrescrita cai no padrão
-  da empresa (ou `expectedMinutes: 0` pra jornada); funcionário sem superior nenhum sempre cai no
-  padrão da empresa.
+- `getEffectiveSettingsForEmployee`: funcionário com superior que tem sobrescrita própria usa a
+  sobrescrita; funcionário cujo superior não tem sobrescrita cai no padrão da empresa; funcionário
+  sem superior nenhum sempre cai no padrão da empresa.
+- `getScheduleForDate`: cobre os três níveis explicitamente — jornada individual tem prioridade
+  sobre a de time, que tem prioridade sobre a da empresa; sem nenhuma das três, `expectedMinutes:
+  0`; um funcionário sem superior nenhum pula direto pro padrão da empresa (nunca "acha" um padrão
+  de time por engano).
 - Índice único parcial de `TimeTrackingSettings`: teste de integração confirmando que duas linhas
   `managerId: null` da mesma empresa são rejeitadas, mas duas linhas com `managerId` diferentes
   (dois superiores diferentes) convivem sem conflito.
+- Criar `WorkSchedule`/`TimeTrackingSettings` sem `employeeId` nem `managerId` (padrão da empresa):
+  rejeitado sem `hasFullPontoAccess`; permitido com.
 - Criar `WorkSchedule`/`TimeTrackingSettings` com `managerId` de outro superior: rejeitado sem
   `hasFullPontoAccess`; permitido com.
