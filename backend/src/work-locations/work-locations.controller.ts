@@ -1,25 +1,27 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { ModulesGuard } from '../auth/guards/modules.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { CreateWorkLocationDto } from './dto/create-work-location.dto';
 import { QueryWorkLocationsDto } from './dto/query-work-locations.dto';
 import { UpdateWorkLocationDto } from './dto/update-work-location.dto';
 import { WorkLocationsService } from './work-locations.service';
 
-// Local de trabalho é configuração da empresa toda (sem vínculo a
-// funcionário) — leitura liberada pra qualquer login com módulo RH, mutação
-// restrita a ADMIN.
-@UseGuards(ModulesGuard, RolesGuard)
+// Local de trabalho é infraestrutura física da empresa toda — mutação exige hasFullPontoAccess
+// (nunca "meu time", ver a spec de 15/09/2026). RolesGuard/@Roles('ADMIN') removidos desta classe.
+@UseGuards(ModulesGuard)
 @RequireModule('RH')
 @Controller('work-locations')
 export class WorkLocationsController {
-  constructor(private readonly workLocations: WorkLocationsService) {}
+  constructor(
+    private readonly workLocations: WorkLocationsService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
+  ) {}
 
-  @Roles('ADMIN')
   @Post()
-  create(@Body() dto: CreateWorkLocationDto) {
+  async create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateWorkLocationDto) {
+    this.timeManagementAuth.assertHasFullPontoAccess(user);
     return this.workLocations.create(dto);
   }
 
@@ -33,16 +35,16 @@ export class WorkLocationsController {
     return this.workLocations.findOne(id);
   }
 
-  @Roles('ADMIN')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateWorkLocationDto) {
+  async update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateWorkLocationDto) {
+    this.timeManagementAuth.assertHasFullPontoAccess(user);
     return this.workLocations.update(id, dto);
   }
 
-  @Roles('ADMIN')
   @Delete(':id')
   @HttpCode(204)
-  remove(@Param('id') id: string) {
+  async remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    this.timeManagementAuth.assertHasFullPontoAccess(user);
     return this.workLocations.remove(id);
   }
 }
