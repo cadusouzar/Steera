@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, ForbiddenException, Get, HttpCode, Param, Patch, Post, Query, UseGuards,
+  Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
@@ -36,8 +36,10 @@ export class WorkSchedulesController {
       // outro exige acesso total — mesma regra de quem pode CRIAR um.
       const ownEmployee = await this.timeManagementAuth.resolveOwnEmployee(user).catch(() => null);
       if (ownEmployee?.id !== query.managerId) this.timeManagementAuth.assertHasFullPontoAccess(user);
-    } else if (!user.hasFullPontoAccess) {
-      throw new ForbiddenException('Apenas quem tem acesso total pode listar jornadas sem filtrar por funcionário/superior');
+    } else {
+      // Sem nenhum filtro: mesma regra da camada "empresa inteira" de assertValidTierAndAuthorized
+      // — 404, nunca 403, mesmo padrão de negação de todo o resto do backend (ver findOne abaixo).
+      this.timeManagementAuth.assertHasFullPontoAccess(user);
     }
     return this.workSchedules.findAll(query);
   }

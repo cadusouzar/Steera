@@ -42,7 +42,7 @@ describe('WorkSchedulesService', () => {
   beforeEach(async () => {
     prisma = {
       employee: { findFirst: jest.fn() },
-      workSchedule: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn(), delete: jest.fn() },
+      workSchedule: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
       user: { findUnique: jest.fn() },
     };
     const module = await Test.createTestingModule({
@@ -132,6 +132,81 @@ describe('WorkSchedulesService', () => {
   it('throws NotFoundException for a schedule belonging to another company', async () => {
     prisma.workSchedule.findFirst.mockResolvedValue(null);
     await expect(service.findOne('schedule-other-company')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe('remove — authorization by tier', () => {
+    it('rejects a non-full-access EMPLOYEE manager deleting a company-wide schedule', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-company-wide', companyId: 'company-1', employeeId: null, managerId: null,
+      });
+
+      await expect(service.remove('ws-company-wide', employeeManagerLogin)).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.workSchedule.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unrelated manager deleting another manager\'s team-default schedule', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-team-other', companyId: 'company-1', employeeId: null, managerId: 'employee-someone-else',
+      });
+      // O login atual (employeeManagerLogin) está vinculado a 'employee-mgr-1', não ao managerId do
+      // agendamento ('employee-someone-else') — não é o próprio time dele.
+      prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
+
+      await expect(service.remove('ws-team-other', employeeManagerLogin)).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.workSchedule.delete).not.toHaveBeenCalled();
+    });
+
+    it('allows an ADMIN with hasFullPontoAccess to delete a company-wide schedule', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-company-wide', companyId: 'company-1', employeeId: null, managerId: null,
+      });
+      prisma.workSchedule.delete.mockResolvedValue({ id: 'ws-company-wide' });
+
+      await service.remove('ws-company-wide', admin);
+
+      expect(prisma.workSchedule.delete).toHaveBeenCalledWith({ where: { id: 'ws-company-wide' } });
+    });
+  });
+
+  describe('update — authorization follows the NEW employeeId on reassignment', () => {
+    it('rejects reassigning an individual schedule to a NEW employee the caller cannot manage, even if they could manage the OLD one', async () => {
+      // Agendamento hoje pertence a 'employee-old' (o caller consegue gerenciar esse). O DTO pede
+      // pra reatribuir pra 'employee-new' — autorização tem que ser checada contra o NOVO alvo, não
+      // o antigo, senão um superior poderia "roubar" o agendamento de um funcionário que não
+      // gerencia só reatribuindo um que já é seu.
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-1', companyId: 'company-1', employeeId: 'employee-old', managerId: null,
+      });
+      // canManage() do TimeManagementAuthService consulta employee.findFirst escopado por empresa
+      // pra achar o alvo — aqui simula que 'employee-new' existe na empresa, mas não é gerenciável
+      // por employeeManagerLogin (managerId do alvo não bate com o employeeId do login atual).
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-new', companyId: 'company-1', managerId: 'employee-outro-gerente' });
+      prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
+
+      const dto = { employeeId: 'employee-new' };
+
+      await expect(service.update('ws-1', dto, employeeManagerLogin)).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.workSchedule.update).not.toHaveBeenCalled();
+    });
+
+    it('allows reassigning an individual schedule to a NEW employee the caller CAN manage', async () => {
+      prisma.workSchedule.findFirst.mockResolvedValue({
+        id: 'ws-1', companyId: 'company-1', employeeId: 'employee-old', managerId: null,
+      });
+      // 'employee-new' é subordinado direto do Employee vinculado a employeeManagerLogin.
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-new', companyId: 'company-1', managerId: 'employee-mgr-1' });
+      prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
+      prisma.workSchedule.update.mockResolvedValue({ id: 'ws-1', employeeId: 'employee-new' });
+
+      const dto = { employeeId: 'employee-new' };
+
+      await service.update('ws-1', dto, employeeManagerLogin);
+
+      expect(prisma.workSchedule.update).toHaveBeenCalledWith({
+        where: { id: 'ws-1' },
+        data: expect.objectContaining({ employeeId: 'employee-new' }),
+      });
+    });
   });
 
   // Validação de formato (HH:mm) e de weekDays (0-6) acontece no DTO via
