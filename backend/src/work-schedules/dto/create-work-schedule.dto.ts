@@ -6,7 +6,8 @@ import {
 export const HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class CreateWorkScheduleDto {
-  @IsString() @MinLength(1) employeeId!: string;
+  @IsOptional() @IsString() @MinLength(1) employeeId?: string;
+  @IsOptional() @IsString() @MinLength(1) managerId?: string;
   @IsString() @MinLength(1) name!: string;
 
   // 0=domingo..6=sábado (ver comentário do model no schema.prisma). Sem

@@ -1,15 +1,31 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { CreateWorkScheduleDto } from './dto/create-work-schedule.dto';
 import { WorkSchedulesService } from './work-schedules.service';
 
 describe('WorkSchedulesService', () => {
   let service: WorkSchedulesService;
-  let prisma: { employee: Record<string, jest.Mock>; workSchedule: Record<string, jest.Mock> };
+  let prisma: {
+    employee: Record<string, jest.Mock>;
+    workSchedule: Record<string, jest.Mock>;
+    user: Record<string, jest.Mock>;
+  };
+
+  const admin: AuthenticatedUser = {
+    userId: 'user-admin', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: true,
+  };
+  const limitedAdmin: AuthenticatedUser = {
+    userId: 'u1', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: false,
+  };
+  const employeeManagerLogin: AuthenticatedUser = {
+    userId: 'u2', companyId: 'company-1', role: 'EMPLOYEE', modules: [], mustChangePassword: false, hasFullPontoAccess: true,
+  };
 
   const validDto: CreateWorkScheduleDto = {
     employeeId: 'employee-1',
@@ -27,10 +43,12 @@ describe('WorkSchedulesService', () => {
     prisma = {
       employee: { findFirst: jest.fn() },
       workSchedule: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn(), delete: jest.fn() },
+      user: { findUnique: jest.fn() },
     };
     const module = await Test.createTestingModule({
       providers: [
         WorkSchedulesService,
+        TimeManagementAuthService,
         { provide: PrismaService, useValue: prisma },
         { provide: CompanyContextService, useValue: { getCurrentCompanyId: jest.fn().mockResolvedValue('company-1') } },
       ],
@@ -42,7 +60,7 @@ describe('WorkSchedulesService', () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', companyId: 'company-1' });
     prisma.workSchedule.create.mockResolvedValue({ id: 'schedule-1' });
 
-    await service.create(validDto);
+    await service.create(validDto, admin);
 
     expect(prisma.employee.findFirst).toHaveBeenCalledWith({ where: { id: 'employee-1', companyId: 'company-1' } });
     expect(prisma.workSchedule.create).toHaveBeenCalledWith({
@@ -52,8 +70,51 @@ describe('WorkSchedulesService', () => {
 
   it('rejects an employeeId belonging to a different company', async () => {
     prisma.employee.findFirst.mockResolvedValue(null);
-    await expect(service.create(validDto)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.create(validDto, admin)).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.workSchedule.create).not.toHaveBeenCalled();
+  });
+
+  describe('create — three tiers', () => {
+    it('creates a company-wide default row when neither employeeId nor managerId is given', async () => {
+      const dto = { name: 'Padrão', weekDays: [1, 2, 3, 4, 5], expectedStartTime: '08:00', expectedEndTime: '17:00', dailyMinutes: 480, weeklyMinutes: 2400, validFrom: '2026-01-01' };
+      prisma.workSchedule.create.mockResolvedValue({ id: 'ws-1', employeeId: null, managerId: null });
+
+      await service.create(dto, admin);
+
+      expect(prisma.workSchedule.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ employeeId: undefined, managerId: undefined }),
+      });
+    });
+
+    it('rejects both employeeId and managerId given together', async () => {
+      const dto = { employeeId: 'emp-1', managerId: 'mgr-1', name: 'X', weekDays: [1], expectedStartTime: '08:00', expectedEndTime: '17:00', dailyMinutes: 480, weeklyMinutes: 2400, validFrom: '2026-01-01' };
+      await expect(service.create(dto, admin)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.workSchedule.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create — authorization by tier', () => {
+    it('rejects a company-wide default row from a manager without hasFullPontoAccess', async () => {
+      const dto = { name: 'X', weekDays: [1], expectedStartTime: '08:00', expectedEndTime: '17:00', dailyMinutes: 480, weeklyMinutes: 2400, validFrom: '2026-01-01' };
+      await expect(service.create(dto, limitedAdmin)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('allows a manager to create a team-default row for their OWN team (managerId matches their own linked employee)', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
+      const dto = { managerId: 'employee-mgr-1', name: 'Meu time', weekDays: [1], expectedStartTime: '08:00', expectedEndTime: '17:00', dailyMinutes: 480, weeklyMinutes: 2400, validFrom: '2026-01-01' };
+      prisma.workSchedule.create.mockResolvedValue({ id: 'ws-2' });
+
+      await service.create(dto, employeeManagerLogin);
+
+      expect(prisma.workSchedule.create).toHaveBeenCalled();
+    });
+
+    it('rejects a manager creating a team-default row for a DIFFERENT superior, without hasFullPontoAccess', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
+      const dto = { managerId: 'employee-someone-else', name: 'X', weekDays: [1], expectedStartTime: '08:00', expectedEndTime: '17:00', dailyMinutes: 480, weeklyMinutes: 2400, validFrom: '2026-01-01' };
+
+      await expect(service.create(dto, employeeManagerLogin)).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 
   it('lists work schedules filtering by employeeId', async () => {

@@ -5,6 +5,7 @@ import { HHMM_REGEX } from './create-work-schedule.dto';
 
 export class UpdateWorkScheduleDto {
   @IsOptional() @IsString() @MinLength(1) employeeId?: string;
+  @IsOptional() @IsString() @MinLength(1) managerId?: string;
   @IsOptional() @IsString() @MinLength(1) name?: string;
 
   @IsOptional()

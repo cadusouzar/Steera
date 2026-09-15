@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { WorkSchedule } from '@prisma/client';
+import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { parseDateOnly } from '../common/date.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { CreateWorkScheduleDto } from './dto/create-work-schedule.dto';
 import { QueryWorkSchedulesDto } from './dto/query-work-schedules.dto';
 import { UpdateWorkScheduleDto } from './dto/update-work-schedule.dto';
@@ -12,6 +14,7 @@ export class WorkSchedulesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyContext: CompanyContextService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
   ) {}
 
   // Mesmo padrão de EmployeesService.assertRoleUsable: WorkSchedule.employeeId
@@ -32,13 +35,42 @@ export class WorkSchedulesService {
     return schedule;
   }
 
-  async create(dto: CreateWorkScheduleDto): Promise<WorkSchedule> {
+  // Ao menos um dos dois nunca preenchido ao mesmo tempo — as três combinações válidas: só
+  // employeeId (individual), só managerId (padrão de time), nenhum dos dois (padrão da empresa).
+  private async assertValidTierAndAuthorized(
+    currentUser: AuthenticatedUser,
+    companyId: string,
+    employeeId: string | undefined,
+    managerId: string | undefined,
+  ) {
+    if (employeeId && managerId) {
+      throw new BadRequestException('Uma jornada não pode ter employeeId e managerId ao mesmo tempo');
+    }
+    if (!employeeId && !managerId) {
+      // Padrão da empresa inteira.
+      this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+      return;
+    }
+    if (managerId) {
+      const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
+      if (currentUserRecord?.employeeId === managerId) return; // autoatendimento: configurando o próprio time
+      this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+      await this.assertEmployeeExists(managerId, companyId);
+      return;
+    }
+    // employeeId (individual)
+    await this.assertEmployeeExists(employeeId!, companyId);
+    await this.timeManagementAuth.assertCanManage(currentUser, employeeId!);
+  }
+
+  async create(dto: CreateWorkScheduleDto, currentUser: AuthenticatedUser): Promise<WorkSchedule> {
     const companyId = await this.companyContext.getCurrentCompanyId();
-    await this.assertEmployeeExists(dto.employeeId, companyId);
+    await this.assertValidTierAndAuthorized(currentUser, companyId, dto.employeeId, dto.managerId);
     return this.prisma.workSchedule.create({
       data: {
         companyId,
         employeeId: dto.employeeId,
+        managerId: dto.managerId,
         name: dto.name,
         weekDays: dto.weekDays,
         expectedStartTime: dto.expectedStartTime,
@@ -64,6 +96,7 @@ export class WorkSchedulesService {
     const where = {
       companyId,
       ...(query.employeeId ? { employeeId: query.employeeId } : {}),
+      ...(query.managerId ? { managerId: query.managerId } : {}),
       ...(query.search ? { name: { contains: query.search, mode: 'insensitive' as const } } : {}),
     };
 
@@ -84,11 +117,11 @@ export class WorkSchedulesService {
     return this.assertExists(id);
   }
 
-  async update(id: string, dto: UpdateWorkScheduleDto): Promise<WorkSchedule> {
+  async update(id: string, dto: UpdateWorkScheduleDto, currentUser: AuthenticatedUser): Promise<WorkSchedule> {
     const schedule = await this.assertExists(id);
-    if (dto.employeeId && dto.employeeId !== schedule.employeeId) {
-      await this.assertEmployeeExists(dto.employeeId, schedule.companyId);
-    }
+    const nextEmployeeId = dto.employeeId !== undefined ? dto.employeeId : (schedule.employeeId ?? undefined);
+    const nextManagerId = dto.managerId !== undefined ? dto.managerId : (schedule.managerId ?? undefined);
+    await this.assertValidTierAndAuthorized(currentUser, schedule.companyId, nextEmployeeId, nextManagerId);
     return this.prisma.workSchedule.update({
       where: { id },
       data: {
@@ -103,8 +136,9 @@ export class WorkSchedulesService {
   // tem campo `active`/inativação lógica no schema (só `validFrom`/`validTo`
   // pra vigência) e nada referencia WorkSchedule por FK — é puramente
   // configuração de admin, sem histórico financeiro/trabalhista atrelado.
-  async remove(id: string): Promise<void> {
-    await this.assertExists(id);
+  async remove(id: string, currentUser: AuthenticatedUser): Promise<void> {
+    const schedule = await this.assertExists(id);
+    await this.assertValidTierAndAuthorized(currentUser, schedule.companyId, schedule.employeeId ?? undefined, schedule.managerId ?? undefined);
     await this.prisma.workSchedule.delete({ where: { id } });
   }
 }
