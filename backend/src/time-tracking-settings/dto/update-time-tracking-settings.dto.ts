@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class UpdateTimeTrackingSettingsDto {
   @IsOptional() @IsBoolean() requirePhoto?: boolean;
@@ -8,4 +8,5 @@ export class UpdateTimeTrackingSettingsDto {
   @IsOptional() @IsBoolean() allowLocationException?: boolean;
   @IsOptional() @IsBoolean() allowExtraPeriods?: boolean;
   @IsOptional() @IsInt() @Min(1) maxAttachmentSizeBytes?: number;
+  @IsOptional() @IsString() managerId?: string;
 }

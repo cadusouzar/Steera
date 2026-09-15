@@ -1,28 +1,27 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Query, UseGuards } from '@nestjs/common';
+import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { ModulesGuard } from '../auth/guards/modules.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { QueryTimeTrackingSettingsDto } from './dto/query-time-tracking-settings.dto';
 import { UpdateTimeTrackingSettingsDto } from './dto/update-time-tracking-settings.dto';
 import { TimeTrackingSettingsService } from './time-tracking-settings.service';
 
-// Leitura liberada pra qualquer login com módulo RH (o frontend do próprio
-// funcionário precisa saber se foto/localização são obrigatórias antes de
-// bater o ponto); mutação restrita a ADMIN.
-@UseGuards(ModulesGuard, RolesGuard)
+// Mutação não é mais @Roles('ADMIN') puro — TimeTrackingSettingsService decide por tier (padrão da
+// empresa exige hasFullPontoAccess; sobrescrita de time é autoatendimento ou exige acesso total
+// pra mexer na de outro superior). RolesGuard removido desta classe.
+@UseGuards(ModulesGuard)
 @RequireModule('RH')
 @Controller('time-tracking-settings')
 export class TimeTrackingSettingsController {
   constructor(private readonly settings: TimeTrackingSettingsService) {}
 
   @Get()
-  findOne() {
-    return this.settings.getCurrent();
+  findOne(@CurrentUser() user: AuthenticatedUser, @Query() query: QueryTimeTrackingSettingsDto) {
+    return this.settings.getScoped(query.managerId, user);
   }
 
-  @Roles('ADMIN')
   @Patch()
-  update(@Body() dto: UpdateTimeTrackingSettingsDto) {
-    return this.settings.update(dto);
+  update(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateTimeTrackingSettingsDto) {
+    return this.settings.update(dto, user);
   }
 }
