@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { FileAssetPurpose, Prisma, TimeEvent } from '@prisma/client';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { buildFileDownloadPath } from '../files/download-token.util';
 import { FilesService } from '../files/files.service';
@@ -25,6 +26,7 @@ export class TimeClockService {
     private readonly settings: TimeTrackingSettingsService,
     private readonly workLocations: WorkLocationsService,
     private readonly timeManagementAuth: TimeManagementAuthService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   // `downloadUrl` pronto (path relativo com token já embutido) SÓ quando o evento tem foto —
@@ -73,7 +75,18 @@ export class TimeClockService {
       where: { employeeId: employee.id, serverRecordedAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) } },
       orderBy: { serverRecordedAt: 'desc' },
     });
-    if (recent) throw new BadRequestException('Aguarde alguns segundos antes de registrar outra marcação');
+    if (recent) {
+      // Único caso deste método que não cria NENHUM TimeEvent - sem este log, a tentativa
+      // simplesmente desaparece sem deixar rastro (achado na revisão final de 14/09/2026).
+      await this.auditLog.record({
+        companyId: user.companyId,
+        action: 'PUNCH_DUPLICATE_REJECTED',
+        employeeId: employee.id,
+        performedByUserId: user.userId,
+        metadata: { requestedType: dto.type },
+      });
+      throw new BadRequestException('Aguarde alguns segundos antes de registrar outra marcação');
+    }
 
     const { state } = await this.getTodayOpenState(employee.id);
     const outcome = validateTransition(state, dto.type, settings.allowExtraPeriods);
@@ -82,10 +95,24 @@ export class TimeClockService {
     }
 
     if (settings.requirePhoto && !photo) {
+      await this.auditLog.record({
+        companyId: user.companyId,
+        action: 'PUNCH_VALIDATION_REJECTED',
+        employeeId: employee.id,
+        performedByUserId: user.userId,
+        metadata: { requestedType: dto.type, reason: 'missing_required_photo' },
+      });
       throw new BadRequestException('Foto obrigatória para registrar o ponto');
     }
     if (settings.requireLocation && dto.latitude == null) {
       if (!settings.allowLocationException) {
+        await this.auditLog.record({
+          companyId: user.companyId,
+          action: 'PUNCH_VALIDATION_REJECTED',
+          employeeId: employee.id,
+          performedByUserId: user.userId,
+          metadata: { requestedType: dto.type, reason: 'missing_required_location' },
+        });
         throw new BadRequestException('Localização obrigatória para registrar o ponto');
       }
     }

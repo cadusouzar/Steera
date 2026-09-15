@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 import { FilesModule } from '../files/files.module';
 import { HolidaysModule } from '../holidays/holidays.module';
 import { TimeManagementAuthModule } from '../time-management/time-management-auth.module';
@@ -10,7 +11,7 @@ import { TimeClockService } from './time-clock.service';
 import { TimeEventsAdminController } from './time-events-admin.controller';
 
 @Module({
-  imports: [FilesModule, TimeTrackingSettingsModule, WorkLocationsModule, TimeManagementAuthModule, HolidaysModule],
+  imports: [FilesModule, TimeTrackingSettingsModule, WorkLocationsModule, TimeManagementAuthModule, HolidaysModule, AuditLogModule],
   controllers: [TimeClockController, TimeEventsAdminController],
   providers: [TimeClockService, TimeAttendanceCalculationService],
   exports: [TimeClockService, TimeAttendanceCalculationService],

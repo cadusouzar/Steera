@@ -198,6 +198,7 @@ model Company {
   timeCorrections        TimeCorrection[]
   timeJustifications     TimeJustification[]
   fileAssets             FileAsset[]
+  auditLogs              AuditLog[]
 }
 
 model Role {
@@ -668,4 +669,34 @@ model Holiday {
   @@unique([scope, state, companyId, date])
   @@index([date])
   @@index([companyId])
+}
+
+// Cobre só as 3 ações do fluxo de Controle de Ponto que hoje não deixam NENHUM rastro em nenhuma
+// outra tabela (achado na revisão final de 14/09/2026, ver DECISOES-TECNICAS.md): uma tentativa de
+// marcação duplicada rejeitada e uma marcação rejeitada por falta de foto/localização exigida não
+// criam nenhum TimeEvent, e um acesso a um FileAsset (foto/atestado) via GET /file-assets/:id nunca
+// era registrado em lugar nenhum. As demais ações que a spec também lista como exigindo auditoria
+// (marcação criada, solicitação/aprovação/rejeição/correção de ajuste, envio de justificativa) já
+// têm seu próprio registro durável e consultável (TimeEvent/TimeAdjustmentRequest/TimeCorrection/
+// TimeJustification) — deliberadamente não duplicadas aqui, pra não manter dois registros divergentes
+// da mesma ação. `metadata` nunca carrega conteúdo de imagem/atestado, só contexto (ex.: tipo de
+// marcação tentada, motivo da rejeição, id do asset acessado) — LGPD, mesma regra do resto do módulo.
+enum AuditAction {
+  PUNCH_DUPLICATE_REJECTED
+  PUNCH_VALIDATION_REJECTED
+  FILE_ACCESSED
+}
+
+model AuditLog {
+  id                String      @id @default(cuid())
+  companyId         String
+  company           Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  action            AuditAction
+  employeeId        String? // funcionário a quem a ação se refere (nulo quando não se aplica)
+  performedByUserId String? // login autenticado que disparou a ação (nulo quando o próprio sistema rejeita algo antes de identificar um ator, ex. validação de marcação)
+  metadata          Json? // contexto extra em texto/estrutura simples — nunca conteúdo de arquivo
+  createdAt         DateTime    @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, employeeId])
 }

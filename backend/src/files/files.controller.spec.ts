@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { verifyDownloadToken } from './download-token.util';
 import { FilesController } from './files.controller';
@@ -12,6 +13,7 @@ jest.mock('./download-token.util', () => ({
 describe('FilesController', () => {
   let controller: FilesController;
   let filesService: { assertExistsForCompany: jest.Mock; streamPath: jest.Mock };
+  let auditLog: { record: jest.Mock };
   const verifyDownloadTokenMock = verifyDownloadToken as jest.Mock;
 
   const user: AuthenticatedUser = {
@@ -29,10 +31,14 @@ describe('FilesController', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     filesService = { assertExistsForCompany: jest.fn(), streamPath: jest.fn() };
+    auditLog = { record: jest.fn() };
 
     const module = await Test.createTestingModule({
       controllers: [FilesController],
-      providers: [{ provide: FilesService, useValue: filesService }],
+      providers: [
+        { provide: FilesService, useValue: filesService },
+        { provide: AuditLogService, useValue: auditLog },
+      ],
     }).compile();
 
     controller = module.get(FilesController);
@@ -61,6 +67,7 @@ describe('FilesController', () => {
       mimeType: 'application/pdf',
       originalFilename: 'contrato.pdf',
       storagePath: 'attachments/uuid.pdf',
+      purpose: 'ADJUSTMENT_ATTACHMENT',
     });
     const pipeMock = jest.fn();
     filesService.streamPath.mockResolvedValue({ pipe: pipeMock });
@@ -69,6 +76,12 @@ describe('FilesController', () => {
     await controller.download('asset-1', 'good-token', user, res);
 
     expect(filesService.assertExistsForCompany).toHaveBeenCalledWith('asset-1', 'company-1');
+    expect(auditLog.record).toHaveBeenCalledWith({
+      companyId: 'company-1',
+      action: 'FILE_ACCESSED',
+      performedByUserId: 'user-1',
+      metadata: { assetId: 'asset-1', purpose: 'ADJUSTMENT_ATTACHMENT' },
+    });
     expect(filesService.streamPath).toHaveBeenCalledWith('attachments/uuid.pdf');
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
     expect(res.setHeader).toHaveBeenCalledWith('Content-Disposition', 'inline; filename="contrato.pdf"');

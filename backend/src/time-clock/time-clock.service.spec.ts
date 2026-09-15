@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { FileAssetPurpose } from '@prisma/client';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,6 +39,7 @@ describe('TimeClockService', () => {
   let settingsService: { getOrCreateDefault: jest.Mock };
   let workLocationsService: { findAllActive: jest.Mock };
   let timeManagementAuth: { resolveOwnEmployee: jest.Mock };
+  let auditLog: { record: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -47,6 +49,7 @@ describe('TimeClockService', () => {
     settingsService = { getOrCreateDefault: jest.fn().mockResolvedValue(baseSettings) };
     workLocationsService = { findAllActive: jest.fn().mockResolvedValue([]) };
     timeManagementAuth = { resolveOwnEmployee: jest.fn().mockResolvedValue(employee) };
+    auditLog = { record: jest.fn() };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -56,6 +59,7 @@ describe('TimeClockService', () => {
         { provide: TimeTrackingSettingsService, useValue: settingsService },
         { provide: WorkLocationsService, useValue: workLocationsService },
         { provide: TimeManagementAuthService, useValue: timeManagementAuth },
+        { provide: AuditLogService, useValue: auditLog },
       ],
     }).compile();
     service = module.get(TimeClockService);
@@ -138,6 +142,13 @@ describe('TimeClockService', () => {
         BadRequestException,
       );
       expect(prisma.timeEvent.create).not.toHaveBeenCalled();
+      expect(auditLog.record).toHaveBeenCalledWith({
+        companyId: 'company-1',
+        action: 'PUNCH_DUPLICATE_REJECTED',
+        employeeId: 'employee-1',
+        performedByUserId: 'user-1',
+        metadata: { requestedType: 'BREAK_START' },
+      });
     });
 
     it('accepts a full valid sequence with an interval: CLOCK_IN -> BREAK_START -> BREAK_END -> CLOCK_OUT', async () => {
@@ -244,6 +255,13 @@ describe('TimeClockService', () => {
         BadRequestException,
       );
       expect(prisma.timeEvent.create).not.toHaveBeenCalled();
+      expect(auditLog.record).toHaveBeenCalledWith({
+        companyId: 'company-1',
+        action: 'PUNCH_VALIDATION_REJECTED',
+        employeeId: 'employee-1',
+        performedByUserId: 'user-1',
+        metadata: { requestedType: 'CLOCK_IN', reason: 'missing_required_location' },
+      });
     });
 
     it('accepts (as PENDING_REVIEW, never plain VALID) when location is required, missing, but the exception is authorized', async () => {
@@ -269,6 +287,13 @@ describe('TimeClockService', () => {
         BadRequestException,
       );
       expect(prisma.timeEvent.create).not.toHaveBeenCalled();
+      expect(auditLog.record).toHaveBeenCalledWith({
+        companyId: 'company-1',
+        action: 'PUNCH_VALIDATION_REJECTED',
+        employeeId: 'employee-1',
+        performedByUserId: 'user-1',
+        metadata: { requestedType: 'CLOCK_IN', reason: 'missing_required_photo' },
+      });
     });
 
     it('uploads the photo via FilesService with the TIME_PUNCH_PHOTO purpose and the company max attachment size', async () => {
