@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
@@ -33,7 +34,18 @@ export class TimeClockController {
     return this.timeClock.getStatus(user);
   }
 
+  // Rate limit exigido explicitamente pela spec ("aplicado ao endpoint de criação de evento, não
+  // uma solução global nova") — reaproveita o ThrottlerGuard já existente no projeto, mesmo padrão
+  // de auth.controller.ts. 30/15min (mais generoso que o "default" de 5/15min usado em login) por
+  // ser IP-based: várias marcações legítimas de funcionários diferentes atrás do mesmo NAT de
+  // escritório podem cair na mesma janela num início de turno. @SkipThrottle({'login-email': true})
+  // porque ThrottlerModule.forRoot registra esse throttler nomeado globalmente e ele sempre teria
+  // que ser explicitamente pulado ou explicitamente configurado em toda rota que usa ThrottlerGuard
+  // — aqui não faz sentido nenhum (não é uma ação de login).
   @Post('punches')
+  @UseGuards(ThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 30, ttl: 900_000 } })
   @UseInterceptors(FileInterceptor('photo', { limits: { fileSize: 8 * 1024 * 1024 } }))
   createPunch(
     @CurrentUser() user: AuthenticatedUser,
