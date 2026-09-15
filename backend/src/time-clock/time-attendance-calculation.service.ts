@@ -95,13 +95,36 @@ export class TimeAttendanceCalculationService {
   // weekDays inclua o dia da semana de `date` — sem o filtro de weekDays, um dia de folga dentro do
   // período de vigência (ex.: sábado de uma escala "seg-sex") seria incorretamente contado como
   // "esperado", gerando saldo negativo todo fim de semana.
+  //
+  // Três níveis, sem propagação em cadeia em nenhum passo: individual → padrão do time do
+  // superior DIRETO → padrão da empresa inteira → nenhum (expectedMinutes: 0, comportamento de
+  // hoje, inalterado). Achado + implementado na revisão de escopo de 15/09/2026. Não escopa por
+  // companyId no `where` (mantém a mesma característica de antes — depende do RLS).
   private async getScheduleForDate(employeeId: string, date: Date) {
-    const candidates = await this.prisma.workSchedule.findMany({
+    const localDayOfWeek = date.getUTCDay(); // `date` já é um "dia calendário" (UTC-midnight-encoded) — getUTCDay() dá o dia da semana pretendido, sem depender do fuso da empresa.
+
+    const individualCandidates = await this.prisma.workSchedule.findMany({
       where: { employeeId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
       orderBy: { validFrom: 'desc' },
     });
-    const localDayOfWeek = date.getUTCDay(); // `date` já é um "dia calendário" (UTC-midnight-encoded) — getUTCDay() dá o dia da semana pretendido, sem depender do fuso da empresa.
-    return candidates.find((s) => s.weekDays.includes(localDayOfWeek)) ?? null;
+    const individual = individualCandidates.find((s) => s.weekDays.includes(localDayOfWeek));
+    if (individual) return individual;
+
+    const employee = await this.prisma.employee.findUnique({ where: { id: employeeId }, select: { managerId: true } });
+    if (employee?.managerId) {
+      const teamCandidates = await this.prisma.workSchedule.findMany({
+        where: { managerId: employee.managerId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
+        orderBy: { validFrom: 'desc' },
+      });
+      const teamDefault = teamCandidates.find((s) => s.weekDays.includes(localDayOfWeek));
+      if (teamDefault) return teamDefault;
+    }
+
+    const companyCandidates = await this.prisma.workSchedule.findMany({
+      where: { employeeId: null, managerId: null, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
+      orderBy: { validFrom: 'desc' },
+    });
+    return companyCandidates.find((s) => s.weekDays.includes(localDayOfWeek)) ?? null;
   }
 
   async calculateDailySummary(employeeId: string, date: Date): Promise<DailySummary> {

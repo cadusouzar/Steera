@@ -65,7 +65,7 @@ export class TimeClockService {
 
   async getStatus(user: AuthenticatedUser) {
     const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
-    const settings = await this.settings.getOrCreateDefault(user.companyId);
+    const settings = await this.settings.getEffectiveSettingsForEmployee(employee.id, user.companyId);
     const { state } = await this.getTodayOpenState(employee.id);
     return {
       nextAllowedType: getNextAllowedType(state, settings.allowExtraPeriods),
@@ -80,7 +80,7 @@ export class TimeClockService {
     photo: { buffer: Buffer; originalname: string; mimetype: string; size: number } | undefined,
   ) {
     const employee = await this.timeManagementAuth.resolveOwnEmployee(user);
-    const settings = await this.settings.getOrCreateDefault(user.companyId);
+    const settings = await this.settings.getEffectiveSettingsForEmployee(employee.id, user.companyId);
 
     // Pré-checagem rápida (sem trava), fora da transação — evita fazer todo o resto do trabalho
     // (upload de foto, geofencing) só pra descobrir depois que era uma duplicata óbvia. Não é a

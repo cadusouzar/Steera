@@ -45,7 +45,7 @@ describe('TimeClockService', () => {
   let service: TimeClockService;
   let prisma: { timeEvent: Record<string, jest.Mock>; $executeRaw: jest.Mock };
   let filesService: { upload: jest.Mock };
-  let settingsService: { getOrCreateDefault: jest.Mock };
+  let settingsService: { getEffectiveSettingsForEmployee: jest.Mock };
   let workLocationsService: { findAllActive: jest.Mock };
   let timeManagementAuth: { resolveOwnEmployee: jest.Mock };
   let auditLog: { record: jest.Mock };
@@ -58,7 +58,7 @@ describe('TimeClockService', () => {
     const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
     (runTenantInteractiveTransaction as jest.Mock).mockImplementation((_p: unknown, fn: (tx: unknown) => unknown) => fn(prisma));
     filesService = { upload: jest.fn().mockResolvedValue({ id: 'asset-1' }) };
-    settingsService = { getOrCreateDefault: jest.fn().mockResolvedValue(baseSettings) };
+    settingsService = { getEffectiveSettingsForEmployee: jest.fn().mockResolvedValue(baseSettings) };
     workLocationsService = { findAllActive: jest.fn().mockResolvedValue([]) };
     timeManagementAuth = { resolveOwnEmployee: jest.fn().mockResolvedValue(employee) };
     auditLog = { record: jest.fn() };
@@ -170,7 +170,7 @@ describe('TimeClockService', () => {
     // código entra na transação travada, outra requisição concorrente já criou um evento —
     // a checagem AUTORITATIVA (dentro do lock) precisa pegar isso e nunca criar o segundo evento.
     it('rejects even when the unlocked pre-check passed but a concurrent request already created an event by the time the advisory lock is acquired (the actual race the lock exists to close)', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requireLocation: false });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requireLocation: false });
       prisma.timeEvent.findFirst
         .mockResolvedValueOnce(null) // pré-checagem, sem trava: nada visto ainda
         .mockResolvedValueOnce({ id: 'event-from-concurrent-request', serverRecordedAt: new Date() }); // checagem autoritativa, já dentro do lock
@@ -189,7 +189,7 @@ describe('TimeClockService', () => {
     });
 
     it('accepts a full valid sequence with an interval: CLOCK_IN -> BREAK_START -> BREAK_END -> CLOCK_OUT', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requirePhoto: false, requireLocation: false });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requirePhoto: false, requireLocation: false });
 
       prisma.timeEvent.findMany.mockResolvedValueOnce([]);
       await service.createPunch(user, { type: 'CLOCK_IN' }, undefined);
@@ -208,7 +208,7 @@ describe('TimeClockService', () => {
     });
 
     it('rejects an invalid sequence (two CLOCK_IN in a row without CLOCK_OUT)', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requirePhoto: false, requireLocation: false });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requirePhoto: false, requireLocation: false });
       prisma.timeEvent.findMany.mockResolvedValue(eventsOf(['CLOCK_IN']));
 
       await expect(service.createPunch(user, { type: 'CLOCK_IN' }, undefined)).rejects.toBeInstanceOf(
@@ -218,7 +218,7 @@ describe('TimeClockService', () => {
     });
 
     it('allows EXTRA_IN when allowExtraPeriods is true and the journey is open with nothing else in progress', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({
         ...baseSettings,
         requirePhoto: false,
         requireLocation: false,
@@ -234,7 +234,7 @@ describe('TimeClockService', () => {
     });
 
     it('rejects EXTRA_IN when allowExtraPeriods is false, even with an open journey', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({
         ...baseSettings,
         requirePhoto: false,
         requireLocation: false,
@@ -249,7 +249,7 @@ describe('TimeClockService', () => {
     });
 
     it('records location within the configured WorkLocation radius as WITHIN_RANGE / VALID', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requirePhoto: false });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requirePhoto: false });
       workLocationsService.findAllActive.mockResolvedValue([
         { id: 'location-1', latitude: -23.55052, longitude: -46.633308, radiusMeters: 200, active: true },
       ]);
@@ -262,7 +262,7 @@ describe('TimeClockService', () => {
     });
 
     it('records a location outside every configured WorkLocation radius as OUT_OF_RANGE / PENDING_REVIEW — never rejected outright, never silently VALID', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requirePhoto: false });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requirePhoto: false });
       workLocationsService.findAllActive.mockResolvedValue([
         { id: 'location-1', latitude: -23.55052, longitude: -46.633308, radiusMeters: 100, active: true },
       ]);
@@ -281,7 +281,7 @@ describe('TimeClockService', () => {
     });
 
     it('rejects when location is required, missing, and no exception is authorized', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({
         ...baseSettings,
         requirePhoto: false,
         requireLocation: true,
@@ -302,7 +302,7 @@ describe('TimeClockService', () => {
     });
 
     it('accepts (as PENDING_REVIEW, never plain VALID) when location is required, missing, but the exception is authorized', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({
         ...baseSettings,
         requirePhoto: false,
         requireLocation: true,
@@ -318,7 +318,7 @@ describe('TimeClockService', () => {
     });
 
     it('rejects when photo is required and missing', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requirePhoto: true, requireLocation: false });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requirePhoto: true, requireLocation: false });
 
       await expect(service.createPunch(user, { type: 'CLOCK_IN' }, undefined)).rejects.toBeInstanceOf(
         BadRequestException,
@@ -334,7 +334,7 @@ describe('TimeClockService', () => {
     });
 
     it('uploads the photo via FilesService with the TIME_PUNCH_PHOTO purpose and the company max attachment size', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requireLocation: false, maxAttachmentSizeBytes: 1234 });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requireLocation: false, maxAttachmentSizeBytes: 1234 });
       filesService.upload.mockResolvedValue({ id: 'asset-9' });
 
       await service.createPunch(user, { type: 'CLOCK_IN' }, photo);
@@ -350,7 +350,7 @@ describe('TimeClockService', () => {
     });
 
     it('reflects settings.requirePhoto/requireLocation', async () => {
-      settingsService.getOrCreateDefault.mockResolvedValue({ ...baseSettings, requirePhoto: false, requireLocation: true });
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requirePhoto: false, requireLocation: true });
       const status = await service.getStatus(user);
       expect(status.requirePhoto).toBe(false);
       expect(status.requireLocation).toBe(true);

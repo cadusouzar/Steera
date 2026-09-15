@@ -172,6 +172,95 @@ describe('TimeAttendanceCalculationService', () => {
     expect(summary.events).toHaveLength(2);
   });
 
+  describe('getScheduleForDate — three tiers (individual -> team default -> company default)', () => {
+    const individual = {
+      id: 'individual',
+      employeeId: 'emp-1',
+      managerId: null,
+      weekDays: [1],
+      dailyMinutes: 240,
+      validFrom: new Date(Date.UTC(2026, 0, 1)),
+      validTo: null,
+    };
+    const teamDefault = {
+      id: 'team-default',
+      employeeId: null,
+      managerId: 'manager-1',
+      weekDays: [1],
+      dailyMinutes: 300,
+      validFrom: new Date(Date.UTC(2026, 0, 1)),
+      validTo: null,
+    };
+    const companyDefault = {
+      id: 'company-default',
+      employeeId: null,
+      managerId: null,
+      weekDays: [1],
+      dailyMinutes: 400,
+      validFrom: new Date(Date.UTC(2026, 0, 1)),
+      validTo: null,
+    };
+
+    it('prefers an individual schedule over a team-default one', async () => {
+      prisma.workSchedule.findMany.mockReset();
+      prisma.workSchedule.findMany.mockResolvedValueOnce([individual]); // individual tier already matches
+
+      const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+      expect(summary.expectedMinutes).toBe(240);
+      // Individual matched — never even queries the team/company tiers.
+      expect(prisma.workSchedule.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to the team-default schedule when no individual one matches', async () => {
+      prisma.employee.findUnique.mockResolvedValue({ companyId: 'company-1', managerId: 'manager-1' });
+      prisma.workSchedule.findMany.mockReset();
+      prisma.workSchedule.findMany
+        .mockResolvedValueOnce([]) // individual: no match
+        .mockResolvedValueOnce([teamDefault]); // team (direct manager): match
+
+      const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+      expect(summary.expectedMinutes).toBe(300);
+    });
+
+    it('falls back to the company-wide default schedule when neither individual nor team match', async () => {
+      prisma.employee.findUnique.mockResolvedValue({ companyId: 'company-1', managerId: 'manager-1' });
+      prisma.workSchedule.findMany.mockReset();
+      prisma.workSchedule.findMany
+        .mockResolvedValueOnce([]) // individual: no match
+        .mockResolvedValueOnce([]) // team: no match
+        .mockResolvedValueOnce([companyDefault]); // company-wide: match
+
+      const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+      expect(summary.expectedMinutes).toBe(400);
+    });
+
+    it('results in expectedMinutes: 0 when none of the three tiers has a matching schedule', async () => {
+      prisma.employee.findUnique.mockResolvedValue({ companyId: 'company-1', managerId: 'manager-1' });
+      prisma.workSchedule.findMany.mockReset();
+      prisma.workSchedule.findMany.mockResolvedValue([]); // every tier empty
+
+      const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+      expect(summary.expectedMinutes).toBe(0);
+    });
+
+    it('skips the team-tier query entirely when the employee has no managerId (no chain propagation)', async () => {
+      prisma.employee.findUnique.mockResolvedValue({ companyId: 'company-1', managerId: null });
+      prisma.workSchedule.findMany.mockReset();
+      prisma.workSchedule.findMany
+        .mockResolvedValueOnce([]) // individual: no match
+        .mockResolvedValueOnce([companyDefault]); // company-wide: match (2nd call, since team was skipped)
+
+      const summary = await service.calculateDailySummary('emp-1', MONDAY);
+
+      expect(summary.expectedMinutes).toBe(400);
+      expect(prisma.workSchedule.findMany).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('calculateMonthlySummary', () => {
     it('sums daily totals across the month and never generates a day after today', async () => {
       jest.useFakeTimers().setSystemTime(new Date(Date.UTC(2026, 0, 3, 12))); // "today" = 2026-01-03
