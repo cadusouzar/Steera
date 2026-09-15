@@ -40,7 +40,9 @@ interface UserFormState {
 const emptyForm: UserFormState = { email: '', role: 'admin', employeeId: '', modules: ['DASHBOARD'] };
 
 const UsersManagement = () => {
-  const isAdmin = getCurrentUser()?.role === 'admin';
+  const currentUser = getCurrentUser();
+  const isAdmin = currentUser?.role === 'admin';
+  const myHasFullPontoAccess = currentUser?.hasFullPontoAccess ?? false;
 
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
@@ -54,6 +56,7 @@ const UsersManagement = () => {
   const [formData, setFormData] = useState<UserFormState>(emptyForm);
 
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [pontoAccessSaving, setPontoAccessSaving] = useState<string | null>(null);
 
   // Senha temporária devolvida pela criação — só existe nessa única resposta,
   // nunca mais recuperável depois. Fica num banner que só some com ação
@@ -197,6 +200,20 @@ const UsersManagement = () => {
       setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar o status deste usuário.');
     } finally {
       setPendingUserId(null);
+    }
+  };
+
+  const togglePontoAccess = async (user: SystemUser) => {
+    if (pontoAccessSaving) return;
+    setPontoAccessSaving(user.id);
+    setActionError(null);
+    try {
+      await api.updatePontoAccess(user.id, !user.hasFullPontoAccess);
+      await loadData();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar o acesso ao Ponto deste usuário.');
+    } finally {
+      setPontoAccessSaving(null);
     }
   };
 
@@ -345,6 +362,28 @@ const UsersManagement = () => {
                                 <p className="text-sm text-muted">
                                   {user.role === 'admin' ? 'Administrador' : 'Funcionário'}
                                 </p>
+                                {user.role === 'admin' && (
+                                  <div className="mt-1">
+                                    {myHasFullPontoAccess ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => togglePontoAccess(user)}
+                                        disabled={pontoAccessSaving === user.id}
+                                        className="text-xs font-medium text-primary hover:text-primary/80 disabled:opacity-50 transition-colors"
+                                      >
+                                        {pontoAccessSaving === user.id
+                                          ? 'Salvando...'
+                                          : user.hasFullPontoAccess
+                                            ? 'Acesso total ao Ponto — clique para restringir ao próprio time'
+                                            : 'Restrito ao próprio time no Ponto — clique para dar acesso total'}
+                                      </button>
+                                    ) : (
+                                      <span className="text-xs text-muted">
+                                        {user.hasFullPontoAccess ? 'Acesso total ao Ponto' : 'Restrito ao próprio time no Ponto'}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </td>
