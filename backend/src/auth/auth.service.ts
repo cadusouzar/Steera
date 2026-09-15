@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { runAsSystem } from '../prisma/tenant-context';
 import { runTenantInteractiveTransaction, runTenantTransaction } from '../prisma/tenant-rls.extension';
 import { hashPassword, verifyPassword } from './password.util';
+import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 
 const ALL_MODULES: AppModuleEnum[] = ['DASHBOARD', 'CLIENTES', 'RH', 'COMERCIAL', 'OPERACOES', 'FINANCAS'];
@@ -34,10 +35,37 @@ export class AuthService {
         role: user.role,
         modules: user.modules,
         mustChangePassword: user.mustChangePassword,
-        hasFullPontoAccess: user.hasFullPontoAccess,
+        // Sempre o valor EFETIVO (nunca a coluna crua) — ver ponto-access.util.ts. Isto cobre
+        // login()/register()/refresh()/changePassword() de uma vez, já que todos assinam o token
+        // por aqui.
+        hasFullPontoAccess: effectiveHasFullPontoAccess(user),
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m', algorithm: 'HS256' },
     );
+  }
+
+  // Formato único do objeto `user` devolvido por register()/login()/getProfile() — montado à mão
+  // (nunca o row cru do Prisma) pra nunca vazar passwordHash, e com hasFullPontoAccess já
+  // normalizado pelo mesmo helper que assina o JWT, pra o frontend nunca ver um valor diferente do
+  // que o token carrega.
+  private toPublicUser(user: {
+    id: string;
+    email: string;
+    role: string;
+    modules: string[];
+    mustChangePassword: boolean;
+    employeeId: string | null;
+    hasFullPontoAccess: boolean;
+  }) {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      modules: user.modules,
+      mustChangePassword: user.mustChangePassword,
+      employeeId: user.employeeId,
+      hasFullPontoAccess: effectiveHasFullPontoAccess(user),
+    };
   }
 
   private async issueRefreshToken(userId: string, replaces?: string) {
@@ -99,14 +127,7 @@ export class AuthService {
     // register() é o único lugar onde o próprio usuário escolhe a senha (não
     // uma temporária gerada pelo sistema) — mustChangePassword nasce false
     // aqui, ao contrário de UsersService.create().
-    return {
-      accessToken,
-      user: {
-        id: user.id, email: user.email, role: user.role, modules: user.modules,
-        mustChangePassword: user.mustChangePassword, employeeId: user.employeeId,
-        hasFullPontoAccess: user.hasFullPontoAccess,
-      },
-    };
+    return { accessToken, user: this.toPublicUser(user) };
   }
 
   async login(dto: { email: string; password: string }, res: Response) {
@@ -123,14 +144,7 @@ export class AuthService {
     const accessToken = this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
-    return {
-      accessToken,
-      user: {
-        id: user.id, email: user.email, role: user.role, modules: user.modules,
-        mustChangePassword: user.mustChangePassword, employeeId: user.employeeId,
-        hasFullPontoAccess: user.hasFullPontoAccess,
-      },
-    };
+    return { accessToken, user: this.toPublicUser(user) };
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {
@@ -208,15 +222,7 @@ export class AuthService {
   // reload.
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    return {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      modules: user.modules,
-      mustChangePassword: user.mustChangePassword,
-      employeeId: user.employeeId,
-      hasFullPontoAccess: user.hasFullPontoAccess,
-    };
+    return this.toPublicUser(user);
   }
 
   // Único caminho pelo qual um login se auto-vincula a um Employee já

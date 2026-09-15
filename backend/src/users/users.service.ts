@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction, runTenantTransaction } from '../prisma/tenant-rls.extension';
 import { hashPassword } from '../auth/password.util';
+import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 
@@ -31,12 +32,21 @@ const SAFE_USER_SELECT = {
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAllForCompany(companyId: string) {
-    return this.prisma.user.findMany({
+  // hasFullPontoAccess sempre normalizado antes de sair daqui (ver ponto-access.util.ts) — a
+  // coluna crua nasce `true` pra TODA linha, inclusive logins EMPLOYEE, que nunca têm acesso total
+  // de fato. Sem isso, a tela de Usuários e Acessos exibiria "Acesso total ao Ponto" pra um login
+  // que o backend nega em toda mutação.
+  private toPublicUser<T extends { role: string; hasFullPontoAccess: boolean }>(user: T): T {
+    return { ...user, hasFullPontoAccess: effectiveHasFullPontoAccess(user) };
+  }
+
+  async findAllForCompany(companyId: string) {
+    const users = await this.prisma.user.findMany({
       where: { companyId },
       orderBy: { createdAt: 'asc' },
       select: SAFE_USER_SELECT,
     });
+    return users.map((u) => this.toPublicUser(u));
   }
 
   async create(companyId: string, dto: CreateUserDto) {
@@ -102,7 +112,7 @@ export class UsersService {
       throw err;
     }
 
-    return { user, temporaryPassword };
+    return { user: this.toPublicUser(user), temporaryPassword };
   }
 
   async block(companyId: string, userId: string) {

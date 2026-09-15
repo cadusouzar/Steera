@@ -15,11 +15,18 @@ export interface CurrentUser {
   // /auth/me/employee-link) — TimeTracking.tsx usa isso pra decidir entre o
   // fluxo normal de bater ponto e o estado vazio "vincule seu cadastro".
   employeeId: string | null;
-  // true pra um ADMIN (sempre) ou um EMPLOYEE marcado explicitamente com
-  // acesso administrativo total ao módulo de Ponto (ver
-  // PATCH /companies/me/users/:id/ponto-access) — usado pelo frontend pra
-  // decidir entre a visão "minha equipe" (escopada por managerId) e a visão
-  // "empresa inteira" das telas administrativas de Ponto.
+  // Valor EFETIVO de acesso total ao módulo de Ponto, já normalizado pelo
+  // backend (ver backend/src/auth/ponto-access.util.ts): true SÓ pra um login
+  // `role: ADMIN` cuja coluna `hasFullPontoAccess` está ligada — um ADMIN pode
+  // perfeitamente ter false (restrito ao próprio time, ver
+  // PATCH /companies/me/users/:id/ponto-access), e um login EMPLOYEE NUNCA vê
+  // true aqui, qualquer que seja o valor guardado no banco (a coluna nasce
+  // `true` por default pra toda linha, inclusive EMPLOYEE — antes da
+  // normalização de 15/09/2026 isso fazia um gerente EMPLOYEE achar que tinha
+  // acesso total e tomar 404 em toda mutação). Usado pelo frontend pra decidir
+  // entre a visão "minha equipe" (escopada por managerId) e a visão "empresa
+  // inteira" das telas administrativas de Ponto — agora com exatamente o mesmo
+  // significado que o backend aplica.
   hasFullPontoAccess: boolean;
 }
 

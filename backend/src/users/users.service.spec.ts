@@ -44,6 +44,37 @@ describe('UsersService', () => {
     expect(call.select.passwordHash).toBeUndefined();
   });
 
+  // Achado C2 da revisão final (15/09/2026): a coluna nasce `true` pra toda linha, EMPLOYEE
+  // inclusive — a listagem tem que mostrar o valor EFETIVO, nunca o cru, pra Usuários e Acessos
+  // não anunciar "Acesso total ao Ponto" pra um login que o backend nega em toda mutação.
+  it('findAllForCompany presents the EFFECTIVE hasFullPontoAccess (false for EMPLOYEE rows, whatever the column says)', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'u1', role: 'ADMIN', hasFullPontoAccess: true },
+      { id: 'u2', role: 'ADMIN', hasFullPontoAccess: false },
+      { id: 'u3', role: 'EMPLOYEE', hasFullPontoAccess: true },
+    ]);
+
+    const users = await service.findAllForCompany('c1');
+
+    expect(users.map((u: any) => [u.id, u.hasFullPontoAccess])).toEqual([
+      ['u1', true],
+      ['u2', false],
+      ['u3', false],
+    ]);
+  });
+
+  it('create returns the EFFECTIVE hasFullPontoAccess for a newly created EMPLOYEE login', async () => {
+    prisma.employee.findFirst.mockResolvedValue({ id: 'emp-1', companyId: 'c1' });
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ id: 'c1', maxEmployeeLogins: 10 });
+    prisma.user.count.mockResolvedValue(0);
+    prisma.user.create.mockResolvedValue({ id: 'u9', role: 'EMPLOYEE', hasFullPontoAccess: true });
+
+    const { user } = await service.create('c1', { email: 'f@a.com', role: 'EMPLOYEE', employeeId: 'emp-1', modules: ['RH'] } as any);
+
+    expect(user.hasFullPontoAccess).toBe(false);
+  });
+
   it('create never selects passwordHash back for the created user', async () => {
     prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin3@a.com', role: 'ADMIN' });
     await service.create('c1', { email: 'admin3@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);

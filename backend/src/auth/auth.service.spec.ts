@@ -72,6 +72,66 @@ describe('AuthService', () => {
     expect(result.user.hasFullPontoAccess).toBe(true);
   });
 
+  // Achado C2 da revisão final (15/09/2026): `User.hasFullPontoAccess` nasce `true` pra TODA linha
+  // (@default(true) no schema) e UsersService.create() nunca desliga isso pra um login EMPLOYEE —
+  // então o JWT de um gerente EMPLOYEE carregava `true`, o frontend lia o booleano cru sem
+  // nenhuma checagem de papel, e essa persona (a razão de ser deste plano) entrava na tela
+  // administrativa achando ter acesso total e tomava 404 em toda mutação. O valor exposto agora é
+  // sempre o EFETIVO (role === 'ADMIN' && flag).
+  it('login exposes hasFullPontoAccess: false for an EMPLOYEE login even when the stored column is true', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u2', companyId: 'c1', role: 'EMPLOYEE', modules: ['RH'], status: 'ACTIVE',
+      passwordHash: 'h', mustChangePassword: false, hasFullPontoAccess: true, employeeId: 'emp-1',
+    });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+    prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+    const result = await service.login({ email: 'gerente@x.com', password: 'y' }, fakeRes);
+
+    expect(result.user.hasFullPontoAccess).toBe(false);
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({ hasFullPontoAccess: false, role: 'EMPLOYEE' }),
+      expect.anything(),
+    );
+  });
+
+  it('getProfile (GET /auth/me) exposes hasFullPontoAccess: false for an EMPLOYEE login', async () => {
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      id: 'u2', email: 'gerente@x.com', companyId: 'c1', role: 'EMPLOYEE', modules: ['RH'],
+      mustChangePassword: false, employeeId: 'emp-1', hasFullPontoAccess: true, passwordHash: 'h',
+    });
+
+    const profile = await service.getProfile('u2');
+
+    expect(profile.hasFullPontoAccess).toBe(false);
+    // Nunca vaza o row cru do Prisma (sem passwordHash na resposta).
+    expect(profile).not.toHaveProperty('passwordHash');
+  });
+
+  it('getProfile keeps hasFullPontoAccess: false for an ADMIN whose column is false (restricted admin)', async () => {
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      id: 'u3', email: 'admin-restrito@x.com', companyId: 'c1', role: 'ADMIN', modules: ['RH'],
+      mustChangePassword: false, employeeId: 'emp-2', hasFullPontoAccess: false, passwordHash: 'h',
+    });
+
+    expect((await service.getProfile('u3')).hasFullPontoAccess).toBe(false);
+  });
+
+  it('refresh signs the EFFECTIVE flag for an EMPLOYEE login as well', async () => {
+    prisma.refreshToken.findUnique.mockResolvedValue({
+      id: 'rt1', userId: 'u2', expiresAt: new Date(Date.now() + 10_000), revokedAt: null, replacedByTokenId: null,
+      user: { id: 'u2', companyId: 'c1', role: 'EMPLOYEE', modules: ['RH'], status: 'ACTIVE', hasFullPontoAccess: true },
+    });
+    prisma.refreshToken.create.mockResolvedValue({ id: 'rt2' });
+
+    await service.refresh('algum-valor', fakeRes);
+
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({ hasFullPontoAccess: false }),
+      expect.anything(),
+    );
+  });
+
   it('refresh rejects when no cookie value is provided', async () => {
     await expect(service.refresh(undefined, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
   });
