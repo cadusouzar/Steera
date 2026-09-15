@@ -494,6 +494,115 @@ solicitações de ajuste, justificativas/atestados e configuração administrati
   Ver `[[DECISOES-TECNICAS]]` seção "Controle de Ponto" para o detalhe completo (incluindo
   todas as decisões, o incidente de segurança do `canManage()`, e os quatro achados acima).
 
+**Configuração de Ponto Escopada por Superior (`hasFullPontoAccess`, `WorkSchedule`/
+`TimeTrackingSettings` em camadas, 15/09/2026):** duas lacunas do desenho original motivaram este
+refinamento — cadastro de jornada não escalava (sempre um `WorkSchedule` por funcionário, mesmo
+quando um time inteiro compartilha o mesmo horário) e `role: ADMIN` era um bypass absoluto dentro do
+Controle de Ponto, mesmo em empresas pequenas/médias onde múltiplos logins têm `ADMIN` por
+conveniência (gerentes de confiança, não só o dono). Spec completa em
+`docs/superpowers/specs/2026-09-15-time-tracking-scoped-config-design.md`, plano em
+`docs/superpowers/plans/2026-09-15-time-tracking-scoped-config.md` (12 tasks, todas implementadas e
+revisadas individualmente).
+- **`User.hasFullPontoAccess` (novo campo, `@default(true)`):** só tem efeito para `role: ADMIN` —
+  não muda nada para um login `EMPLOYEE`, que já era sempre escopado ao próprio time. O bypass
+  absoluto em `TimeManagementAuthService.canManage()`/`getManageableEmployeeIds()` passou de
+  `if (currentUser.role === 'ADMIN') return true` para
+  `if (currentUser.role === 'ADMIN' && currentUser.hasFullPontoAccess) return true` — como essas duas
+  funções já eram o único lugar do projeto que decide "quem administra o ponto de quem", usado pelas
+  5 abas administrativas (Inconsistências, Solicitações de Ajuste, Justificativas, Correção Proativa,
+  Configuração), essa foi a única mudança necessária para propagar a restrição de forma consistente.
+  Um `ADMIN` com `hasFullPontoAccess: false` passa a ser tratado, em todo o módulo, exatamente como um
+  `EMPLOYEE` que gerencia gente — só seus subordinados diretos, sem nenhuma exceção por tela. Ações
+  sem um funcionário-alvo para checar via `canManage()` (editar o padrão da empresa de
+  `TimeTrackingSettings`/`WorkSchedule`, mutar `WorkLocation`, o próprio endpoint de toggle) usam o
+  novo `assertHasFullPontoAccess(user)`, síncrono (sem consulta ao banco — o dado já vem inteiro no
+  JWT) e sempre `404`, nunca `403`, mesmo padrão do resto do backend.
+- **`WorkSchedule` em três camadas (empresa → time → individual):** `employeeId` virou opcional e
+  ganhou um `managerId` irmão (nunca os dois preenchidos ao mesmo tempo — validado na aplicação, não
+  como `CHECK` de banco). Só `employeeId`: jornada individual, sobrescreve tudo (mesmo comportamento
+  de sempre). Só `managerId`: "padrão do time" daquele superior, aplica-se automaticamente a todos os
+  subordinados diretos sem precisar de um cadastro por pessoa. Nenhum dos dois: padrão da empresa
+  inteira, cobre quem ainda não tem nada configurado por time/indivíduo. Resolução em
+  `getScheduleForDate` é sempre individual → time do superior direto → empresa → nenhum
+  (`expectedMinutes: 0`, "Folga", comportamento de sempre) — sem propagação em cadeia em nenhum
+  passo, sempre o superior **direto**, nunca um nível acima (mesma limitação já aceita no resto do
+  módulo). Criar uma linha sem `employeeId`/`managerId` sempre exige `assertHasFullPontoAccess`;
+  criar com `managerId` é autoatendimento livre se for o próprio `Employee` vinculado do chamador
+  configurando o próprio time, senão também exige `assertHasFullPontoAccess` (só quem tem acesso
+  total monta o padrão de time de OUTRO superior em nome dele, ex.: RH ajudando a configurar).
+- **`TimeTrackingSettings` em duas camadas (empresa → time), com um detalhe de índice não-óbvio:** a
+  constraint de unicidade deixou de ser `companyId @unique` sozinho e virou dois **índices únicos
+  parciais** feitos à mão na migration (`CREATE UNIQUE INDEX ... WHERE "managerId" IS NULL` /
+  `... WHERE "managerId" IS NOT NULL`) — um `@@unique([companyId, managerId])` comum não bastaria,
+  porque o Postgres trata `NULL` como nunca igual a si mesmo, então múltiplas linhas
+  `managerId: NULL` da mesma empresa não violariam essa constraint. `getEffectiveSettingsForEmployee`
+  espelha a mesma lógica de fallback do `WorkSchedule`, com um nível a menos (sem individual — regras
+  de bater ponto nunca foram por pessoa, só por time/empresa).
+- **`WorkLocation` continua só por empresa, de propósito** — geofencing é infraestrutura física, não
+  faz sentido "pertencer" a um time; mutação passou de `@Roles('ADMIN')` puro para exigir
+  `assertHasFullPontoAccess` explicitamente, leitura continua liberada para qualquer superior (só
+  visualiza, para escolher um local ao configurar um subordinado).
+- **`PATCH /companies/me/users/:id/ponto-access`** — `{ hasFullPontoAccess: boolean }`, guardado por
+  `assertHasFullPontoAccess(currentUser)` (só quem já tem acesso total liga/desliga o de outro
+  login), alvo precisa ser `role: ADMIN` da mesma empresa (`404`/`400` caso contrário — setar o campo
+  num `EMPLOYEE` é rejeitado como pedido sem sentido, não ignorado em silêncio). **Trava do último
+  admin:** antes de desligar, conta quantos logins `ADMIN` da empresa têm `hasFullPontoAccess: true`
+  dentro de uma transação com `pg_advisory_xact_lock(hashtext(companyId))` — travando por EMPRESA, não
+  por login-alvo, porque o invariante protegido ("pelo menos um full-access admin") é da empresa como
+  um todo. Achado e corrigido ainda durante a implementação (revisão do Task 4): a versão original
+  fazia `count()` e `update()` como duas queries soltas, sem trava nenhuma — duas requisições
+  concorrentes desligando DOIS admins diferentes, com exatamente 2 restantes, podiam ambas ler
+  `count === 2`, ambas passar o guard, e ambas escrever `false`, zerando os admins de acesso total da
+  empresa (estado só recuperável editando o banco direto). Consequência não-óbvia, confirmada na
+  validação final (Task 12): a checagem é sobre o total de full-access admins da empresa, não sobre
+  "o alvo estava em `true` antes desta chamada" — então desligar um admin que **já está** desligado
+  também recebe `400` sempre que só restar um full-access admin na empresa (mesmo que esse alvo
+  específico não fosse contado); não é um bug, é o mesmo invariante sendo aplicado de forma
+  consistente independente de por onde a requisição chegou.
+- **Decisão explícita: flag configurável por login, não "só o fundador"** — discutida em conversa
+  antes deste design: travar acesso total só ao primeiro `ADMIN` criado via `/auth/register` seria
+  mais simples de implementar, mas não resolveria o caso real (empresas onde o próprio fundador quer
+  restringir um gerente de confiança promovido a `ADMIN` por conveniência, sem rebaixá-lo de papel em
+  nenhum outro módulo). `hasFullPontoAccess` é ortogonal a `role`/`modules` — muda só a autorização
+  dentro do Controle de Ponto, nada mais.
+- **Frontend:** `src/pages/app/UsersManagement.tsx` (`/app/usuarios`) ganhou o botão de toggle em
+  cada linha de login `ADMIN` (`"Acesso total ao Ponto — clique para restringir ao próprio time"` /
+  `"Restrito ao próprio time no Ponto — clique para dar acesso total"`), com o erro do último-admin
+  surfaced no banner de erro já existente da tela, nunca engolido em silêncio.
+  `src/pages/app/TimeTrackingAdmin.tsx` (Configuração) ganhou o seletor de escopo "Padrão da
+  empresa"/"Minha equipe" em Regras da empresa (só aparece para quem tem `hasFullPontoAccess` **e**
+  tem subordinados diretos — `hasOwnTeam`) e o seletor de nível "Empresa"/"Meu time"/"Individual" ao
+  criar uma Jornada de trabalho, cada opção gated pela mesma regra do backend. Achado e corrigido
+  durante a própria implementação (Task 11, review): o botão "Meu time" estava gated em
+  `hasFullPontoAccess || hasOwnTeam` (deveria ser só `hasOwnTeam`) — um `ADMIN` de acesso total sem
+  `Employee` vinculado (o estado comum de um fundador recém-registrado) via a opção "Meu time" mesmo
+  sem ter time nenhum, e submeter criava silenciosamente um padrão de EMPRESA em vez de um padrão de
+  time, contrariando o que a UI dava a entender.
+  Ver `[[TimeTrackingAdmin]]`/`[[UsersManagement]]` no vault.
+- **Validação de ponta a ponta (Task 12, 15/09/2026):** suíte de backend com 458 testes/49 suites
+  (acima da baseline de 423 anterior a este plano — toda task acrescentou casos novos), e2e 9/9 (a
+  base `quickflow_test` estava com a migration deste plano pendente — aplicada via
+  `migrate deploy` antes de rodar, sem o que os 9 testes falhavam com "coluna hasFullPontoAccess não
+  existe"), lint e build de backend e frontend limpos. Seguindo a recomendação da revisão do Task 8
+  (uma falha real de wiring de módulo do NestJS — `WorkLocationsModule` faltando um import — havia
+  sobrevivido tanto ao `nest build` quanto à suíte Jest inteira, só aparecendo num boot real), esta
+  validação final incluiu um boot limpo explícito de `npm run start:dev`: grafo de módulos resolvido
+  por completo, todas as rotas novas mapeadas (`/companies/me/users/:id/ponto-access`,
+  `/work-schedules`, etc.), "Nest application successfully started" sem nenhum erro. Passeio manual
+  de 8 passos pelo navegador de verdade (chrome-devtools), com dado real criado nesta sessão (empresa
+  nova, fundador, segundo `ADMIN`, dois funcionários com hierarquia direta, um terceiro sem
+  gerente) — não apenas chamadas de API cruas: criação do segundo `ADMIN` por `/app/usuarios`
+  confirmando a nova coluna de toggle na tabela; desligar `hasFullPontoAccess` daquele login e
+  confirmar visualmente que Correção Proativa (seletor de funcionário) e Configuração (Regras da
+  empresa/Jornadas) passam a mostrar só o time restrito, sem nenhum acesso ao padrão da empresa;
+  criar um padrão de time como esse admin restrito e confirmar que o "Espelho de Ponto" do
+  subordinado direto (login próprio, `/app/ponto`) passou a refletir as horas esperadas da nova
+  jornada num dia da semana correspondente; tentar desligar de novo o mesmo login (no-op) e desligar
+  o próprio fundador (único full-access restante) e confirmar o `400` do guard aparecendo no banner de
+  erro da tela, sem crash; e criar um padrão de empresa como fundador, confirmando que um terceiro
+  funcionário sem gerente e sem jornada própria também passou a mostrar horas esperadas. Todos os 8
+  passos confirmados com resultado real observado na tela, nenhum assumido.
+
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
 integralmente suas instruções. Skills não relacionadas à tarefa não devem ser utilizadas.
