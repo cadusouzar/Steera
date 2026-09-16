@@ -11,3 +11,13 @@ services:
       - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Achado sob o teste de stress (Task 8): `host.docker.internal` resolve para DOIS endereços
+    # neste ambiente (Docker Desktop/Windows) — um IPv4 alcançável e um IPv6 (ULA/link-local
+    # interno do Docker) que NÃO é roteável até o host de verdade. Sob carga baixa isso nunca
+    # aparece (o PgBouncer raramente precisa abrir conexão NOVA com o Postgres); sob a rajada de
+    # conexões concorrentes do teste de stress, toda vez que ele precisa abrir uma conexão nova pra
+    # crescer o pool, há uma chance real de tentar o endereço IPv6 primeiro e falhar
+    # ("Network unreachable", confirmado nos logs do contêiner). Desabilitar IPv6 dentro do
+    # contêiner remove a ambiguidade — `getaddrinfo()` nunca mais devolve o endereço que falha.
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
