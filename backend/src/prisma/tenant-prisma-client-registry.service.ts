@@ -102,7 +102,13 @@ export class TenantPrismaClientRegistry implements OnApplicationShutdown {
     // concorrente: duas chamadas de `getClient` feitas de volta a volta (sem `await` entre elas)
     // deixariam de compartilhar a MESMA `creationPromise` no instante certo se `createClient` não
     // fosse invocado de forma síncrona dentro da própria chamada síncrona a `createAndRegister`.
-    if (this.cache.size >= this.opts.maxSize) {
+    // Conta `inFlightCreation.size` além de `cache.size` (mesma fórmula usada dentro de
+    // `evictLeastRecentlyUsedIfNeeded`, ver o comentário lá para o cenário de corrida que isso
+    // fecha): sem isso, esta checagem síncrona ficaria sistematicamente desatualizada durante uma
+    // rajada de empresas novas e diferentes pedindo client ao mesmo tempo, e nunca chegaria a
+    // chamar `evictLeastRecentlyUsedIfNeeded` (que tem a checagem corrigida) justamente no caso em
+    // que ela é necessária.
+    if (this.cache.size + this.inFlightCreation.size >= this.opts.maxSize) {
       await this.evictLeastRecentlyUsedIfNeeded();
     }
 
@@ -120,7 +126,15 @@ export class TenantPrismaClientRegistry implements OnApplicationShutdown {
   }
 
   private async evictLeastRecentlyUsedIfNeeded(): Promise<void> {
-    if (this.cache.size < this.opts.maxSize) return;
+    // `cache.size` sozinho subestima a ocupação real: uma criação em andamento (registrada em
+    // `inFlightCreation`, mas ainda não inserida em `cache` — isso só acontece depois que
+    // `createClient(...)` resolve) também reserva uma vaga de fato. Sem somar
+    // `inFlightCreation.size` aqui, várias empresas DIFERENTES e nunca vistas antes pedindo
+    // client ao mesmo tempo (requisições HTTP concorrentes reais, não uma única chamada de
+    // `Promise.all`) veriam todas o mesmo `cache.size` antigo — nenhuma delas ainda terminou sua
+    // própria criação — e todas passariam pela checagem de capacidade, deixando o cache acabar
+    // com mais entradas do que `maxSize` (cada uma um pool de conexões real com o Postgres).
+    if (this.cache.size + this.inFlightCreation.size < this.opts.maxSize) return;
 
     const deadline = Date.now() + this.opts.evictionTimeoutMs;
     for (;;) {

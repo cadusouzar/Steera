@@ -137,4 +137,58 @@ describe('TenantPrismaClientRegistry', () => {
     expect((clientA as unknown as ReturnType<typeof makeFakeClient>).$disconnect).toHaveBeenCalledTimes(1);
     expect((clientB as unknown as ReturnType<typeof makeFakeClient>).$disconnect).toHaveBeenCalledTimes(1);
   });
+
+  it('nunca deixa o cache exceder maxSize quando várias empresas DIFERENTES e nunca vistas pedem client ao mesmo tempo', async () => {
+    // Cada empresa resolve seu próprio createClient só quando o teste mandar — simula 3
+    // requisições HTTP concorrentes reais, cada uma para uma empresa nova diferente, todas
+    // ainda em andamento (nenhuma terminou de criar seu client) no momento em que a próxima
+    // chega. `cache.size` sozinho ficaria em 0 durante toda essa rajada (nada foi inserido no
+    // cache ainda — só depois que createClient resolve), então a checagem de capacidade precisa
+    // contar `inFlightCreation.size` também, senão as 3 criações prosseguiriam mesmo com
+    // maxSize=2, e o cache acabaria com 3 entradas — cada uma um pool de conexões real.
+    const resolvers = new Map<string, (c: unknown) => void>();
+    const createClient = jest.fn().mockImplementation(
+      (companyId: string) => new Promise((resolve) => { resolvers.set(companyId, resolve); }),
+    );
+    const registry = new TenantPrismaClientRegistry({ maxSize: 2, evictionTimeoutMs: 1000, createClient });
+
+    // Dispara as 3 chamadas de volta a volta, sem aguardar nenhuma — todas ficam em andamento.
+    const p1 = registry.getClient(companyId1);
+    const p2 = registry.getClient(companyId2);
+    const p3 = registry.getClient(companyId3);
+
+    // A 3ª empresa não pode ter começado a criar ainda: com maxSize=2 e as duas primeiras já em
+    // andamento (inFlightCreation.size=2 no momento da checagem de companyId3), a checagem de
+    // capacidade precisa bloquear a criação da 3ª até uma vaga liberar — createClient só pode
+    // ter sido chamado pras duas primeiras até aqui.
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(resolvers.has(companyId3)).toBe(false);
+
+    // Libera espaço: termina e libera a criação da primeira empresa.
+    resolvers.get(companyId1)!(makeFakeClient());
+    const clientA = await p1;
+    registry.release(companyId1);
+
+    // A expulsão (que ficou fazendo polling esperando uma entrada elegível) encontra companyId1
+    // livre assim que o release acima acontece, e finalmente deixa companyId3 prosseguir — espera
+    // isso terminar de acontecer (polling real, mesmo padrão dos outros testes de expulsão).
+    while (!resolvers.has(companyId3)) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    resolvers.get(companyId3)!(makeFakeClient());
+    const clientC = await p3;
+    registry.release(companyId3);
+
+    // Libera a segunda empresa também, pra fechar o cenário por completo.
+    resolvers.get(companyId2)!(makeFakeClient());
+    const clientB = await p2;
+    registry.release(companyId2);
+
+    expect(createClient).toHaveBeenCalledTimes(3);
+    expect(clientC).toBeDefined();
+    expect(clientB).toBeDefined();
+    // companyId1 foi de fato expulso pra abrir espaço pra companyId3 — nunca companyId2, que
+    // ainda estava em andamento (não elegível pra expulsão).
+    expect((clientA as unknown as ReturnType<typeof makeFakeClient>).$disconnect).toHaveBeenCalledTimes(1);
+  });
 });
