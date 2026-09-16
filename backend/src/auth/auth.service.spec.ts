@@ -26,6 +26,12 @@ describe('AuthService', () => {
       // (these tests never set up a real ALS tenant context), just needs to
       // exist so `tx.$executeRaw` doesn't blow up as `undefined()`.
       $executeRaw: jest.fn(),
+      // Task 7: CREATE SCHEMA / SET LOCAL search_path and the raw statements
+      // inside every real tenant-migrations/*/migration.sql file (applyMigrations
+      // reads real files from disk even in this unit test — only the actual SQL
+      // execution and the TenantMigration bookkeeping row are mocked here).
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      tenantMigration: { create: jest.fn().mockResolvedValue({}) },
       company: { create: jest.fn() },
       employee: { findFirst: jest.fn() },
     };
@@ -166,7 +172,10 @@ describe('AuthService', () => {
   });
 
   it('register rejects a duplicate email with a clean 409 instead of an unhandled 500', async () => {
-    prisma.company.create.mockResolvedValue({ id: 'company-1', name: 'Empresa Duplicada' });
+    // Id no formato cuid-like (minúsculo alfanumérico, 20-30 chars, sem hífen) — assertValidSchemaName
+    // (Task 1) rejeitaria "company-1" (hífen + curto demais) antes mesmo do CREATE SCHEMA rodar,
+    // mascarando o P2002 real que este teste quer provar.
+    prisma.company.create.mockResolvedValue({ id: 'companyduplicado123456789', name: 'Empresa Duplicada' });
     prisma.user.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`email`)', {
         code: 'P2002',
@@ -177,6 +186,28 @@ describe('AuthService', () => {
     await expect(
       service.register({ companyName: 'Empresa Duplicada', email: 'ja-existe@test.com', password: 'senha12345' }, fakeRes),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  describe('register — provisionamento de schema', () => {
+    it('cria o schema físico e aplica todas as migrations de tenant dentro da mesma transação, antes de criar o usuário', async () => {
+      // Id no formato cuid-like (minúsculo alfanumérico, sem hífen) — assertValidSchemaName
+      // (Task 1) rejeitaria um valor com hífen antes de chegar no CREATE SCHEMA.
+      const companyId = 'companyabc123456789012345';
+      prisma.company.create.mockResolvedValue({ id: companyId });
+      prisma.user.create.mockResolvedValue({
+        id: 'user-1', companyId, email: 'a@b.com', role: 'ADMIN', modules: [],
+        mustChangePassword: false, employeeId: null, hasFullPontoAccess: true,
+      });
+
+      await service.register({ companyName: 'Acme', email: 'a@b.com', password: 'senha123456' }, fakeRes);
+
+      expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
+        expect.stringContaining(`CREATE SCHEMA "tenant_${companyId}"`),
+      );
+      const callOrder = prisma.$executeRawUnsafe.mock.invocationCallOrder;
+      const userCreateOrder = prisma.user.create.mock.invocationCallOrder[0];
+      expect(Math.max(...callOrder)).toBeLessThan(userCreateOrder);
+    });
   });
 
   it('changePassword rejects an incorrect current password', async () => {

@@ -71,6 +71,12 @@ describe('QuickFlow backend (e2e)', () => {
   });
 
   afterAll(async () => {
+    // Task 7 (schema-per-tenant): POST /auth/register now provisions a real physical Postgres
+    // schema per company (see AuthService.register) — `prisma.company.delete()` alone only removes
+    // the relational Company row (cascading to User/RefreshToken), it has no idea the physical
+    // schema exists and never drops it. Without this line, every run of this suite would leak one
+    // orphaned `tenant_*` schema into the test database forever.
+    await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${e2eCompanyId}" CASCADE`));
     // Mirrors the cleanup pattern every other test in this file already uses
     // in its own `finally` block — this suite creates its own tenant/admin
     // too, so it cleans up after itself the same way. Cascades to the User

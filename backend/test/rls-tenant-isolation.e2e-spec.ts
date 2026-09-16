@@ -99,6 +99,13 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
 
   afterAll(async () => {
     await sys(async () => {
+      // Task 7 (schema-per-tenant): POST /auth/register now provisions a real physical Postgres
+      // schema per company (see AuthService.register) — dropping the Company row below never drops
+      // this, since the schema is a separate DDL object, not a relational child of Company. Without
+      // this, every run of this suite (it registers TWO companies) would leak two orphaned
+      // `tenant_*` schemas into the test database forever.
+      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${companyAId}" CASCADE`);
+      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${companyBId}" CASCADE`);
       await prisma.receivable.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
       await prisma.subscription.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
       await prisma.company.delete({ where: { id: companyAId } });

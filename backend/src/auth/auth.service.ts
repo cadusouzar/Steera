@@ -2,9 +2,13 @@ import { BadRequestException, ConflictException, Injectable, UnauthorizedExcepti
 import { JwtService } from '@nestjs/jwt';
 import { AppModule as AppModuleEnum, Prisma } from '@prisma/client';
 import { Response } from 'express';
+import { join } from 'path';
+import { listMigrationNames } from '../prisma/migration-files.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { runAsSystem } from '../prisma/tenant-context';
+import { assertValidSchemaName, tenantSchemaName } from '../prisma/tenant-schema.util';
 import { runTenantInteractiveTransaction, runTenantTransaction } from '../prisma/tenant-rls.extension';
+import { applyMigrations } from '../prisma/tenant-migration.util';
 import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
@@ -12,6 +16,13 @@ import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.uti
 const ALL_MODULES: AppModuleEnum[] = ['DASHBOARD', 'CLIENTES', 'RH', 'COMERCIAL', 'OPERACOES', 'FINANCAS'];
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
 const REFRESH_COOKIE_NAME = 'rt';
+
+// process.cwd(), não __dirname: __dirname aponta pra dentro de `dist/src/auth` depois de compilado
+// (`npm run build` + `node dist/main.js`), onde `prisma/` não existe — mesmo padrão já usado em
+// FilesService.STORAGE_ROOT (`join(process.cwd(), 'storage', 'attachments')`), que assume
+// `npm run start:dev`/`start:prod` sempre rodam com o diretório de trabalho em `backend/`
+// (garantido pelo próprio npm, que sempre executa scripts com CWD = pasta do package.json).
+const TENANT_MIGRATIONS_DIR = join(process.cwd(), 'prisma', 'tenant-migrations');
 
 @Injectable()
 export class AuthService {
@@ -100,7 +111,39 @@ export class AuthService {
       // comment and the RLS report for the full reasoning on this bypass.
       user = await runAsSystem(() =>
         runTenantInteractiveTransaction(this.prisma, async (tx) => {
+          // Achado ao rodar a suíte e2e inteira (não previsto no brief): toda migration de tenant
+          // que adiciona uma FK pra `companyId` termina em `ALTER TABLE ... REFERENCES
+          // "Company"("id")` — a tabela CENTRAL compartilhada por TODAS as empresas, não uma tabela
+          // dentro do schema físico novo. Cada `ALTER TABLE ADD CONSTRAINT` desse tipo pede um
+          // ShareRowExclusiveLock na tabela referenciada (`Company`); o `tx.company.create()` logo
+          // abaixo já segura um RowExclusiveLock nela (do próprio INSERT desta mesma transação).
+          // Duas empresas se registrando ao mesmo tempo — cada uma com seu próprio INSERT +
+          // dezenas de ALTER TABLE contra a MESMA `Company` — reproduzem de forma determinística um
+          // deadlock circular do Postgres (40P01: cada transação segura o RowExclusiveLock da sua
+          // própria linha e espera o ShareRowExclusiveLock que a outra está seguindo). Reproduzido
+          // ao vivo rodando `npm run test:e2e` sem filtro (múltiplos specs registrando em paralelo,
+          // cada um em seu próprio worker do Jest) — sem serialização, ~2 de 3 specs concorrentes
+          // falhavam com 500. `pg_advisory_xact_lock` (mesmo padrão já usado em
+          // `UsersService.updatePontoAccess`/`TimeClockService.createPunch`, liberado sozinho no
+          // commit/rollback, sem precisar de unlock explícito) serializa só esta seção entre
+          // registros concorrentes — chave GLOBAL (não por companyId), porque o recurso disputado
+          // (`Company`, a tabela central) é compartilhado por toda empresa, não um recurso por
+          // tenant. Provisionar uma empresa é raro e nunca um caminho quente, então serializar
+          // globalmente aqui não tem custo de throughput relevante.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tenant_provisioning')::bigint)`;
           const company = await tx.company.create({ data: { name: dto.companyName } });
+          const schemaName = tenantSchemaName(company.id);
+          assertValidSchemaName(schemaName);
+          // CREATE SCHEMA e a migration replay abaixo rodam DENTRO desta mesma transação
+          // PostgreSQL — DDL é transacional no Postgres, então qualquer falha (schema, uma
+          // migration específica) desfaz TUDO, incluindo o INSERT do Company acima: nunca existe
+          // uma empresa com schema pela metade, e uma segunda tentativa após falha é sempre
+          // segura (não há sujeira residual pra limpar).
+          await tx.$executeRawUnsafe(`CREATE SCHEMA "${schemaName}"`);
+          await tx.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`);
+          await applyMigrations(tx, company.id, schemaName, TENANT_MIGRATIONS_DIR, listMigrationNames(TENANT_MIGRATIONS_DIR));
+          // "User" só existe em `public` — resolve corretamente mesmo com o search_path acima
+          // apontando primeiro pro schema do tenant (o PostgreSQL cai pro próximo item da lista).
           return tx.user.create({
             data: {
               companyId: company.id,
