@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { ClientStatus, ReceivableStatus, SubscriptionStatus } from '@prisma/client';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { runTenantTransaction } from '../prisma/tenant-rls.extension';
+import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { startOfToday } from '../common/date.util';
 import { ClientTrashService } from './client-trash.service';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -106,20 +106,21 @@ export class ClientsService {
       throw new ConflictException(`Cliente ${id} já está inativo`);
     }
 
-    const [updatedClient] = await runTenantTransaction(this.prisma, [
-      this.prisma.client.update({
+    const updatedClient = await runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const updated = await tx.client.update({
         where: { id },
         data: {
           status: ClientStatus.INACTIVE,
           includeInRevenueReport: dto.includeInRevenueReport,
           deactivatedAt: new Date(),
         },
-      }),
-      this.prisma.subscription.updateMany({
+      });
+      await tx.subscription.updateMany({
         where: { clientId: id, status: SubscriptionStatus.ACTIVE },
         data: { status: SubscriptionStatus.INACTIVE },
-      }),
-    ]);
+      });
+      return updated;
+    });
 
     return updatedClient;
   }

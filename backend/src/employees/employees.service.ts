@@ -4,7 +4,7 @@ import { normalizeCpf } from '../common/cpf.util';
 import { parseDateOnly } from '../common/date.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { runTenantTransaction } from '../prisma/tenant-rls.extension';
+import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -165,16 +165,17 @@ export class EmployeesService {
       throw new ConflictException(`Funcionário ${id} já está inativo`);
     }
 
-    const [updated] = await runTenantTransaction(this.prisma, [
-      this.prisma.employee.update({
+    const updated = await runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const result = await tx.employee.update({
         where: { id },
         data: { status: EmployeeStatus.INACTIVE, terminationDate: new Date() },
-      }),
-      this.prisma.employeeRecurringPayment.updateMany({
+      });
+      await tx.employeeRecurringPayment.updateMany({
         where: { employeeId: id, status: 'ACTIVE' },
         data: { status: 'INACTIVE' },
-      }),
-    ]);
+      });
+      return result;
+    });
 
     return updated;
   }

@@ -30,9 +30,10 @@ describe('ClientsService', () => {
       subscription: {
         updateMany: jest.fn(),
       },
-      // Mirrors Prisma's array form: $transaction([opA, opB]) resolves each
-      // operation (already a promise from the mocked calls above) in order.
-      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+      // Mirrors Prisma's interactive form: $transaction(async (tx) => ...) invokes the callback
+      // with a `tx` — here the same mocked `prisma` object, so existing assertions against
+      // `prisma.client.update`/`prisma.subscription.updateMany` keep working unchanged.
+      $transaction: jest.fn((fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
     };
     clientTrash = { purgeExpiredTrash: jest.fn().mockResolvedValue(0) };
 
@@ -218,6 +219,32 @@ describe('ClientsService', () => {
       const passedAt: Date = (prisma.client.update as jest.Mock).mock.calls[0][0].data.deactivatedAt;
       expect(passedAt.getTime()).toBeGreaterThanOrEqual(before);
       expect(passedAt.getTime()).toBeLessThanOrEqual(after);
+    });
+
+    it('calls update/updateMany inside the same transaction callback, and rolls back if the second operation fails (atomicity)', async () => {
+      prisma.client.findFirst.mockResolvedValue({ id: 'client-1', status: 'ACTIVE' });
+      const tx = {
+        client: { update: jest.fn().mockResolvedValue({ id: 'client-1', status: 'INACTIVE' }) },
+        subscription: { updateMany: jest.fn().mockRejectedValue(new Error('falha simulada')) },
+      };
+      prisma.$transaction.mockImplementation(async (fn: any) => fn(tx));
+
+      await expect(service.deactivate('client-1', { includeInRevenueReport: true })).rejects.toThrow(
+        'falha simulada',
+      );
+
+      // Both operations were attempted INSIDE the same simulated transaction, in order — real
+      // atomicity (a genuine rollback against Postgres) is covered by the e2e test; this unit
+      // test only confirms the callback form is what's actually used (the regression this task
+      // exists to prevent: silently going back to the array form).
+      expect(tx.client.update).toHaveBeenCalledWith({
+        where: { id: 'client-1' },
+        data: expect.objectContaining({ status: 'INACTIVE', includeInRevenueReport: true }),
+      });
+      expect(tx.subscription.updateMany).toHaveBeenCalledWith({
+        where: { clientId: 'client-1', status: 'ACTIVE' },
+        data: { status: 'INACTIVE' },
+      });
     });
   });
 

@@ -140,19 +140,42 @@ describe('EmployeesService', () => {
 
   it('deactivating an employee flips status, sets terminationDate, and pauses active recurring payments in one transaction', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' });
-    // Mimics real Prisma: calling `.update()`/`.updateMany()` without awaiting
-    // returns a (thenable) operation object synchronously, never `undefined` —
-    // needed so the array built inline for `$transaction([...])` has non-nullish
-    // elements for `expect.anything()` to match below.
-    prisma.employee.update.mockReturnValue({});
-    prisma.employeeRecurringPayment.updateMany.mockReturnValue({});
-    prisma.$transaction.mockResolvedValue([{ id: 'employee-1', status: 'INACTIVE' }, { count: 2 }]);
+    const tx = {
+      employee: { update: jest.fn().mockResolvedValue({ id: 'employee-1', status: 'INACTIVE' }) },
+      employeeRecurringPayment: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    };
+    prisma.$transaction.mockImplementation(async (fn: any) => fn(tx));
 
-    await service.deactivate('employee-1');
+    const result = await service.deactivate('employee-1');
 
-    expect(prisma.$transaction).toHaveBeenCalledWith([
-      expect.anything(),
-      expect.anything(),
-    ]);
+    expect(tx.employee.update).toHaveBeenCalledWith({
+      where: { id: 'employee-1' },
+      data: { status: 'INACTIVE', terminationDate: expect.any(Date) },
+    });
+    expect(tx.employeeRecurringPayment.updateMany).toHaveBeenCalledWith({
+      where: { employeeId: 'employee-1', status: 'ACTIVE' },
+      data: { status: 'INACTIVE' },
+    });
+    expect(result).toEqual({ id: 'employee-1', status: 'INACTIVE' });
+  });
+
+  it('calls update/updateMany inside the same transaction callback, and rolls back if the second operation fails (atomicity)', async () => {
+    prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'ACTIVE' });
+    const tx = {
+      employee: { update: jest.fn().mockResolvedValue({ id: 'employee-1', status: 'INACTIVE' }) },
+      employeeRecurringPayment: { updateMany: jest.fn().mockRejectedValue(new Error('falha simulada')) },
+    };
+    prisma.$transaction.mockImplementation(async (fn: any) => fn(tx));
+
+    await expect(service.deactivate('employee-1')).rejects.toThrow('falha simulada');
+
+    expect(tx.employee.update).toHaveBeenCalledWith({
+      where: { id: 'employee-1' },
+      data: expect.objectContaining({ status: 'INACTIVE' }),
+    });
+    expect(tx.employeeRecurringPayment.updateMany).toHaveBeenCalledWith({
+      where: { employeeId: 'employee-1', status: 'ACTIVE' },
+      data: { status: 'INACTIVE' },
+    });
   });
 });

@@ -8,12 +8,15 @@ import { PrismaService } from '../src/prisma/prisma.service';
 // assertion queries, outside of any HTTP request — with the RLS backstop's
 // FORCE ROW LEVEL SECURITY now enabled on every tenant table, those calls
 // would otherwise see/write nothing at all (see the RLS report's "no tenant
-// context = see nothing" default). `sys(...)` is this file's one narrow,
-// test-infrastructure-only use of the same escape hatch AuthService uses for
-// its pre-authentication queries (see tenant-context.ts's `runAsSystem`) —
-// legitimate here because this is test scaffolding, never part of what's
-// actually being exercised/asserted through the HTTP API itself.
-import { runAsSystem } from '../src/prisma/tenant-context';
+// context = see nothing" default). `sys(...)` is this file's escape hatch for
+// CENTRAL models/DDL only (User, Company, raw schema drop) — the same one
+// AuthService uses for its pre-authentication queries. Tenant models
+// (Client/Receivable/Subscription) are physically routed to this company's
+// own schema now, and bypass mode never redirects a tenant model to it (there
+// is no companyId to redirect with under bypass) — those call sites use
+// `runWithTenant(e2eCompanyId, ...)` instead, since this suite already knows
+// which company it registered.
+import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -124,7 +127,11 @@ describe('QuickFlow backend (e2e)', () => {
       expect(clientDetailRes.body.totalPending).toBe(0);
       expect(clientDetailRes.body.totalOverdue).toBe(0);
     } finally {
-      await sys(async () => {
+      // `Client`/`Receivable` are tenant models, physically routed to this company's own
+      // schema — `sys()` (RLS bypass) never redirects a tenant model, so it can't reach them
+      // any more. `runWithTenant` with the company we already registered is the correct escape
+      // hatch here now.
+      await runWithTenant(e2eCompanyId, async () => {
         await prisma.receivable.deleteMany({ where: { clientId } });
         await prisma.client.delete({ where: { id: clientId } });
       });
@@ -220,7 +227,7 @@ describe('QuickFlow backend (e2e)', () => {
       // above even runs, so it applies regardless of clientB's state here).
       await request(server).patch(`/clients/${clientB.id}/deactivate`).send({}).set('Authorization', authHeader).expect(400);
     } finally {
-      await sys(async () => {
+      await runWithTenant(e2eCompanyId, async () => {
         await prisma.receivable.deleteMany({ where: { clientId: { in: [clientA.id, clientB.id] } } });
         await prisma.client.deleteMany({ where: { id: { in: [clientA.id, clientB.id] } } });
       });
@@ -246,7 +253,7 @@ describe('QuickFlow backend (e2e)', () => {
         .send({ status: 'INACTIVE' })
         .set('Authorization', authHeader).expect(400);
     } finally {
-      await sys(() => prisma.client.delete({ where: { id: clientRes.body.id } }));
+      await runWithTenant(e2eCompanyId, () => prisma.client.delete({ where: { id: clientRes.body.id } }));
     }
   });
 
@@ -297,7 +304,7 @@ describe('QuickFlow backend (e2e)', () => {
       await request(server).patch(`/clients/${trashed.id}/deactivate`).send({ includeInRevenueReport: false }).set('Authorization', authHeader).expect(200);
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - 31);
-      await sys(async () => {
+      await runWithTenant(e2eCompanyId, async () => {
         await prisma.client.update({ where: { id: trashed.id }, data: { deactivatedAt: cutoff } });
         await prisma.client.update({ where: { id: kept.id }, data: { deactivatedAt: cutoff } });
       });
@@ -311,12 +318,16 @@ describe('QuickFlow backend (e2e)', () => {
 
       // Rule: the purge really cascades — trashed's receivable and subscription
       // are gone too, not just the Client row.
-      const remainingReceivables = await sys(() => prisma.receivable.findMany({ where: { clientId: trashed.id } }));
+      const remainingReceivables = await runWithTenant(e2eCompanyId, () =>
+        prisma.receivable.findMany({ where: { clientId: trashed.id } }),
+      );
       expect(remainingReceivables).toEqual([]);
-      const remainingSubscriptions = await sys(() => prisma.subscription.findMany({ where: { clientId: trashed.id } }));
+      const remainingSubscriptions = await runWithTenant(e2eCompanyId, () =>
+        prisma.subscription.findMany({ where: { clientId: trashed.id } }),
+      );
       expect(remainingSubscriptions).toEqual([]);
     } finally {
-      await sys(async () => {
+      await runWithTenant(e2eCompanyId, async () => {
         await prisma.receivable.deleteMany({ where: { clientId: { in: [trashed.id, kept.id] } } });
         await prisma.client.deleteMany({ where: { id: { in: [trashed.id, kept.id] } } });
       });

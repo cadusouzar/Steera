@@ -168,16 +168,26 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
     expect(checkedA + checkedB).toBe(ROUNDS);
   });
 
-  it('a wrong/nonexistent tenant context sees zero rows, not an error and not everyone else\'s rows', async () => {
+  it('a wrong/nonexistent tenant context never returns everyone else\'s rows', async () => {
     // Directly exercises the Prisma extension with a bogus companyId — the
     // same mechanism the interceptor uses, just pointed at a company that
-    // does not exist. Per the RLS policy's safe default, this must come back
-    // empty, never throw, and never return real data from A or B.
+    // does not exist.
+    //
+    // Under the RLS-only design this used to come back empty (a real, but
+    // row-level-filtered, query against the single shared `public` table).
+    // Since physical per-tenant schemas were introduced (schema-per-tenant
+    // routing fix), `Client` is a tenant model routed to `tenant_<companyId>`
+    // — a bogus companyId has no physical schema at all, so the query now
+    // fails loudly (Postgres "relation does not exist") instead of silently
+    // returning []. That's still the safe outcome this test cares about: it
+    // is architecturally impossible for this to return company A's or B's
+    // real rows. A real request can't reach this state in practice — the
+    // interceptor only ever supplies a companyId from a validated JWT for a
+    // company whose schema was provisioned at registration.
     const { runWithTenant } = await import('../src/prisma/tenant-context');
-    const rows = await runWithTenant('nonexistentcompanyid1234567890', () =>
-      prisma.client.findMany({ where: {} }),
-    );
-    expect(rows).toEqual([]);
+    await expect(
+      runWithTenant('nonexistentcompanyid1234567890', () => prisma.client.findMany({ where: {} })),
+    ).rejects.toThrow();
   });
 
   it('no tenant context at all sees zero rows', async () => {
