@@ -5,26 +5,10 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { selectBypassingRls } from './tenant-physical-read.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
-}
-
-// `$queryRawUnsafe`/`$executeRawUnsafe` never go through the extension's `$allOperations` hook
-// (by design — see tenant-rls.extension.ts), so `runAsSystem()`'s bypass flag alone never reaches
-// the database for a raw query. The tenant schema's own `Client` table has the same
-// FORCE ROW LEVEL SECURITY policy as `public."Client"` (replayed verbatim from the same migration
-// history), so a raw SELECT with no bypass set_config is silently filtered to zero rows by RLS —
-// not proof the row is missing. This helper issues the bypass set_config in the SAME transaction
-// as the raw query, which is what actually reaches Postgres.
-function selectBypassingRls<T>(prisma: PrismaService, sql: string): Promise<T> {
-  return sys(async () => {
-    const results = await prisma.$transaction([
-      prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`,
-      prisma.$queryRawUnsafe<T>(sql),
-    ]);
-    return results[1] as T;
-  });
 }
 
 describe('Roteamento físico real — dado criado pela API cai no schema do tenant (e2e)', () => {

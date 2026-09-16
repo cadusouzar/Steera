@@ -5,24 +5,10 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { selectBypassingRls } from './tenant-physical-read.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
-}
-
-// The tenant schema's own `Client` table carries the same FORCE ROW LEVEL SECURITY policy as
-// `public."Client"` (replayed verbatim by the tenant migrations) — a raw $queryRawUnsafe never
-// goes through the extension's $allOperations hook, so runAsSystem()'s bypass flag alone never
-// reaches Postgres for a raw query, and an un-bypassed SELECT is silently filtered to zero rows.
-// See tenant-routing.e2e-spec.ts for the same fix.
-function selectBypassingRls<T>(prisma: PrismaService, sql: string): Promise<T> {
-  return sys(async () => {
-    const results = await prisma.$transaction([
-      prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`,
-      prisma.$queryRawUnsafe<T>(sql),
-    ]);
-    return results[1] as T;
-  });
 }
 
 describe('Atomicidade de deactivate() após a migração pra forma interativa (e2e)', () => {
