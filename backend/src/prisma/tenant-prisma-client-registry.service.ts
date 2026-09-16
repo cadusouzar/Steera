@@ -3,9 +3,23 @@
 // (a implementação real fica em `prisma.module.ts`, Task 3). Essa separação é deliberada: o
 // registry só sabe cachear/expulsar/coordenar concorrência, nunca como construir um client de
 // verdade — mais fácil de testar isoladamente (Step 1 abaixo nunca precisa de uma URL real).
-import { Injectable, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { assertValidSchemaName, tenantSchemaName } from './tenant-schema.util';
+
+const logger = new Logger('TenantPrismaClientRegistry');
+
+// Achado sob o teste de stress (Task 8): `void client.$disconnect()` sozinho, sem `.catch`, é uma
+// rejeição de Promise não tratada em potencial — e o comportamento padrão do Node moderno pra uma
+// `unhandledRejection` é derrubar o processo inteiro. Uma desconexão que falhar aqui (ex.: o
+// PgBouncer sob concorrência alta recusando/demorando a fechar a conexão física) nunca deveria
+// derrubar o backend inteiro por causa disso — na pior hipótese, uma conexão fica presa até o
+// próximo restart, o que é recuperável; um crash do processo não é.
+function safeDisconnect(client: { $disconnect(): Promise<void> }): void {
+  client.$disconnect().catch((err: unknown) => {
+    logger.warn(`Falha ao desconectar um client de tenant durante expulsão/liberação: ${String(err)}`);
+  });
+}
 
 interface TenantClientEntry {
   client: PrismaClient;
@@ -77,7 +91,7 @@ export class TenantPrismaClientRegistry implements OnApplicationShutdown {
     entry.inFlightOperations--;
     if (entry.pendingEviction && entry.inFlightOperations === 0) {
       this.cache.delete(companyId);
-      void entry.client.$disconnect();
+      safeDisconnect(entry.client);
     }
   }
 
@@ -91,7 +105,9 @@ export class TenantPrismaClientRegistry implements OnApplicationShutdown {
   }
 
   async onApplicationShutdown(): Promise<void> {
-    await Promise.all([...this.cache.values()].map((entry) => entry.client.$disconnect()));
+    // `allSettled`, não `all` — uma desconexão falhando nunca deve impedir a tentativa de
+    // desconectar as demais (mesmo raciocínio de `safeDisconnect` acima).
+    await Promise.allSettled([...this.cache.values()].map((entry) => entry.client.$disconnect()));
     this.cache.clear();
   }
 
@@ -150,7 +166,7 @@ export class TenantPrismaClientRegistry implements OnApplicationShutdown {
 
       if (oldestKey && oldestEntry) {
         this.cache.delete(oldestKey);
-        void oldestEntry.client.$disconnect();
+        safeDisconnect(oldestEntry.client);
         return;
       }
 
