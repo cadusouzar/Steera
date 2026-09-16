@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema } from './tenant-physical-read.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -124,5 +125,76 @@ describe('Provisionamento de tenant novo (e2e)', () => {
     await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId: dupUser.companyId } }));
     await sys(() => prisma.user.deleteMany({ where: { companyId: dupUser.companyId } }));
     await sys(() => prisma.company.delete({ where: { id: dupUser.companyId } }));
+  });
+
+  it('uma marcação de ponto registrada pela empresa está fisicamente no schema dela', async () => {
+    const server = app.getHttpServer();
+    const pontoEmail = `provisioning-ponto-${runId}@test.com`;
+
+    const registerRes = await request(server)
+      .post('/auth/register')
+      .set('x-requested-with', 'XMLHttpRequest')
+      .send({ companyName: 'Provisioning Ponto Co', email: pontoEmail, password: 'senha-de-teste-12345' })
+      .expect(201);
+    const tokenA = `Bearer ${registerRes.body.accessToken}`;
+    const pontoUser = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: pontoEmail } }));
+    const pontoCompanyId = pontoUser.companyId;
+
+    try {
+      // O fundador (criado via /auth/register) nunca tem um Employee vinculado por padrão —
+      // precisa criar um Cargo, um Employee, e se auto-vincular antes de bater o próprio ponto.
+      const roleRes = await request(server)
+        .post('/roles')
+        .set('Authorization', tokenA)
+        .send({ name: 'Cargo Ponto Físico', department: 'Operações' })
+        .expect(201);
+
+      const empRes = await request(server)
+        .post('/employees')
+        .set('Authorization', tokenA)
+        .send({
+          fullName: 'Funcionário Ponto Físico',
+          cpf: '22233344455',
+          roleId: roleRes.body.id,
+          contractType: 'CLT',
+          admissionDate: '2026-01-01',
+          department: 'Operações',
+          baseValue: 3500,
+          paymentDueDay: 5,
+        })
+        .expect(201);
+
+      await request(server)
+        .patch('/auth/me/employee-link')
+        .set('Authorization', tokenA)
+        .send({ employeeId: empRes.body.id })
+        .expect(200);
+
+      // Defaults exigem foto + localização em toda marcação (TimeTrackingSettings.requirePhoto/
+      // requireLocation, ambos @default(true)) — sem relação com roteamento físico, desligados aqui
+      // só para manter este teste focado na prova de roteamento, não no fluxo completo de ponto.
+      await request(server)
+        .patch('/time-tracking-settings')
+        .set('Authorization', tokenA)
+        .send({ requirePhoto: false, requireLocation: false })
+        .expect(200);
+
+      const punchRes = await request(server)
+        .post('/time-clock/punches')
+        .set('Authorization', tokenA)
+        .send({ type: 'CLOCK_IN' })
+        .expect(201);
+
+      // POST /time-clock/punches devolve { event, nextAllowedType }, não o TimeEvent direto na raiz.
+      const timeEventId = punchRes.body.event.id;
+      await assertRowExistsInTenantSchema(prisma, pontoCompanyId, 'TimeEvent', { id: timeEventId });
+      await assertRowAbsentFromPublicSchema(prisma, 'TimeEvent', { id: timeEventId });
+    } finally {
+      const schemaName = `tenant_${pontoCompanyId}`;
+      await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
+      await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId: pontoCompanyId } }));
+      await sys(() => prisma.user.deleteMany({ where: { companyId: pontoCompanyId } }));
+      await sys(() => prisma.company.delete({ where: { id: pontoCompanyId } }));
+    }
   });
 });

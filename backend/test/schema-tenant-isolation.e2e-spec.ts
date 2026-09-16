@@ -5,9 +5,24 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema } from './tenant-physical-read.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
+}
+
+// `$queryRawUnsafe` never goes through the extension's `$allOperations` hook, so `sys()`'s bypass
+// flag alone never reaches Postgres for a raw query — every tenant table carries FORCE ROW LEVEL
+// SECURITY, so an un-bypassed raw SELECT against one is silently filtered to zero rows. See
+// tenant-physical-read.util.ts for the full explanation.
+function selectBypassingRls<T>(prisma: PrismaService, sql: string): Promise<T> {
+  return sys(async () => {
+    const results = await prisma.$transaction([
+      prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`,
+      prisma.$queryRawUnsafe<T>(sql),
+    ]);
+    return results[1] as T;
+  });
 }
 
 describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
@@ -106,5 +121,40 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
       .get(`/clients/${clientBId}`)
       .set('Authorization', tokenA)
       .expect(404);
+  });
+
+  it('o Cliente criado no beforeAll está fisicamente dentro do schema da Empresa A, nunca em public', async () => {
+    const [client] = await selectBypassingRls<{ id: string }[]>(
+      prisma,
+      `SELECT id FROM "tenant_${companyAId}"."Client" WHERE name = 'Cliente João (A)'`,
+    );
+    await assertRowExistsInTenantSchema(prisma, companyAId, 'Client', { id: client.id });
+    await assertRowAbsentFromPublicSchema(prisma, 'Client', { id: client.id });
+  });
+
+  it('um Funcionário criado pela API da Empresa A está fisicamente dentro do schema dela', async () => {
+    const roleRes = await request(app.getHttpServer())
+      .post('/roles')
+      .set('Authorization', tokenA)
+      .send({ name: 'Cargo Físico', department: 'Teste' })
+      .expect(201);
+
+    const empRes = await request(app.getHttpServer())
+      .post('/employees')
+      .set('Authorization', tokenA)
+      .send({
+        fullName: 'Funcionário Físico',
+        cpf: '00000000000',
+        roleId: roleRes.body.id,
+        contractType: 'CLT',
+        admissionDate: '2026-01-01',
+        department: 'Operações',
+        baseValue: 3000,
+        paymentDueDay: 5,
+      })
+      .expect(201);
+
+    await assertRowExistsInTenantSchema(prisma, companyAId, 'Employee', { id: empRes.body.id });
+    await assertRowAbsentFromPublicSchema(prisma, 'Employee', { id: empRes.body.id });
   });
 });
