@@ -207,6 +207,21 @@ describe('AuthService', () => {
       const callOrder = prisma.$executeRawUnsafe.mock.invocationCallOrder;
       const userCreateOrder = prisma.user.create.mock.invocationCallOrder[0];
       expect(Math.max(...callOrder)).toBeLessThan(userCreateOrder);
+
+      // Achado da revisão do Task 7: a asserção acima só provava a ordem CREATE SCHEMA -> user.create,
+      // nunca que o pg_advisory_xact_lock (o fix real pro deadlock 40P01 documentado em
+      // AuthService.register) sequer é chamado, nem que ele roda ANTES de company.create() — a
+      // única coisa que impede a corrida (dois INSERTs concorrentes em Company + as dezenas de
+      // ALTER TABLE ... REFERENCES "Company" das migrations) é essa trava rodar primeiro. Sem esta
+      // asserção, um refactor futuro podia remover/reordenar o lock silenciosamente e só o e2e
+      // (dependente de timing, não garantido em toda execução) acabaria pegando a regressão.
+      const lockCallIndex = prisma.$executeRaw.mock.calls.findIndex(
+        (args: unknown[]) => Array.isArray(args[0]) && (args[0] as string[]).join('').includes('pg_advisory_xact_lock'),
+      );
+      expect(lockCallIndex).not.toBe(-1);
+      const lockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[lockCallIndex];
+      const companyCreateOrder = prisma.company.create.mock.invocationCallOrder[0];
+      expect(lockCallOrder).toBeLessThan(companyCreateOrder);
     });
   });
 
