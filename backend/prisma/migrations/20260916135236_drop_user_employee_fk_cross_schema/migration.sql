@@ -1,0 +1,11 @@
+-- Employee is a tenant model, physically routed to tenant_<companyId> (see the
+-- schema-per-tenant routing fix). A foreign key from public."User" to a table that only
+-- physically exists inside a per-company schema is structurally impossible in Postgres — this
+-- constraint was written before physical per-tenant schemas existed and now blocks every legitimate
+-- PATCH /auth/me/employee-link call for a company using physical routing ("foreign key constraint
+-- violated", the referenced Employee row was never in public."Employee"). Application-level
+-- validation already covers this (AuthService.linkCurrentUserToEmployee confirms the Employee
+-- exists and belongs to the same company before this write, correctly tenant-routed via the model
+-- API) — this migration only drops the now-impossible DB-level constraint. The unique index on
+-- User.employeeId is untouched.
+ALTER TABLE "User" DROP CONSTRAINT "User_employeeId_fkey";

@@ -151,8 +151,18 @@ model User {
   email              String         @unique
   passwordHash       String
   role               UserRole
+  // Sem `@relation` de propósito: `Employee` é um modelo de tenant, fisicamente roteado pro schema
+  // da empresa (ver tenant-rls.extension.ts) — uma FK de `public."User"` pra uma tabela que só
+  // existe fisicamente dentro de `tenant_<companyId>` é estruturalmente impossível no Postgres (o
+  // schema-per-tenant routing fix descobriu isso ao vivo: `PATCH /auth/me/employee-link` derrubava
+  // com "foreign key constraint violated" pra toda empresa nova, porque o Employee referenciado
+  // nunca estava em `public."Employee"`). A integridade já é garantida na aplicação —
+  // `AuthService.linkCurrentUserToEmployee` confirma o Employee existe e pertence à mesma empresa
+  // (via `prisma.employee.findFirst`, corretamente roteado) antes deste UPDATE — e nenhum código do
+  // projeto usa `include: { employee: ... }` (todo lugar que precisa do Employee vinculado já faz a
+  // busca manual em duas etapas, ver `TimeManagementAuthService.resolveOwnEmployee`), então remover
+  // a relação Prisma não quebra nenhum join existente.
   employeeId         String?        @unique
-  employee           Employee?      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   modules            AppModule[]
   status             UserStatus     @default(ACTIVE)
   mustChangePassword Boolean        @default(false)
@@ -257,7 +267,6 @@ model Employee {
   payments                      EmployeePayment[]
   vacationSchedules             VacationSchedule[]
   leaveSchedules                LeaveSchedule[]
-  user                          User?
   managerId                     String?
   manager                       Employee?                  @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
   reports                       Employee[]                 @relation("EmployeeManager")
