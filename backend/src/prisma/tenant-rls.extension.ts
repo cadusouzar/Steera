@@ -1,120 +1,136 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getTenantStore, runInsideExplicitTenantTransaction } from './tenant-context';
 import { assertValidSchemaName, tenantSchemaName } from './tenant-schema.util';
+import { TENANT_TABLE_NAMES } from './tenant-table-names';
 
 /**
- * Database-level Row-Level Security backstop — see the RLS migration
- * (`prisma/migrations/*_enable_row_level_security`) for the Postgres side of
- * this. This extension is the application-layer half: it is what actually
- * turns the per-request tenant context (`tenant-context.ts`) into a real
- * Postgres session variable the RLS policies read.
- *
- * THE SINGLE MOST IMPORTANT CORRECTNESS PROPERTY HERE: `set_config(key,
- * value, true)` — note the `true` (= "local to the current transaction") —
- * is called INSIDE an actual database transaction for every query, so
- * Postgres resets it automatically the instant that transaction ends. A
- * plain `SET` (or `set_config(..., false)`) would persist for the lifetime
- * of the pooled physical connection, not the logical request, and could leak
- * one company's tenant id onto a totally unrelated later request that
- * happens to reuse the same pooled connection. Do not "simplify" this.
- *
- * Two distinct code paths need this, and they must NOT double up:
- *
- * 1. A plain, standalone call like `prisma.client.findFirst(...)` has no
- *    transaction of its own — this extension's `$allOperations` hook wraps
- *    it in a fresh two-statement transaction: `[set_config, the real query]`.
- *
- * 2. A handful of existing services already use `prisma.$transaction([...])`
- *    (array form) or `prisma.$transaction(async (tx) => {...})` (interactive
- *    form) for their OWN atomicity needs (e.g. `UsersService.block`). Those
- *    call sites use `runTenantTransaction`/`runTenantInteractiveTransaction`
- *    below instead of calling `prisma.$transaction` directly — those helpers
- *    set the tenant config as the FIRST statement of the SAME transaction
- *    and mark the async context as `insideExplicitTx`, so this extension's
- *    `$allOperations` hook (which fires for every model operation inside
- *    that transaction too, since extensions carry over to `tx`) sees the
- *    flag and passes the query straight through instead of opening a SECOND,
- *    separate transaction around it.
- *
- *    This matters a lot: wrapping each member of an already-atomic
- *    transaction in its own separate mini-transaction breaks the atomicity
- *    guarantee the original code relied on (verified empirically during
- *    development — an outer transaction whose second statement fails no
- *    longer rolls back the first one). See the RLS report for the
- *    reproduction.
- *
- * When no tenant context is set at all (migrations, health checks, the
- * narrow pre-authentication paths in AuthService that use `runAsSystem`,
- * this project's own e2e-test setup/teardown code) the query is passed
- * through completely unchanged — no wrapping, no forced empty context. This
- * is what keeps existing tooling working exactly as before.
+ * Interface mínima que esta extensão e as duas transaction helpers abaixo precisam do registry —
+ * a classe real (Task 2) tem exatamente estes três métodos públicos. Declarada localmente pra este
+ * arquivo não depender de importar a classe concreta (evita um ciclo de import: o registry usa esta
+ * extensão pra construir seus próprios clients de tenant).
  */
-export function tenantRlsExtension(base: PrismaClient) {
+export interface TenantClientResolver {
+  getClient(companyId: string): Promise<PrismaClient>;
+  release(companyId: string): void;
+  withClient<T>(companyId: string, fn: (client: PrismaClient) => Promise<T>): Promise<T>;
+}
+
+const TENANT_TABLE_SET: ReadonlySet<string> = new Set(TENANT_TABLE_NAMES);
+
+function toModelProperty(model: string): string {
+  return model.charAt(0).toLowerCase() + model.slice(1);
+}
+
+/**
+ * Ponto único de roteamento entre o client central e os clients de tenant.
+ *
+ * Dois modos, distinguidos pela presença do segundo argumento:
+ * - `registry` presente: esta é a extensão do client CENTRAL. Toda operação numa tabela de tenant
+ *   é redirecionada pro client daquela empresa (via `registry.withClient`); toda operação numa
+ *   tabela central (User/Company/RefreshToken/TenantMigration) roda aqui mesmo, sem redirecionar.
+ * - `registry` ausente: esta é a extensão de um client de TENANT específico, já resolvido e criado
+ *   pelo próprio registry (ver Task 2's `createClient`, chamado sem passar `registry`). Toda
+ *   operação que chega aqui já está no lugar certo — só precisa do `set_config` de RLS (defesa em
+ *   profundidade dentro do próprio schema do tenant), nunca redireciona de novo (evitaria recursão
+ *   infinita: se este client redirecionasse de novo, cairia nele mesmo, pra sempre).
+ */
+export function tenantRlsExtension(base: PrismaClient, registry?: TenantClientResolver) {
   return Prisma.defineExtension({
     name: 'tenant-rls',
     query: {
-      // $allModels (not the top-level $allOperations) — this only fires for
-      // actual model CRUD operations (findMany, create, update, ...), never
-      // for `$queryRaw`/`$executeRaw` or `$transaction` itself. That's
-      // exactly what we want: the raw `set_config` calls this extension (and
-      // the transaction helpers below) issue via `$executeRaw` never
-      // recurse back into this same hook.
       $allModels: {
-        async $allOperations({ args, query }) {
+        async $allOperations({ model, operation, args, query }) {
           const store = getTenantStore();
 
-          // No tenant context at all (migrations/health-checks/system code
-          // that never called runWithTenant/runAsSystem) — or already inside
-          // an explicit transaction that set the config itself. Either way,
-          // pass through unchanged.
           if (!store || store.insideExplicitTx) return query(args);
           if (!store.companyId && !store.bypass) return query(args);
 
-          const statements: Prisma.PrismaPromise<unknown>[] = [];
-
           if (store.bypass) {
-            // Modo bypass (login/register/refresh pré-autenticação, setup/teardown de e2e): nunca
-            // define search_path — essas operações só tocam tabelas centrais (User/Company), que
-            // já resolvem corretamente contra `public` (o search_path padrão de uma conexão nova
-            // do Postgres), sem precisar de nenhum comando extra.
-            statements.push(base.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`);
-          } else {
-            // SET LOCAL (nunca SET puro) — mesma razão exata do set_config(..., true) logo abaixo:
-            // sem o LOCAL, o search_path persistiria na conexão física pooled além desta
-            // mini-transação, vazando o schema de uma empresa pra uma requisição de outra empresa
-            // que reaproveite a mesma conexão depois.
-            const schemaName = tenantSchemaName(store.companyId!);
-            assertValidSchemaName(schemaName);
-            statements.push(base.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`));
-            statements.push(base.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`);
+            const results = await base.$transaction([
+              base.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`,
+              query(args),
+            ]);
+            return results[results.length - 1];
           }
 
-          statements.push(query(args));
+          const isTenantModel = registry !== undefined && model !== undefined && TENANT_TABLE_SET.has(model);
 
-          // Array-form $transaction batches every member into ONE physical
-          // Postgres transaction (BEGIN ... COMMIT) — this is what makes the
-          // `true` (LOCAL) scope of set_config (and the `SET LOCAL` above)
-          // actually apply to `query`.
-          const results = await base.$transaction(statements);
-          return results[results.length - 1];
+          if (!isTenantModel) {
+            // Modelo central (ou já estamos dentro de um client de tenant, onde `registry` é
+            // undefined e por isso NENHUM modelo conta como "de tenant" pra fins de redirecionar de
+            // novo) — roda aqui mesmo, só com o set_config (RLS, defesa em profundidade).
+            const results = await base.$transaction([
+              base.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`,
+              query(args),
+            ]);
+            return results[results.length - 1];
+          }
+
+          // Modelo de tenant no client CENTRAL: redireciona pro client resolvido da empresa.
+          //
+          // Achado empírico durante esta task (verificado contra Postgres real, não previsto no
+          // design original): NÃO envolver esta chamada numa segunda `$transaction([...])` aqui —
+          // uma primeira versão fazia `tenantClient.$transaction([setConfig, tenantClient[model][op]
+          // (args)])`, mas `tenantClient[model][op](args)` já dispara a PRÓPRIA extensão do client
+          // de tenant (modo registry-less, ver abaixo), cujo hook chama a SUA PRÓPRIA
+          // `base.$transaction([...])` internamente — ou seja, um `$transaction` aninhado dentro de
+          // outro, em conexões diferentes. Isso não lança erro nenhum (a operação retorna com
+          // sucesso, inclusive satisfazendo a policy de RLS) mas o dado nunca fica persistido em
+          // schema nenhum quando inspecionado por uma conexão separada logo em seguida — reproduzido
+          // ao vivo com um `POST /clients` cujo Cliente criado não aparecia nem em
+          // `tenant_<id>."Client"` nem em `public."Client"`. Delegar direto pro método do model no
+          // client de tenant deixa a extensão DELE (o mesmo caminho testado sozinho por qualquer
+          // client de tenant) ser a única dona da transação real — ela já aplica seu próprio
+          // `set_config` como parte dessa mesma transação (branch `!isTenantModel` acima, que roda
+          // pra TODO model quando `registry` está ausente).
+          return registry!.withClient(store.companyId!, (tenantClient) => {
+            const modelProperty = toModelProperty(model!);
+            return (tenantClient as unknown as Record<string, any>)[modelProperty][operation](args);
+          });
         },
       },
     },
   });
 }
 
-/**
- * For the existing `prisma.$transaction([opA, opB, ...])` (array form) call
- * sites that need their own atomicity (e.g. `UsersService.block`,
- * `ClientsService.deactivate`) — sets the current tenant/system context as
- * the transaction's first statement, then runs the rest of the array inside
- * the SAME transaction. Falls back to a plain, unscoped `$transaction` if
- * called with no tenant/system context active (should not normally happen
- * for these call sites — all of them run inside an authenticated request —
- * but mirrors the "no context = pass through unchanged" rule used
- * everywhere else in this file rather than silently forcing an empty/wrong
- * scope).
- */
+/** Emite as instruções de setup (SET LOCAL search_path + set_config, ou só o set_config de bypass)
+ * que precedem o corpo de uma transação explícita — usado tanto pela forma array quanto pela
+ * interativa abaixo. Sempre reemite o `, public` mesmo quando o client já é o de um tenant
+ * específico (cuja conexão já resolve `tenant_x` sozinha, sem o fallback pra `public`) — necessário
+ * pra qualquer SQL bruto dentro da transação que precise alcançar uma tabela central (ex.: a
+ * réplica de migrations, que tem `REFERENCES "Company"`). */
+function buildSetupStatements(
+  prisma: { $executeRaw: PrismaClient['$executeRaw']; $executeRawUnsafe: PrismaClient['$executeRawUnsafe'] },
+  companyId: string | undefined,
+  bypass: boolean | undefined,
+): Prisma.PrismaPromise<unknown>[] {
+  if (bypass) {
+    return [prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`];
+  }
+  const schemaName = tenantSchemaName(companyId!);
+  assertValidSchemaName(schemaName);
+  return [
+    prisma.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`),
+    prisma.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`,
+  ];
+}
+
+let registeredResolver: TenantClientResolver | undefined;
+
+/** Chamado uma única vez por `prisma.module.ts` — dá às duas funções de transação abaixo acesso ao
+ * mesmo registry usado pelo `$allOperations` da extensão central, sem precisar mudar a assinatura
+ * pública delas (todos os 7 call sites existentes continuam chamando
+ * `runTenantTransaction(this.prisma, [...])`/`runTenantInteractiveTransaction(this.prisma, fn)`
+ * exatamente como hoje, só com 2 argumentos). Mesmo padrão de singleton por módulo já usado por
+ * `tenant-context.ts` (AsyncLocalStorage), não uma invenção nova neste arquivo. */
+export function registerTenantClientResolver(resolver: TenantClientResolver): void {
+  registeredResolver = resolver;
+}
+
+export function getRegisteredTenantClientResolver(): TenantClientResolver | undefined {
+  return registeredResolver;
+}
+
 export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unknown>[]>(
   prisma: {
     $transaction: PrismaClient['$transaction'];
@@ -122,57 +138,71 @@ export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unk
     $executeRawUnsafe: PrismaClient['$executeRawUnsafe'];
   },
   ops: [...T],
+  // Terceiro argumento só usado pelos testes unitários (Step 1) pra injetar um registry fake; os 7
+  // call sites reais nunca passam isto — a função resolve o registry real via
+  // `getRegisteredTenantClientResolver()` quando este argumento é omitido.
+  registryOverride?: TenantClientResolver,
 ): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
   const store = getTenantStore();
-  const transact = prisma.$transaction.bind(prisma) as (
-    ops: Prisma.PrismaPromise<unknown>[],
-  ) => Promise<unknown[]>;
+  const registry = registryOverride ?? getRegisteredTenantClientResolver();
 
   if (!store || (!store.companyId && !store.bypass)) {
+    const transact = prisma.$transaction.bind(prisma) as (
+      ops: Prisma.PrismaPromise<unknown>[],
+    ) => Promise<unknown[]>;
     return transact(ops as unknown as Prisma.PrismaPromise<unknown>[]) as unknown as Promise<{
       [K in keyof T]: Awaited<T[K]>;
     }>;
   }
 
-  const setupStatements: Prisma.PrismaPromise<unknown>[] = [];
-  if (store.bypass) {
-    setupStatements.push(prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`);
-  } else {
-    const schemaName = tenantSchemaName(store.companyId!);
-    assertValidSchemaName(schemaName);
-    setupStatements.push(prisma.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`));
-    setupStatements.push(prisma.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`);
+  if (store.bypass || !registry) {
+    const setupStatements = buildSetupStatements(prisma, store.companyId, store.bypass);
+    const transact = prisma.$transaction.bind(prisma) as (
+      ops: Prisma.PrismaPromise<unknown>[],
+    ) => Promise<unknown[]>;
+    return runInsideExplicitTenantTransaction(async () => {
+      const results = await transact([...setupStatements, ...(ops as unknown as Prisma.PrismaPromise<unknown>[])]);
+      return results.slice(setupStatements.length) as unknown as { [K in keyof T]: Awaited<T[K]> };
+    });
   }
 
-  return runInsideExplicitTenantTransaction(async () => {
-    const results = await transact([...setupStatements, ...(ops as unknown as Prisma.PrismaPromise<unknown>[])]);
-    return results.slice(setupStatements.length) as unknown as { [K in keyof T]: Awaited<T[K]> };
-  });
+  // Nota: os únicos 5 call sites atuais desta função em modo NÃO-bypass já foram migrados (Task 4)
+  // pra `runTenantInteractiveTransaction` — mantido aqui por completude/simetria, não exercitado
+  // por nenhum caminho real após esta correção.
+  return registry.withClient(store.companyId!, (tenantClient) => {
+    const setupStatements = buildSetupStatements(tenantClient, store.companyId, false);
+    return runInsideExplicitTenantTransaction(async () => {
+      const results = await tenantClient.$transaction([...setupStatements, ...(ops as unknown as Prisma.PrismaPromise<unknown>[])]);
+      return results.slice(setupStatements.length) as unknown as { [K in keyof T]: Awaited<T[K]> };
+    });
+  }) as unknown as Promise<{ [K in keyof T]: Awaited<T[K]> }>;
 }
 
-/**
- * Same idea as `runTenantTransaction`, for the interactive
- * `prisma.$transaction(async (tx) => {...})` form (currently only
- * `AuthService.register`, which uses `runAsSystem` around this since it
- * creates a brand new company/user pre-authentication).
- */
 export function runTenantInteractiveTransaction<T>(
   prisma: { $transaction: PrismaClient['$transaction'] },
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  registryOverride?: TenantClientResolver,
 ): Promise<T> {
   const store = getTenantStore();
+  const registry = registryOverride ?? getRegisteredTenantClientResolver();
+
   if (!store || (!store.companyId && !store.bypass)) {
     return prisma.$transaction(fn);
   }
-  return prisma.$transaction(async (tx) => {
-    if (store.bypass) {
-      await tx.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`;
-    } else {
-      const schemaName = tenantSchemaName(store.companyId!);
-      assertValidSchemaName(schemaName);
-      await tx.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`);
-      await tx.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`;
-    }
-    return runInsideExplicitTenantTransaction(() => fn(tx));
-  });
+
+  if (store.bypass || !registry) {
+    return prisma.$transaction(async (tx) => {
+      const setupStatements = buildSetupStatements(tx, store.companyId, store.bypass);
+      for (const stmt of setupStatements) await stmt;
+      return runInsideExplicitTenantTransaction(() => fn(tx));
+    });
+  }
+
+  return registry.withClient(store.companyId!, (tenantClient) =>
+    (tenantClient as unknown as { $transaction: PrismaClient['$transaction'] }).$transaction(async (tx) => {
+      const setupStatements = buildSetupStatements(tx, store.companyId, false);
+      for (const stmt of setupStatements) await stmt;
+      return runInsideExplicitTenantTransaction(() => fn(tx));
+    }),
+  );
 }
