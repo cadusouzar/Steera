@@ -174,7 +174,7 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
     // does not exist. Per the RLS policy's safe default, this must come back
     // empty, never throw, and never return real data from A or B.
     const { runWithTenant } = await import('../src/prisma/tenant-context');
-    const rows = await runWithTenant('this-company-does-not-exist', () =>
+    const rows = await runWithTenant('nonexistentcompanyid1234567890', () =>
       prisma.client.findMany({ where: {} }),
     );
     expect(rows).toEqual([]);
