@@ -200,6 +200,7 @@ model Company {
   timeJustifications     TimeJustification[]
   fileAssets             FileAsset[]
   auditLogs              AuditLog[]
+  tenantMigrations       TenantMigration[]
 }
 
 model Role {
@@ -710,4 +711,20 @@ model AuditLog {
 
   @@index([companyId, createdAt])
   @@index([companyId, employeeId])
+}
+
+// Metadado central sobre tenants (não é dado operacional de empresa nenhuma) — registra quais
+// migrations do histórico de TENANT (prisma/tenant-migrations/, ver Task 3 — não o histórico
+// principal) já foram aplicadas em qual schema físico. Vive no schema central (`public`), sem RLS
+// — mesma categoria de `Company`, consultada sempre via `runWithTenant`/sem contexto de tenant
+// específico, nunca precisa de bypass.
+model TenantMigration {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  migrationName String
+  appliedAt     DateTime @default(now())
+
+  @@unique([companyId, migrationName])
+  @@index([companyId])
 }
