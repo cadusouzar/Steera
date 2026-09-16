@@ -5,24 +5,10 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
-import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema } from './tenant-physical-read.util';
+import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema, selectBypassingRls } from './tenant-physical-read.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
-}
-
-// `$queryRawUnsafe` never goes through the extension's `$allOperations` hook, so `sys()`'s bypass
-// flag alone never reaches Postgres for a raw query — every tenant table carries FORCE ROW LEVEL
-// SECURITY, so an un-bypassed raw SELECT against one is silently filtered to zero rows. See
-// tenant-physical-read.util.ts for the full explanation.
-function selectBypassingRls<T>(prisma: PrismaService, sql: string): Promise<T> {
-  return sys(async () => {
-    const results = await prisma.$transaction([
-      prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`,
-      prisma.$queryRawUnsafe<T>(sql),
-    ]);
-    return results[1] as T;
-  });
 }
 
 describe('Isolamento físico por schema — cross-tenant (e2e)', () => {

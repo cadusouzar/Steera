@@ -12,7 +12,7 @@ function sys<T>(fn: () => Promise<T>): Promise<T> {
 // migrations — an un-bypassed raw SELECT is silently filtered to zero rows by RLS, indistinguishable
 // from "the row isn't there." The bypass `set_config` must be issued in the SAME transaction as the
 // raw query. See tenant-routing.e2e-spec.ts for the first occurrence of this fix.
-function selectBypassingRls<T>(prisma: PrismaService, sql: string): Promise<T> {
+export function selectBypassingRls<T>(prisma: PrismaService, sql: string): Promise<T> {
   return sys(async () => {
     const results = await prisma.$transaction([
       prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`,
