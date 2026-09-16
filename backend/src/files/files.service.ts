@@ -65,8 +65,9 @@ export class FilesService {
 
     await mkdir(STORAGE_ROOT, { recursive: true });
     const storedName = `${randomUUID()}${ALLOWED_EXT[realMime]}`;
-    const storagePath = join('attachments', storedName); // relativo — nunca exposto ao cliente
-    await writeFile(join(STORAGE_ROOT, storedName), bufferToStore);
+    const storagePath = join('attachments', companyId, storedName); // relativo — nunca exposto ao cliente
+    await mkdir(join(STORAGE_ROOT, companyId), { recursive: true });
+    await writeFile(join(STORAGE_ROOT, companyId, storedName), bufferToStore);
 
     return this.prisma.fileAsset.create({
       data: {

@@ -144,7 +144,7 @@ describe('FilesService', () => {
           originalFilename: 'contrato.pdf',
           mimeType: 'application/pdf',
           sizeBytes: file.buffer.length,
-          storagePath: join('attachments', '11111111-1111-1111-1111-111111111111.pdf'),
+          storagePath: join('attachments', 'company-1', '11111111-1111-1111-1111-111111111111.pdf'),
           purpose: 'ADJUSTMENT_ATTACHMENT',
         },
       });
@@ -160,7 +160,7 @@ describe('FilesService', () => {
       expect(sharpMock).toHaveBeenCalledWith(file.buffer);
       const strippedBuffer = Buffer.from('stripped-image-bytes');
       expect(writeFile).toHaveBeenCalledWith(
-        join(process.cwd(), 'storage', 'attachments', '11111111-1111-1111-1111-111111111111.jpg'),
+        join(process.cwd(), 'storage', 'attachments', 'company-1', '11111111-1111-1111-1111-111111111111.jpg'),
         strippedBuffer,
       );
       expect(prisma.fileAsset.create).toHaveBeenCalledWith({
@@ -201,7 +201,7 @@ describe('FilesService', () => {
       const [writtenPath] = writeFile.mock.calls[0];
       expect(writtenPath).not.toContain('passwd');
       expect(writtenPath).not.toContain('..');
-      expect(writtenPath).toBe(join(process.cwd(), 'storage', 'attachments', '11111111-1111-1111-1111-111111111111.pdf'));
+      expect(writtenPath).toBe(join(process.cwd(), 'storage', 'attachments', 'company-1', '11111111-1111-1111-1111-111111111111.pdf'));
     });
 
     it('sanitizes path-traversal/special characters out of the originalFilename metadata field', async () => {
@@ -220,6 +220,20 @@ describe('FilesService', () => {
       detectRealMimeType.mockReturnValue('application/pdf');
       await service.upload('company-1', 'user-1', pdfFile(), FileAssetPurpose.ADJUSTMENT_ATTACHMENT);
       expect(mkdir).toHaveBeenCalledWith(join(process.cwd(), 'storage', 'attachments'), { recursive: true });
+    });
+
+    it('stores the file in a companyId subdirectory and includes companyId in storagePath', async () => {
+      detectRealMimeType.mockReturnValue('application/pdf');
+      const file = pdfFile();
+
+      const result = await service.upload('company-xyz', 'user-1', file, FileAssetPurpose.ADJUSTMENT_ATTACHMENT);
+
+      expect(result.storagePath).toMatch(/^attachments[\\/]company-xyz[\\/]/);
+      expect(mkdir).toHaveBeenCalledWith(join(process.cwd(), 'storage', 'attachments', 'company-xyz'), { recursive: true });
+      expect(writeFile).toHaveBeenCalledWith(
+        join(process.cwd(), 'storage', 'attachments', 'company-xyz', '11111111-1111-1111-1111-111111111111.pdf'),
+        file.buffer,
+      );
     });
   });
 
@@ -242,6 +256,14 @@ describe('FilesService', () => {
       const stream = await service.streamPath(join('attachments', 'existing.pdf'));
       expect(stat).toHaveBeenCalledWith(join(process.cwd(), 'storage', 'attachments', 'existing.pdf'));
       expect(createReadStream).toHaveBeenCalledWith(join(process.cwd(), 'storage', 'attachments', 'existing.pdf'));
+      expect(stream).toBeDefined();
+    });
+
+    it('streams a file from a companyId subdirectory correctly', async () => {
+      const storagePath = join('attachments', 'company-xyz', 'existing.pdf');
+      const stream = await service.streamPath(storagePath);
+      expect(stat).toHaveBeenCalledWith(join(process.cwd(), 'storage', 'attachments', 'company-xyz', 'existing.pdf'));
+      expect(createReadStream).toHaveBeenCalledWith(join(process.cwd(), 'storage', 'attachments', 'company-xyz', 'existing.pdf'));
       expect(stream).toBeDefined();
     });
 
