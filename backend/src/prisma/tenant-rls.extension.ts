@@ -166,9 +166,12 @@ export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unk
     });
   }
 
-  // Nota: os únicos 5 call sites atuais desta função em modo NÃO-bypass já foram migrados (Task 4)
-  // pra `runTenantInteractiveTransaction` — mantido aqui por completude/simetria, não exercitado
-  // por nenhum caminho real após esta correção.
+  // Nota: os dois call sites que tocavam tabela de tenant em modo NÃO-bypass (ClientsService/
+  // EmployeesService.deactivate) já foram migrados pra `runTenantInteractiveTransaction`. Os
+  // demais call sites de `runTenantTransaction` que restam (AuthService.changePassword,
+  // UsersService.block) tocam só modelos CENTRAIS (User/RefreshToken) — nunca chegam a este
+  // branch (`!isTenantModel` sempre roda no client base pra eles) e não têm motivo pra migrar.
+  // Este branch fica aqui por completude/simetria da API, não por ter um chamador real hoje.
   return registry.withClient(store.companyId!, (tenantClient) => {
     const setupStatements = buildSetupStatements(tenantClient, store.companyId, false);
     return runInsideExplicitTenantTransaction(async () => {
