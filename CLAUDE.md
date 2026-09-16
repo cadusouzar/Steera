@@ -634,6 +634,135 @@ revisadas individualmente).
   junto do RLS) e tratamento de `P2002` no find-then-create de `TimeTrackingSettings` (os índices
   únicos são parciais, então não há `upsert` possível — a corrida relê em vez de vazar um 500).
 
+**Isolamento Físico por Schema PostgreSQL (schema-per-tenant, Fase 1, 15-16/09/2026) — infraestrutura
+pronta, mas ACHADO CRÍTICO NA VALIDAÇÃO FINAL: o roteamento de dados de verdade não funciona.** Spec em
+`docs/superpowers/specs/2026-09-15-schema-per-tenant-design.md`, plano em
+`docs/superpowers/plans/2026-09-15-schema-per-tenant.md` (11 tasks). Objetivo original: sair de
+"isolamento só por RLS + coluna `companyId`" para "um schema PostgreSQL físico por empresa como
+camada primária, com RLS mantida como backstop" — ver `[[DECISOES-TECNICAS]]` no vault pro raciocínio
+completo (incluindo o trade-off de segurança de manter `Company`/`User`/`RefreshToken` centrais em vez
+de resolver o tenant por subdomínio/slug antes da senha) e o achado crítico abaixo em detalhe.
+- **Fase 1 vs. Fase 2:** Fase 1 (este plano) é só aditiva — toda empresa **nova** nasceria no modelo
+  físico novo, nenhuma empresa/dado já existente é tocado (permanecem no modelo compartilhado de
+  sempre). Fase 2 (futura, spec separada, só depois da Fase 1 estar de fato validada) migraria os
+  dados das empresas já existentes para seus próprios schemas.
+- **O que FOI implementado e funciona corretamente, verificado nesta validação final:**
+  `AuthService.register()` provisiona um schema físico `tenant_<companyId>` (nome derivado por função
+  pura, `tenantSchemaName()` em `backend/src/prisma/tenant-schema.util.ts` — nunca persistido, nunca
+  aceito de requisição, validado por regex antes de qualquer SQL bruto) numa única transação
+  (`pg_advisory_xact_lock(hashtext('tenant_provisioning'))` → `Company.create` → `CREATE SCHEMA` →
+  replay de todas as migrations de tenant → `User.create`), com rollback atômico completo em qualquer
+  falha (Postgres DDL é transacional). Confirmado via `psql` real nesta validação: duas empresas novas
+  registradas via `POST /auth/register` ganharam `tenant_<idA>`/`tenant_<idB>` reais em
+  `information_schema.schemata`, cada um com exatamente as 19 tabelas de tenant esperadas e SEM
+  `Company`/`User`/`RefreshToken` (`\dt tenant_<id>.*` não lista nenhuma das três).
+  `TenantMigrationManagerService` (`backend/src/tenant-migration/`, `@Cron(EVERY_DAY_AT_3AM)` +
+  `OnApplicationBootstrap`, mesmo padrão de `BillingSchedulerService`) aplica migrations de tenant
+  pendentes em empresas que já têm schema, registrando cada uma em `TenantMigration` (central, sem
+  RLS — bookkeeping de qual migration já foi aplicada a qual empresa).
+- **O novo passo no fluxo de migration:** depois de `npx prisma migrate dev` criar uma migration
+  tocando qualquer tabela de tenant, rodar `npm run generate:tenant-migrations`
+  (`backend/scripts/generate-tenant-migrations.ts`) e revisar o `git diff` do arquivo gerado em
+  `backend/prisma/tenant-migrations/` antes de commitar — o gerador filtra o `migration.sql` de cada
+  migration histórica statement-a-statement, mantendo só o que toca uma tabela em
+  `TENANT_TABLE_NAMES` (`backend/src/prisma/tenant-table-names.ts`); se a migration toca só tabelas
+  centrais (`Company`/`User`/`RefreshToken`/`TenantMigration`), o gerador simplesmente não produz
+  nada pra ela — **comportamento esperado, não um erro**.
+- **`TENANT_TABLE_NAMES` (19 modelos) e a decisão de manter `Holiday` inteiramente central nesta
+  fase:** `Client`, `Receivable`, `Subscription`, `Role`, `Employee`, `EmployeeWarning`,
+  `EmployeeRecurringPayment`, `EmployeePayment`, `VacationSchedule`, `LeaveSchedule`,
+  `TimeTrackingSettings`, `TimeEvent`, `WorkSchedule`, `WorkLocation`, `TimeAdjustmentRequest`,
+  `TimeCorrection`, `TimeJustification`, `FileAsset`, `AuditLog`. `Holiday` fica de fora de propósito:
+  seus escopos `NATIONAL`/`STATE` são catálogo compartilhado por todo o sistema, e o volume/risco do
+  escopo `COMPANY` (feriado customizado) é baixo o suficiente pra não justificar isolamento físico
+  nesta fase — o `companyId`+RLS que já existe hoje já cobre esse caso.
+- **Pré-requisito de privilégio `CREATE SCHEMA`:** satisfeito automaticamente neste ambiente porque
+  `quickflow_app` já é OWNER dos bancos `quickflow`/`quickflow_test` (ver `[[AMBIENTE-LOCAL]]`, seção
+  5) — ownership de banco já inclui o privilégio de criar schemas nele, sem GRANT adicional. Só
+  precisa de atenção explícita se algum dia a aplicação rodar contra um usuário de banco que NÃO seja
+  o dono (ex.: um usuário de aplicação com privilégios restritos por política de infra).
+- **Bug encontrado e corrigido durante o PLANEJAMENTO (antes de qualquer código):** replayar o
+  histórico principal de migrations (`prisma/migrations/`) inteiro dentro de um schema de tenant novo
+  recriaria `Company`/`User`/`RefreshToken` lá dentro — várias migrations reais deste projeto
+  misturam DDL central e de tenant no mesmo arquivo. Resolvido com o segundo histórico filtrado
+  (`prisma/tenant-migrations/`, gerado por `npm run generate:tenant-migrations`) descrito acima —
+  nunca replaya o histórico principal bruto contra um schema de tenant.
+- **Bugs encontrados e corrigidos durante a EXECUÇÃO (Tasks 3-4):** o classificador tinha um regex
+  guloso (`\w+`) em `DROP INDEX` que fazia backtrack pro underscore errado num nome de índice real —
+  trocado por não-guloso (`\w+?`); duas migrations históricas de remediação
+  (`20260911003303_restore_client_trash_columns`, `20260911003700_restore_receivable_subscription_link`,
+  artefatos de um incidente real de `db push --accept-data-loss` antigo) são 100% redundantes quando
+  replayadas a partir de um schema vazio — excluídas via a lista `NOOP_WHEN_REPLAYED_FROM_EMPTY`
+  (hand-maintained) no gerador. Robustez do classificador NÃO é garantida contra SQL futuro arbitrário
+  (`DROP`/`TRUNCATE` não classificados merecem escrutínio manual, o splitter de `;` não foi testado
+  contra corpo de função plpgsql/escape de barra invertida) — caveat honesto, não bloqueante hoje.
+
+> [!danger] ACHADO CRÍTICO na validação final (Task 11, 16/09/2026) — mecanismo primário de
+> isolamento NÃO está ativo para tráfego real da aplicação
+> Tudo acima (criação de schema, réplica de migrations, bookkeeping em `TenantMigration`) funciona
+> exatamente como projetado. O que NÃO funciona: **o Prisma Client (engine padrão, `@prisma/client
+> ^5.20`/instalado `5.22.0`, sem driver adapters) ignora completamente o `SET LOCAL search_path`
+> emitido pela extensão (`tenant-rls.extension.ts`) para toda query gerada via a API de modelo
+> (`prisma.<model>.*`)** — ou seja, para 100% das leituras/escritas reais de todo service do backend.
+> O engine do Prisma resolve cada tabela contra o schema fixado em `DATABASE_URL` (`?schema=public`)
+> no momento da conexão, não contra o `search_path` corrente da transação — mesmo quando o `SET
+> LOCAL search_path` roda como primeira instrução da MESMA transação array-form
+> (`prisma.$transaction([...])`) que a extensão usa.
+>
+> **Evidência reproduzida nesta validação** (registrando 2 empresas novas via `/auth/register` e
+> testando ao vivo): `POST /clients` como Empresa A criou um cliente que a API lista corretamente só
+> pra Empresa A — mas uma consulta `psql` direta em `tenant_<idA>."Client"` mostra **zero linhas**; o
+> registro está inteiro em `public."Client"` (confirmado via `SELECT ... FROM public."Client" WHERE
+> email = ...`, com `app.rls_bypass` ligado). Um diagnóstico isolado (fora do NestJS, sem DI, só
+> `new PrismaClient()` + o exato padrão `$transaction([SET LOCAL search_path, query])` da extensão)
+> confirma a causa raiz sem ambiguidade: `SELECT current_schema()` na MESMA transação retorna
+> corretamente `tenant_<idA>` (o `SET LOCAL` funcionou no Postgres), mas
+> `prisma.client.findMany({})` naquela mesma transação devolveu as 15 linhas de `public."Client"` de
+> **várias empresas diferentes** — nunca a linha de teste inserida via SQL bruto só em
+> `tenant_<idA>."Client"`, que ficou invisível pra API do Prisma.
+>
+> **Consequência prática:** todo schema `tenant_<companyId>` criado por este plano existe, tem as 19
+> tabelas certas, mas fica **permanentemente vazio** — nenhum código da aplicação escreve nele de
+> verdade. O único mecanismo que hoje efetivamente isola dado entre empresas continua sendo a RLS
+> (`companyId` + policy) que já existia ANTES deste plano começar — exatamente a camada que o design
+> pretendia rebaixar a backstop, não a única linha de defesa real. O critério de conclusão "uma
+> requisição de A estruturalmente não consegue ler/escrever dado de B" NÃO é verdade hoje — só é
+> verdade porque a RLS antiga continua fazendo esse trabalho sozinha.
+>
+> **Por que nenhuma das 10 tasks/revisões nem o e2e novo pegou isso:** o teste unitário da extensão
+> (`tenant-rls.extension.spec.ts`) usa um Prisma mockado (nunca toca Postgres de verdade, não pode
+> detectar uma limitação do engine real). O e2e
+> `backend/test/schema-tenant-isolation.e2e-spec.ts` só confirma (a) que o NOME do schema existe em
+> `information_schema.schemata` e (b) que a listagem/acesso por id da API isola corretamente entre
+> empresas — (b) é verdade, mas pela RLS, não pelo roteamento físico; o teste nunca consulta
+> `tenant_<id>."Client"` diretamente pra confirmar que a linha criada está fisicamente lá. É uma
+> lacuna real de cobertura, não um acaso de ambiente — reproduzida de forma determinística com um
+> script isolado que nem passa pelo NestJS.
+>
+> **Achado relacionado (secundário, mesma raiz):** `TenantMigrationManagerService`, ao iterar TODA
+> `Company` no boot/cron, tenta reaplicar o histórico de tenant-migrations inteiro contra empresas que
+> nunca tiveram um schema físico criado (todas as ~50 empresas de teste deste ambiente de dev,
+> anteriores a este plano) — o `SET LOCAL search_path` pra um schema inexistente não dá erro no
+> Postgres, só faz a resolução cair pro próximo item do path (`public`, que já tem os mesmos objetos),
+> gerando um erro de objeto duplicado (`42710`, etc.) capturado e logado por empresa, sem derrubar o
+> boot nem corromper `public` (a transação inteira sofre rollback no primeiro conflito — DDL
+> transacional do Postgres). Ainda assim, isso enche o log de um bloco `ERROR` por empresa legada a
+> cada boot/cron das 3h, sem nenhuma forma de silenciar exceto dando a elas um schema físico (fora do
+> escopo da Fase 1) ou ajustando o serviço pra pular empresas sem schema.
+>
+> **Não corrigido nesta task (Task 11 é só validação + documentação, sem código novo).** Corrigir de
+> verdade exige uma mudança de arquitetura na camada de acesso a dado — candidatos a avaliar em uma
+> spec própria: (a) Prisma Driver Adapters (`@prisma/adapter-pg`) com um `Pool`/`PoolClient`
+> customizado que aplique `SET search_path` por conexão emprestada (precisa verificação própria se o
+> engine realmente delega pro driver nesse modo); (b) uma instância de `PrismaClient` por tenant, cada
+> uma com sua própria `DATABASE_URL?schema=tenant_<id>` (custo de conexões/memória por tenant); (c)
+> reescrever o acesso a dado de tabelas de tenant pra SQL bruto parametrizado (perde a API tipada do
+> Prisma); (d) fallback explícito pra manter RLS como camada primária de fato (não só de nome) até uma
+> dessas opções ser implementada e validada com um teste que compare os dados fisicamente, não só via
+> API. **Recomendação: não tratar a Fase 1 como concluída/pronta pra produção até um teste automatizado
+> novo confirmar, com uma leitura direta em `tenant_<id>."ModelName"`, que a aplicação real grava e lê
+> fisicamente do schema do tenant — não só que o schema existe e que a API filtra certo.**
+
 **Regra permanente de skills:** Antes de realizar qualquer tarefa neste projeto, o Claude Code deve
 verificar as skills disponíveis e utilizar todas aquelas que forem relevantes ao contexto, seguindo
 integralmente suas instruções. Skills não relacionadas à tarefa não devem ser utilizadas.
