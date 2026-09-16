@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getTenantStore, runInsideExplicitTenantTransaction } from './tenant-context';
+import { assertValidSchemaName, tenantSchemaName } from './tenant-schema.util';
 
 /**
  * Database-level Row-Level Security backstop — see the RLS migration
@@ -69,15 +70,33 @@ export function tenantRlsExtension(base: PrismaClient) {
           if (!store || store.insideExplicitTx) return query(args);
           if (!store.companyId && !store.bypass) return query(args);
 
-          const setConfigStatement = store.bypass
-            ? base.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`
-            : base.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`;
+          const statements: Prisma.PrismaPromise<unknown>[] = [];
+
+          if (store.bypass) {
+            // Modo bypass (login/register/refresh pré-autenticação, setup/teardown de e2e): nunca
+            // define search_path — essas operações só tocam tabelas centrais (User/Company), que
+            // já resolvem corretamente contra `public` (o search_path padrão de uma conexão nova
+            // do Postgres), sem precisar de nenhum comando extra.
+            statements.push(base.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`);
+          } else {
+            // SET LOCAL (nunca SET puro) — mesma razão exata do set_config(..., true) logo abaixo:
+            // sem o LOCAL, o search_path persistiria na conexão física pooled além desta
+            // mini-transação, vazando o schema de uma empresa pra uma requisição de outra empresa
+            // que reaproveite a mesma conexão depois.
+            const schemaName = tenantSchemaName(store.companyId!);
+            assertValidSchemaName(schemaName);
+            statements.push(base.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`));
+            statements.push(base.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`);
+          }
+
+          statements.push(query(args));
 
           // Array-form $transaction batches every member into ONE physical
           // Postgres transaction (BEGIN ... COMMIT) — this is what makes the
-          // `true` (LOCAL) scope of set_config actually apply to `query`.
-          const [, result] = await base.$transaction([setConfigStatement, query(args)]);
-          return result;
+          // `true` (LOCAL) scope of set_config (and the `SET LOCAL` above)
+          // actually apply to `query`.
+          const results = await base.$transaction(statements);
+          return results[results.length - 1];
         },
       },
     },
@@ -97,7 +116,11 @@ export function tenantRlsExtension(base: PrismaClient) {
  * scope).
  */
 export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unknown>[]>(
-  prisma: { $transaction: PrismaClient['$transaction']; $executeRaw: PrismaClient['$executeRaw'] },
+  prisma: {
+    $transaction: PrismaClient['$transaction'];
+    $executeRaw: PrismaClient['$executeRaw'];
+    $executeRawUnsafe: PrismaClient['$executeRawUnsafe'];
+  },
   ops: [...T],
 ): Promise<{ [K in keyof T]: Awaited<T[K]> }> {
   const store = getTenantStore();
@@ -110,16 +133,20 @@ export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unk
       [K in keyof T]: Awaited<T[K]>;
     }>;
   }
-  const setConfigStatement = store.bypass
-    ? prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`
-    : prisma.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`;
+
+  const setupStatements: Prisma.PrismaPromise<unknown>[] = [];
+  if (store.bypass) {
+    setupStatements.push(prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`);
+  } else {
+    const schemaName = tenantSchemaName(store.companyId!);
+    assertValidSchemaName(schemaName);
+    setupStatements.push(prisma.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`));
+    setupStatements.push(prisma.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`);
+  }
 
   return runInsideExplicitTenantTransaction(async () => {
-    const [, ...results] = await transact([
-      setConfigStatement,
-      ...(ops as unknown as Prisma.PrismaPromise<unknown>[]),
-    ]);
-    return results as unknown as { [K in keyof T]: Awaited<T[K]> };
+    const results = await transact([...setupStatements, ...(ops as unknown as Prisma.PrismaPromise<unknown>[])]);
+    return results.slice(setupStatements.length) as unknown as { [K in keyof T]: Awaited<T[K]> };
   });
 }
 
@@ -141,6 +168,9 @@ export function runTenantInteractiveTransaction<T>(
     if (store.bypass) {
       await tx.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`;
     } else {
+      const schemaName = tenantSchemaName(store.companyId!);
+      assertValidSchemaName(schemaName);
+      await tx.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`);
       await tx.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`;
     }
     return runInsideExplicitTenantTransaction(() => fn(tx));
