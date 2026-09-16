@@ -39,6 +39,17 @@ export interface TenantPrismaClientRegistryOptions {
   // Injetável pra testes (Task 2 nunca cria um PrismaClient de verdade) — em produção, a Task 3
   // passa uma factory que constrói um PrismaClient real com a extensão de RLS aplicada.
   createClient: (companyId: string, schemaName: string) => Promise<{ $disconnect(): Promise<void> }>;
+  // Achado na revisão final do routing fix: toda empresa cadastrada ANTES da Fase 1 do
+  // schema-per-tenant nunca teve `tenant_<companyId>` criado — a Fase 1 sempre foi aditiva de
+  // propósito (nenhuma empresa/dado já existente seria tocado). Sem esta checagem, o roteamento
+  // tentaria criar um client apontando pra um schema que não existe, e toda query dessa empresa
+  // (as ~50 empresas de teste deste ambiente, e qualquer empresa real cadastrada antes desta
+  // correção) quebraria com "table does not exist" — derrubando por completo o app pra elas.
+  // Injetável pra testes; em produção, `prisma.module.ts` consulta `pg_namespace` via o client
+  // central. Opcional só pra não obrigar todo teste unitário que não se importa com este cenário a
+  // fornecer um fake — quando omitido, assume que o schema sempre existe (o comportamento de antes
+  // desta checagem). `prisma.module.ts` sempre fornece isto de verdade em produção.
+  checkSchemaExists?: (companyId: string, schemaName: string) => Promise<boolean>;
 }
 
 /**
@@ -52,11 +63,31 @@ export interface TenantPrismaClientRegistryOptions {
 export class TenantPrismaClientRegistry implements OnApplicationShutdown {
   private readonly cache = new Map<string, TenantClientEntry>();
   private readonly inFlightCreation = new Map<string, Promise<PrismaClient>>();
+  // Cacheia o resultado por companyId — a existência do schema físico de uma empresa nunca muda
+  // depois de provisionada (nunca é apagada, nunca é criada fora do fluxo de registro), então uma
+  // checagem repetida a cada operação seria uma ida ao Postgres desperdiçada. `undefined` (chave
+  // ausente) significa "ainda não checado"; `false` significa "checado, empresa legada sem schema".
+  private readonly schemaExistenceCache = new Map<string, boolean>();
   private readonly opts: TenantPrismaClientRegistryOptions;
   private useSeq = 0;
 
   constructor(opts: TenantPrismaClientRegistryOptions) {
     this.opts = opts;
+  }
+
+  /** Empresas cadastradas antes da Fase 1 do schema-per-tenant nunca tiveram `tenant_<companyId>`
+   * criado — a Fase 1 sempre foi aditiva de propósito. Retorna `false` pra essas, sem lançar erro,
+   * pra que o chamador (a extensão) possa tratá-las como se ainda estivessem no modelo compartilhado
+   * de sempre, exatamente como antes desta correção. */
+  async hasPhysicalSchema(companyId: string): Promise<boolean> {
+    const cached = this.schemaExistenceCache.get(companyId);
+    if (cached !== undefined) return cached;
+
+    const schemaName = tenantSchemaName(companyId);
+    assertValidSchemaName(schemaName);
+    const exists = this.opts.checkSchemaExists ? await this.opts.checkSchemaExists(companyId, schemaName) : true;
+    this.schemaExistenceCache.set(companyId, exists);
+    return exists;
   }
 
   async getClient(companyId: string): Promise<PrismaClient> {

@@ -168,26 +168,25 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
     expect(checkedA + checkedB).toBe(ROUNDS);
   });
 
-  it('a wrong/nonexistent tenant context never returns everyone else\'s rows', async () => {
+  it('a wrong/nonexistent tenant context sees zero rows, not an error and not everyone else\'s rows', async () => {
     // Directly exercises the Prisma extension with a bogus companyId — the
     // same mechanism the interceptor uses, just pointed at a company that
-    // does not exist.
+    // does not exist. Per the RLS policy's safe default, this must come back
+    // empty, never throw, and never return real data from A or B.
     //
-    // Under the RLS-only design this used to come back empty (a real, but
-    // row-level-filtered, query against the single shared `public` table).
-    // Since physical per-tenant schemas were introduced (schema-per-tenant
-    // routing fix), `Client` is a tenant model routed to `tenant_<companyId>`
-    // — a bogus companyId has no physical schema at all, so the query now
-    // fails loudly (Postgres "relation does not exist") instead of silently
-    // returning []. That's still the safe outcome this test cares about: it
-    // is architecturally impossible for this to return company A's or B's
-    // real rows. A real request can't reach this state in practice — the
-    // interceptor only ever supplies a companyId from a validated JWT for a
-    // company whose schema was provisioned at registration.
+    // History: this briefly threw instead of returning [] during the
+    // schema-per-tenant routing fix, between the physical-routing change
+    // (which redirected every tenant-model query to a per-company schema)
+    // and the `hasPhysicalSchema` fallback fix (revision review, same plan)
+    // that made a company with no physical schema — including, as here, a
+    // company that doesn't exist at all — fall back to the central client
+    // exactly like a legacy pre-routing-fix company would. With that
+    // fallback in place, the original graceful behavior is restored.
     const { runWithTenant } = await import('../src/prisma/tenant-context');
-    await expect(
-      runWithTenant('nonexistentcompanyid1234567890', () => prisma.client.findMany({ where: {} })),
-    ).rejects.toThrow();
+    const rows = await runWithTenant('nonexistentcompanyid1234567890', () =>
+      prisma.client.findMany({ where: {} }),
+    );
+    expect(rows).toEqual([]);
   });
 
   it('no tenant context at all sees zero rows', async () => {
