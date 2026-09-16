@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { assertValidSchemaName } from './tenant-schema.util';
 import { readMigrationSql } from './migration-files.util';
@@ -144,6 +145,21 @@ export async function applyMigrations(
     for (const statement of splitSqlStatements(sql)) {
       await tx.$executeRawUnsafe(statement);
     }
-    await (tx as PrismaClient).tenantMigration.create({ data: { companyId, migrationName } });
+    // Achado na revisão final do routing fix: `tx.tenantMigration.create(...)` (API de modelo)
+    // dependia de `tx` resolver contra o schema CENTRAL — verdade quando o chamador é
+    // AuthService.register (bypass, sempre central), mas não quando o chamador é
+    // TenantMigrationManagerService's catch-up (Task 8 do plano original), onde `tx` vem de um
+    // client de TENANT já resolvido (routing fix, Task 3) — nesse caso a API de modelo compilaria
+    // a query contra `tenant_<id>`, onde `TenantMigration` não existe (é deliberadamente central,
+    // fora de `TENANT_TABLE_NAMES`). SQL bruto, schema-qualificado explicitamente pra `public`,
+    // funciona nos dois casos (schema-qualificação explícita ignora o search_path/schema da conexão
+    // por completo) e mantém o registro de bookkeeping na MESMA transação que o DDL — atomicidade
+    // preservada, sem depender de qual client físico está rodando o replay.
+    await tx.$executeRawUnsafe(
+      'INSERT INTO public."TenantMigration" (id, "companyId", "migrationName", "appliedAt") VALUES ($1, $2, $3, now())',
+      randomUUID(),
+      companyId,
+      migrationName,
+    );
   }
 }

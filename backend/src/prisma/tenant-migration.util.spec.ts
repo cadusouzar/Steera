@@ -6,10 +6,10 @@ jest.mock('./migration-files.util', () => ({
 }));
 
 describe('applyMigrations', () => {
-  let tx: { $executeRawUnsafe: jest.Mock; tenantMigration: { create: jest.Mock } };
+  let tx: { $executeRawUnsafe: jest.Mock };
 
   beforeEach(() => {
-    tx = { $executeRawUnsafe: jest.fn().mockResolvedValue(0), tenantMigration: { create: jest.fn() } };
+    tx = { $executeRawUnsafe: jest.fn().mockResolvedValue(0) };
   });
 
   // Id no formato cuid-like (minúsculo alfanumérico, sem hífen) de propósito — `applyMigrations`
@@ -26,14 +26,23 @@ describe('applyMigrations', () => {
       ['20260101000000_a', '20260102000000_b'],
     );
 
+    // 2 DDL + 2 bookkeeping = 4 chamadas, intercaladas na ordem migration-a-migration.
     expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(1, '-- sql for 20260101000000_a');
-    expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(2, '-- sql for 20260102000000_b');
-    expect(tx.tenantMigration.create).toHaveBeenNthCalledWith(1, {
-      data: { companyId, migrationName: '20260101000000_a' },
-    });
-    expect(tx.tenantMigration.create).toHaveBeenNthCalledWith(2, {
-      data: { companyId, migrationName: '20260102000000_b' },
-    });
+    expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT INTO public."TenantMigration"'),
+      expect.any(String),
+      companyId,
+      '20260101000000_a',
+    );
+    expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(3, '-- sql for 20260102000000_b');
+    expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining('INSERT INTO public."TenantMigration"'),
+      expect.any(String),
+      companyId,
+      '20260102000000_b',
+    );
   });
 
   it('rejeita um nome de schema inválido antes de rodar qualquer SQL', async () => {
@@ -66,13 +75,17 @@ describe('applyMigrations', () => {
       ['20260101000000_multi'],
     );
 
-    expect(tx.$executeRawUnsafe).toHaveBeenCalledTimes(2);
+    // 2 statements de DDL + 1 INSERT de bookkeeping (uma vez por MIGRATION, não por statement).
+    expect(tx.$executeRawUnsafe).toHaveBeenCalledTimes(3);
     expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(1, 'CREATE TABLE "A" ("id" TEXT NOT NULL)');
     expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(2, `CREATE TABLE "B" ("note" TEXT DEFAULT 'a;b')`);
-    expect(tx.tenantMigration.create).toHaveBeenCalledTimes(1);
-    expect(tx.tenantMigration.create).toHaveBeenCalledWith({
-      data: { companyId, migrationName: '20260101000000_multi' },
-    });
+    expect(tx.$executeRawUnsafe).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('INSERT INTO public."TenantMigration"'),
+      expect.any(String),
+      companyId,
+      '20260101000000_multi',
+    );
 
     jest.dontMock('./migration-files.util');
     jest.resetModules();
