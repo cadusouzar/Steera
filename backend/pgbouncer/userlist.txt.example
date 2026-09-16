@@ -1,0 +1,4 @@
+# Copie para userlist.txt (gitignored — nunca versionado, mesmo padrão de backend/.env) e troque
+# "SENHA_AQUI" pela mesma senha usada na DATABASE_URL de backend/.env — ambiente de desenvolvimento
+# local apenas.
+"quickflow_app" "SENHA_AQUI"

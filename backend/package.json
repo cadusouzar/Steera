@@ -10,7 +10,7 @@
     "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings 0",
     "test": "jest --testPathIgnorePatterns=test/",
     "test:watch": "jest --watch --testPathIgnorePatterns=test/",
-    "test:e2e": "node --env-file=.env.test node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
+    "test:e2e": "node --env-file=.env.test node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --maxWorkers=2",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "seed:holidays": "ts-node prisma/seed-holidays.ts",

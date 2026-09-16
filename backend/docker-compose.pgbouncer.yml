@@ -1,0 +1,13 @@
+# Só o PgBouncer roda em contêiner — o Postgres e o backend continuam rodando direto na máquina,
+# exatamente como antes desta correção. `host.docker.internal` é o nome que o Docker Desktop
+# (Windows/Mac) resolve pro próprio host — é assim que o contêiner alcança o Postgres local.
+services:
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    ports:
+      - "6432:6432"
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
