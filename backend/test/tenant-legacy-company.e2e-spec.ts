@@ -5,19 +5,10 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { selectBypassingRls } from './tenant-physical-read.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
-}
-
-function selectBypassingRls<T>(prisma: PrismaService, sql: string): Promise<T> {
-  return sys(async () => {
-    const results = await prisma.$transaction([
-      prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`,
-      prisma.$queryRawUnsafe<T>(sql),
-    ]);
-    return results[1] as T;
-  });
 }
 
 // Achado na revisão final do routing fix: toda empresa cadastrada ANTES da Fase 1 do
