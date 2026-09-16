@@ -28,6 +28,7 @@ import { TimeTrackingSettingsModule } from './time-tracking-settings/time-tracki
 import { TimeClockModule } from './time-clock/time-clock.module';
 import { TimeAdjustmentsModule } from './time-adjustments/time-adjustments.module';
 import { TimeJustificationsModule } from './time-justifications/time-justifications.module';
+import { TenantMigrationModule } from './tenant-migration/tenant-migration.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { TimeJustificationsModule } from './time-justifications/time-justificati
     TimeClockModule,
     TimeAdjustmentsModule,
     TimeJustificationsModule,
+    TenantMigrationModule,
   ],
   providers: [
     // JwtAuthGuard já respeita @Public() (Task 3) — nega por padrão em toda
