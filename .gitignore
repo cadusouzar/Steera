@@ -1,6 +1,8 @@
 node_modules
 dist
 .superpowers/
+CLAUDE.md
+docs/superpowers/
 backend/node_modules
 backend/dist
 backend/coverage
