@@ -73,6 +73,11 @@ describe('CustomFieldDefinitionsService', () => {
       await service.reactivate('def1');
       expect(prisma.customFieldDefinition.update).toHaveBeenCalledWith({ where: { id: 'def1' }, data: { active: true } });
     });
+
+    it('rejeita reativar um campo já ativo', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition({ active: true }));
+      await expect(service.reactivate('def1')).rejects.toThrow(ConflictException);
+    });
   });
 
   describe('remove', () => {
