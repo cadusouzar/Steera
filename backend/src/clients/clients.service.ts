@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { ClientStatus, ReceivableStatus, SubscriptionStatus } from '@prisma/client';
+import { ClientStatus, Prisma, ReceivableStatus, SubscriptionStatus } from '@prisma/client';
 import { CompanyContextService } from '../company/company-context.service';
+import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { startOfToday } from '../common/date.util';
@@ -16,11 +17,19 @@ export class ClientsService {
     private readonly prisma: PrismaService,
     private readonly companyContext: CompanyContextService,
     private readonly clientTrash: ClientTrashService,
+    private readonly customFieldValues: CustomFieldValuesService,
   ) {}
 
   async create(dto: CreateClientDto) {
     const companyId = await this.companyContext.getCurrentCompanyId();
-    return this.prisma.client.create({ data: { ...dto, companyId } });
+    const { customFields, ...nativeDto } = dto;
+    const resolvedCustomFields = await this.customFieldValues.resolveValuesForCreate('client', customFields);
+
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const created = await tx.client.create({ data: { ...nativeDto, companyId } });
+      await this.customFieldValues.setValues('client', created.id, resolvedCustomFields, tx);
+      return this.withCustomFields(created, tx);
+    });
   }
 
   async findAll(query: QueryClientsDto) {
@@ -55,7 +64,10 @@ export class ClientsService {
       this.prisma.client.count({ where }),
     ]);
 
-    return { items, total, page, pageSize };
+    const customFieldsMap = await this.customFieldValues.getValuesForRecords('client', items.map((i) => i.id));
+    const itemsWithCustomFields = items.map((item) => ({ ...item, customFields: customFieldsMap.get(item.id) ?? {} }));
+
+    return { items: itemsWithCustomFields, total, page, pageSize };
   }
 
   // Rota top-level (/clients/:id) — o único jeito de barrar acesso entre
@@ -87,17 +99,35 @@ export class ClientsService {
       }),
     ]);
 
+    const customFieldsMap = await this.customFieldValues.getValuesForRecords('client', [id]);
+
     return {
       ...client,
       totalPaid: Number(paidAgg._sum.amount ?? 0),
       totalPending: Number(pendingAgg._sum.amount ?? 0),
       totalOverdue: Number(overdueAgg._sum.amount ?? 0),
+      customFields: customFieldsMap.get(id) ?? {},
     };
   }
 
   async update(id: string, dto: UpdateClientDto) {
     await this.assertExists(id);
-    return this.prisma.client.update({ where: { id }, data: dto });
+    const { customFields, ...nativeDto } = dto;
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const updated = await tx.client.update({ where: { id }, data: nativeDto });
+      if (customFields) await this.customFieldValues.setValues('client', id, customFields, tx);
+      return this.withCustomFields(updated, tx);
+    });
+  }
+
+  // `tx` opcional: create/update já estão dentro de uma transação de tenant e passam a mesma pra
+  // reaproveitar a conexão (ver o comentário em CustomFieldValuesService.getActiveDefinitions).
+  private async withCustomFields<T extends { id: string }>(
+    record: T,
+    tx?: Prisma.TransactionClient,
+  ): Promise<T & { customFields: Record<string, unknown> }> {
+    const map = await this.customFieldValues.getValuesForRecords('client', [record.id], tx);
+    return { ...record, customFields: map.get(record.id) ?? {} };
   }
 
   async deactivate(id: string, dto: DeactivateClientDto) {

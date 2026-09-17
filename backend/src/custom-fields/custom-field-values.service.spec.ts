@@ -12,12 +12,23 @@ function makeDefinition(overrides: Partial<any> = {}) {
 }
 
 describe('CustomFieldValuesService', () => {
-  let prisma: { customFieldDefinition: { findMany: jest.Mock }; $queryRawUnsafe: jest.Mock };
+  let prisma: {
+    customFieldDefinition: { findMany: jest.Mock };
+    $queryRawUnsafe: jest.Mock;
+    $transaction: jest.Mock;
+  };
   let companyContext: { getCurrentCompanyId: jest.Mock };
   let service: CustomFieldValuesService;
 
   beforeEach(() => {
-    prisma = { customFieldDefinition: { findMany: jest.fn() }, $queryRawUnsafe: jest.fn() };
+    prisma = {
+      customFieldDefinition: { findMany: jest.fn() },
+      $queryRawUnsafe: jest.fn(),
+      // Sem contexto de tenant (nenhum AsyncLocalStorage ativo neste teste unitário),
+      // runTenantInteractiveTransaction cai direto em `prisma.$transaction(fn)` — mesmo padrão já
+      // usado em clients.service.spec.ts.
+      $transaction: jest.fn((fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
+    };
     companyContext = { getCurrentCompanyId: jest.fn().mockResolvedValue('c1') };
     service = new CustomFieldValuesService(prisma as any, companyContext as any);
   });
@@ -51,24 +62,28 @@ describe('CustomFieldValuesService', () => {
   });
 
   describe('setValues', () => {
-    let tx: { $executeRawUnsafe: jest.Mock };
-    beforeEach(() => { tx = { $executeRawUnsafe: jest.fn() }; });
+    // `setValues` busca as definições ativas via o próprio `tx` recebido (não mais via `prisma`
+    // central) — reaproveita a MESMA transação/conexão do chamador em vez de abrir uma segunda.
+    let tx: { $executeRawUnsafe: jest.Mock; customFieldDefinition: { findMany: jest.Mock } };
+    beforeEach(() => {
+      tx = { $executeRawUnsafe: jest.fn(), customFieldDefinition: { findMany: jest.fn() } };
+    });
 
     it('não faz nada quando a entidade não tem campo ativo', async () => {
-      prisma.customFieldDefinition.findMany.mockResolvedValue([]);
+      tx.customFieldDefinition.findMany.mockResolvedValue([]);
       await service.setValues('client', 'rec1', { custom_segmento: 'x' }, tx as any);
       expect(tx.$executeRawUnsafe).not.toHaveBeenCalled();
     });
 
     it('rejeita uma chave que não corresponde a nenhum campo ativo', async () => {
-      prisma.customFieldDefinition.findMany.mockResolvedValue([makeDefinition()]);
+      tx.customFieldDefinition.findMany.mockResolvedValue([makeDefinition()]);
       await expect(
         service.setValues('client', 'rec1', { custom_inexistente: 'x' }, tx as any),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('escreve só as colunas presentes no objeto — update parcial', async () => {
-      prisma.customFieldDefinition.findMany.mockResolvedValue([
+      tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({ columnName: 'custom_a' }),
         makeDefinition({ id: 'def2', columnName: 'custom_b' }),
       ]);
@@ -81,7 +96,7 @@ describe('CustomFieldValuesService', () => {
     });
 
     it('rejeita valor não-numérico pra um campo NUMBER', async () => {
-      prisma.customFieldDefinition.findMany.mockResolvedValue([
+      tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({ type: CustomFieldType.NUMBER, columnName: 'custom_qtd' }),
       ]);
       await expect(
@@ -90,7 +105,7 @@ describe('CustomFieldValuesService', () => {
     });
 
     it('rejeita valor fora da lista de opções pra um campo SELECT', async () => {
-      prisma.customFieldDefinition.findMany.mockResolvedValue([
+      tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({
           type: CustomFieldType.SELECT, columnName: 'custom_seg',
           configuration: { options: ['Pequeno', 'Médio'] },
@@ -102,7 +117,7 @@ describe('CustomFieldValuesService', () => {
     });
 
     it('rejeita null pra um campo obrigatório', async () => {
-      prisma.customFieldDefinition.findMany.mockResolvedValue([
+      tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({ required: true, columnName: 'custom_seg' }),
       ]);
       await expect(
@@ -111,7 +126,7 @@ describe('CustomFieldValuesService', () => {
     });
 
     it('adiciona o cast ::text[] pra um campo MULTI_SELECT', async () => {
-      prisma.customFieldDefinition.findMany.mockResolvedValue([
+      tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({
           type: CustomFieldType.MULTI_SELECT, columnName: 'custom_tags',
           configuration: { options: ['A', 'B'] },

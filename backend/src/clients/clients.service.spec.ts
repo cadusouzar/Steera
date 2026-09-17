@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { CompanyContextService } from '../company/company-context.service';
+import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClientTrashService } from './client-trash.service';
 import { ClientsService } from './clients.service';
@@ -14,6 +15,11 @@ describe('ClientsService', () => {
     $transaction: jest.Mock;
   };
   let clientTrash: { purgeExpiredTrash: jest.Mock };
+  let customFieldValues: {
+    resolveValuesForCreate: jest.Mock;
+    setValues: jest.Mock;
+    getValuesForRecords: jest.Mock;
+  };
 
   beforeEach(async () => {
     prisma = {
@@ -36,6 +42,11 @@ describe('ClientsService', () => {
       $transaction: jest.fn((fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
     };
     clientTrash = { purgeExpiredTrash: jest.fn().mockResolvedValue(0) };
+    customFieldValues = {
+      resolveValuesForCreate: jest.fn().mockResolvedValue({}),
+      setValues: jest.fn(),
+      getValuesForRecords: jest.fn().mockResolvedValue(new Map()),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -43,6 +54,7 @@ describe('ClientsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: CompanyContextService, useValue: { getCurrentCompanyId: jest.fn().mockResolvedValue('company-1') } },
         { provide: ClientTrashService, useValue: clientTrash },
+        { provide: CustomFieldValuesService, useValue: customFieldValues },
       ],
     }).compile();
 
@@ -73,6 +85,7 @@ describe('ClientsService', () => {
       totalPaid: 0,
       totalPending: 0,
       totalOverdue: 0,
+      customFields: {},
     });
   });
 
@@ -113,7 +126,7 @@ describe('ClientsService', () => {
       where: { id: '1' },
       data: { name: 'Ana Nova' },
     });
-    expect(result).toEqual({ id: '1', name: 'Ana Nova' });
+    expect(result).toEqual({ id: '1', name: 'Ana Nova', customFields: {} });
   });
 
   describe('findAll', () => {
