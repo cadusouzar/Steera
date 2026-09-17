@@ -1,6 +1,6 @@
 import { ContractType } from '@prisma/client';
 import {
-  IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min, MinLength,
+  IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Max, Min, MinLength,
 } from 'class-validator';
 
 export class CreateEmployeeDto {
@@ -19,4 +19,5 @@ export class CreateEmployeeDto {
   @IsOptional() @IsString() bankDetails?: string;
   @IsOptional() @IsBoolean() salaryRecurrenceEnabled?: boolean;
   @IsOptional() @IsString() managerId?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }

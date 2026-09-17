@@ -171,4 +171,41 @@ describe('Campos personalizados: isolamento entre empresas em Clientes (e2e)', (
       .expect(201);
     expect(createA.body.customFields).toEqual({ custom_nivel_de_senioridade: 'Sênior' });
   });
+
+  it('isolamento se repete em Funcionários: campo de A nunca aparece pra B', async () => {
+    await request(app.getHttpServer())
+      .post('/custom-fields')
+      .set('Authorization', tokenA)
+      .send({ entity: 'employee', displayName: 'Camiseta', type: 'TEXT' })
+      .expect(201);
+
+    const activeFieldsB = await request(app.getHttpServer())
+      .get('/custom-fields/active?entity=employee')
+      .set('Authorization', tokenB)
+      .expect(200);
+    expect(activeFieldsB.body).toEqual([]);
+
+    const roleRes = await request(app.getHttpServer())
+      .post('/roles')
+      .set('Authorization', tokenA)
+      .send({ name: 'Cargo Custom Fields', department: 'Teste' })
+      .expect(201);
+
+    const createA = await request(app.getHttpServer())
+      .post('/employees')
+      .set('Authorization', tokenA)
+      .send({
+        fullName: 'Funcionário Custom Fields',
+        cpf: '11111111111',
+        roleId: roleRes.body.id,
+        contractType: 'CLT',
+        admissionDate: '2026-01-01',
+        department: 'Operações',
+        baseValue: 3000,
+        paymentDueDay: 5,
+        customFields: { custom_camiseta: 'G' },
+      })
+      .expect(201);
+    expect(createA.body.customFields).toEqual({ custom_camiseta: 'G' });
+  });
 });

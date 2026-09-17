@@ -4,8 +4,15 @@ import { maskCpf } from '../common/cpf.util';
 // `manager` só vem preenchido quando o caller fez o join (ver
 // EmployeesService.create/update/findOne) — nos demais call sites (ex.:
 // deactivate/reactivate) o objeto ainda tem `managerId` (campo real do
-// modelo), só `managerName` fica null por falta do join.
-type EmployeeWithOptionalManager = Employee & { manager?: { fullName: string } | null };
+// modelo), só `managerName` fica null por falta do join. `customFields` só
+// vem preenchido quando o caller passou pelo `withCustomFields`/merge em lote
+// de EmployeesService (create/update/findOne/findAll) — mesmos call sites de
+// deactivate/reactivate acima ficam sem, por não terem mudado o próprio
+// registro de campos personalizados.
+type EmployeeWithOptionalManager = Employee & {
+  manager?: { fullName: string } | null;
+  customFields?: Record<string, unknown>;
+};
 
 // Usado em listagens — sem CPF completo nem dados bancários.
 export function toEmployeeListItem(employee: EmployeeWithOptionalManager) {
@@ -19,6 +26,7 @@ export function toEmployeeListItem(employee: EmployeeWithOptionalManager) {
     status: employee.status,
     cpfMasked: maskCpf(employee.cpf),
     baseValue: Number(employee.baseValue),
+    customFields: employee.customFields ?? {},
   };
 }
 
@@ -46,5 +54,6 @@ export function toEmployeeDetail(employee: EmployeeWithOptionalManager) {
     salaryRecurrenceEnabled: employee.salaryRecurrenceEnabled,
     createdAt: employee.createdAt,
     updatedAt: employee.updatedAt,
+    customFields: employee.customFields ?? {},
   };
 }

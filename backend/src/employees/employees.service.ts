@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Employee, EmployeeStatus } from '@prisma/client';
+import { Employee, EmployeeStatus, Prisma } from '@prisma/client';
 import { normalizeCpf } from '../common/cpf.util';
 import { parseDateOnly } from '../common/date.util';
 import { CompanyContextService } from '../company/company-context.service';
+import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -14,6 +15,7 @@ export class EmployeesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyContext: CompanyContextService,
+    private readonly customFieldValues: CustomFieldValuesService,
   ) {}
 
   private async assertRoleUsable(roleId: string, companyId: string) {
@@ -54,26 +56,33 @@ export class EmployeesService {
       await this.assertManagerUsable(dto.managerId, companyId);
     }
 
-    return this.prisma.employee.create({
-      data: {
-        companyId,
-        roleId: dto.roleId,
-        fullName: dto.fullName,
-        cpf,
-        email: dto.email,
-        phone: dto.phone,
-        address: dto.address,
-        contractType: dto.contractType,
-        admissionDate: parseDateOnly(dto.admissionDate),
-        department: dto.department,
-        baseValue: dto.baseValue,
-        paymentDueDay: dto.paymentDueDay,
-        payOnLastBusinessDay: dto.payOnLastBusinessDay ?? false,
-        bankDetails: dto.bankDetails,
-        salaryRecurrenceEnabled: dto.salaryRecurrenceEnabled ?? true,
-        managerId: dto.managerId,
-      },
-      include: { manager: { select: { fullName: true } } },
+    const { customFields, ...nativeDto } = dto;
+    const resolvedCustomFields = await this.customFieldValues.resolveValuesForCreate('employee', customFields);
+
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const created = await tx.employee.create({
+        data: {
+          companyId,
+          roleId: nativeDto.roleId,
+          fullName: nativeDto.fullName,
+          cpf,
+          email: nativeDto.email,
+          phone: nativeDto.phone,
+          address: nativeDto.address,
+          contractType: nativeDto.contractType,
+          admissionDate: parseDateOnly(nativeDto.admissionDate),
+          department: nativeDto.department,
+          baseValue: nativeDto.baseValue,
+          paymentDueDay: nativeDto.paymentDueDay,
+          payOnLastBusinessDay: nativeDto.payOnLastBusinessDay ?? false,
+          bankDetails: nativeDto.bankDetails,
+          salaryRecurrenceEnabled: nativeDto.salaryRecurrenceEnabled ?? true,
+          managerId: nativeDto.managerId,
+        },
+        include: { manager: { select: { fullName: true } } },
+      });
+      await this.customFieldValues.setValues('employee', created.id, resolvedCustomFields, tx);
+      return this.withCustomFields(created, tx);
     });
   }
 
@@ -100,7 +109,10 @@ export class EmployeesService {
       this.prisma.employee.count({ where }),
     ]);
 
-    return { items, total, page, pageSize };
+    const customFieldsMap = await this.customFieldValues.getValuesForRecords('employee', items.map((i) => i.id));
+    const itemsWithCustomFields = items.map((item) => ({ ...item, customFields: customFieldsMap.get(item.id) ?? {} }));
+
+    return { items: itemsWithCustomFields, total, page, pageSize };
   }
 
   async assertExists(id: string): Promise<Employee> {
@@ -121,7 +133,7 @@ export class EmployeesService {
       include: { manager: { select: { fullName: true } } },
     });
     if (!employee) throw new NotFoundException(`Funcionário ${id} não encontrado`);
-    return employee;
+    return this.withCustomFields(employee);
   }
 
   async update(id: string, dto: UpdateEmployeeDto) {
@@ -144,15 +156,31 @@ export class EmployeesService {
       if (conflict) throw new ConflictException('Já existe um funcionário com este CPF nesta empresa');
     }
 
-    return this.prisma.employee.update({
-      where: { id },
-      data: {
-        ...dto,
-        ...(cpf ? { cpf } : {}),
-        ...(dto.admissionDate ? { admissionDate: parseDateOnly(dto.admissionDate) } : {}),
-      },
-      include: { manager: { select: { fullName: true } } },
+    const { customFields, ...nativeDto } = dto;
+
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const updated = await tx.employee.update({
+        where: { id },
+        data: {
+          ...nativeDto,
+          ...(cpf ? { cpf } : {}),
+          ...(nativeDto.admissionDate ? { admissionDate: parseDateOnly(nativeDto.admissionDate) } : {}),
+        },
+        include: { manager: { select: { fullName: true } } },
+      });
+      if (customFields) await this.customFieldValues.setValues('employee', id, customFields, tx);
+      return this.withCustomFields(updated, tx);
     });
+  }
+
+  // `tx` opcional: create/update já estão dentro de uma transação de tenant e passam a mesma pra
+  // reaproveitar a conexão (ver o comentário em CustomFieldValuesService.getActiveDefinitions).
+  private async withCustomFields<T extends { id: string }>(
+    record: T,
+    tx?: Prisma.TransactionClient,
+  ): Promise<T & { customFields: Record<string, unknown> }> {
+    const map = await this.customFieldValues.getValuesForRecords('employee', [record.id], tx);
+    return { ...record, customFields: map.get(record.id) ?? {} };
   }
 
   // Nunca apaga o funcionário — só marca INACTIVE e, na mesma transação,

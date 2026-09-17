@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { CompanyContextService } from '../company/company-context.service';
+import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeesService } from './employees.service';
 
@@ -12,19 +13,33 @@ describe('EmployeesService', () => {
     employeeRecurringPayment: Record<string, jest.Mock>;
     $transaction: jest.Mock;
   };
+  let customFieldValues: {
+    resolveValuesForCreate: jest.Mock;
+    setValues: jest.Mock;
+    getValuesForRecords: jest.Mock;
+  };
 
   beforeEach(async () => {
     prisma = {
       employee: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn(), update: jest.fn() },
       role: { findFirst: jest.fn() },
       employeeRecurringPayment: { updateMany: jest.fn() },
-      $transaction: jest.fn(),
+      // Mirrors Prisma's interactive form: $transaction(async (tx) => ...) invokes the callback
+      // with a `tx` — here the same mocked `prisma` object, so existing assertions against
+      // `prisma.employee.create`/`prisma.employee.update` keep working unchanged.
+      $transaction: jest.fn((fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
+    };
+    customFieldValues = {
+      resolveValuesForCreate: jest.fn().mockResolvedValue({}),
+      setValues: jest.fn(),
+      getValuesForRecords: jest.fn().mockResolvedValue(new Map()),
     };
     const module = await Test.createTestingModule({
       providers: [
         EmployeesService,
         { provide: PrismaService, useValue: prisma },
         { provide: CompanyContextService, useValue: { getCurrentCompanyId: jest.fn().mockResolvedValue('company-1') } },
+        { provide: CustomFieldValuesService, useValue: customFieldValues },
       ],
     }).compile();
     service = module.get(EmployeesService);
