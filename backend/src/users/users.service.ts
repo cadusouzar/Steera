@@ -6,6 +6,7 @@ import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 const PLAN_LIMITS: Record<string, number> = { BASICO: 10, PRO: 50, EMPRESARIAL: 999_999 };
 
@@ -135,6 +136,8 @@ export class UsersService {
     await runInsideExplicitTenantTransaction(() =>
       this.prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
+        await this.assertNotLastActiveAdmin(tx, companyId, userId);
         await tx.user.update({ where: { id: userId }, data: { status: 'BLOCKED' } });
         await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
       }),
@@ -144,7 +147,90 @@ export class UsersService {
   async unblock(companyId: string, userId: string) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
-    await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } });
+    // Reseta failedLoginAttempts também — cobre tanto um BLOCKED (ação de admin) quanto um LOCKED
+    // (travado pelo próprio backend por excesso de tentativas, ver AuthService.login()) com a mesma
+    // ação: sem isso, um login LOCKED desbloqueado voltaria a travar sozinho na primeira senha
+    // errada seguinte, porque o contador nunca foi zerado.
+    await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE', failedLoginAttempts: 0 } });
+  }
+
+  // Edição de um login já existente (17/09/2026) — hoje só `modules`. Único op simples, sem
+  // necessidade de transação especial: não mexe em `RefreshToken`, não tem invariante de
+  // concorrência (diferente de block/remove/updatePontoAccess, que protegem "pelo menos um admin
+  // ativo").
+  async update(companyId: string, userId: string, dto: UpdateUserDto) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
+    if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    return this.toPublicUser(
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { modules: dto.modules },
+        select: SAFE_USER_SELECT,
+      }),
+    );
+  }
+
+  // Exclusão de verdade (17/09/2026) — diferente de block(), que é reversível e não some com o
+  // registro. "Excluir" aqui é uma decisão deliberada e distinta: apagar de vez um login criado por
+  // engano, ou remover o acesso de alguém que não deveria nem deixar rastro. `RefreshToken` tem
+  // `onDelete: Cascade` a partir de `User`, então as sessões daquele login somem junto sem precisar
+  // de limpeza manual. `employeeId` (se houver) fica livre pra um login novo no futuro.
+  async remove(companyId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
+    if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    await runInsideExplicitTenantTransaction(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
+        await this.assertNotLastActiveAdmin(tx, companyId, userId);
+        await tx.user.delete({ where: { id: userId } });
+      }),
+    );
+  }
+
+  // Redefinição de senha por um admin (17/09/2026) — mesmo padrão de senha temporária fixa de
+  // create(), devolvida uma única vez. Também reativa o login (ACTIVE) e zera
+  // failedLoginAttempts: é o caminho de saída de um login LOCKED por excesso de tentativas (a outra
+  // opção é só unblock(), que mantém a senha antiga — reset é pra quando a senha em si é o
+  // problema, ex.: o dono esqueceu ou suspeita que vazou).
+  async resetPassword(companyId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
+    if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+
+    const temporaryPassword = 'Mudar@123';
+    const passwordHash = await hashPassword(temporaryPassword);
+
+    await runInsideExplicitTenantTransaction(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+        await tx.user.update({
+          where: { id: userId },
+          data: { passwordHash, mustChangePassword: true, status: 'ACTIVE', failedLoginAttempts: 0 },
+        });
+        await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      }),
+    );
+
+    return { temporaryPassword };
+  }
+
+  // Compartilhado por block()/remove() — nenhuma das duas pode deixar a empresa sem NENHUM login
+  // ADMIN ativo, o que só seria recuperável editando o banco direto. Sempre chamado DENTRO da
+  // transação travada por pg_advisory_xact_lock(hashtext(companyId)) do chamador, mesmo padrão já
+  // usado por updatePontoAccess — recontagem dentro do lock fecha a mesma corrida (duas requisições
+  // concorrentes mexendo em dois admins diferentes, cada uma vendo "ainda sobra 1" antes da outra
+  // commitar).
+  private async assertNotLastActiveAdmin(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    targetUserId: string,
+  ): Promise<void> {
+    const target = await tx.user.findUniqueOrThrow({ where: { id: targetUserId } });
+    if (target.role !== 'ADMIN' || target.status !== 'ACTIVE') return;
+    const activeAdminCount = await tx.user.count({ where: { companyId, role: 'ADMIN', status: 'ACTIVE' } });
+    if (activeAdminCount <= 1) {
+      throw new BadRequestException('A empresa precisa manter pelo menos um login ADMIN ativo');
+    }
   }
 
   // Sem controller na frente de propósito (ver comentário em users.module.ts) —

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AppModule as AppModuleEnum, Prisma } from '@prisma/client';
 import { Response } from 'express';
@@ -13,9 +13,21 @@ import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 
-const ALL_MODULES: AppModuleEnum[] = ['DASHBOARD', 'CLIENTES', 'RH', 'COMERCIAL', 'OPERACOES', 'FINANCAS'];
+// `RH` de propósito fora daqui — não é mais atribuído a login novo nenhum, nem o fundador (ver
+// RH_CARGOS/RH_FUNCIONARIOS no schema). O fundador via /auth/register continua recebendo TODOS os
+// módulos que realmente existem hoje.
+const ALL_MODULES: AppModuleEnum[] = [
+  'DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS', 'PONTO_REGISTRO', 'PONTO_ADMINISTRACAO',
+  'COMERCIAL', 'OPERACOES', 'FINANCAS',
+];
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
 const REFRESH_COOKIE_NAME = 'rt';
+// Achado durante a auditoria de segurança (17/09/2026): testar manualmente confirmou que o
+// rate-limit por janela de tempo (ThrottlerGuard, 5/15min) nunca acaba de verdade — dá pra esperar
+// e tentar de novo indefinidamente. Este teto é ortogonal e persistente (nunca reseta sozinho com o
+// tempo, só com um login certo ou uma ação de admin) — na 5ª senha errada seguida, a conta trava e
+// só um admin destrava (unblock ou reset de senha).
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 
 // process.cwd(), não __dirname: __dirname aponta pra dentro de `dist/src/auth` depois de compilado
 // (`npm run build` + `node dist/main.js`), onde `prisma/` não existe — mesmo padrão já usado em
@@ -179,11 +191,49 @@ export class AuthService {
     // found them by email — this lookup is legitimately cross-tenant by
     // necessity. See the RLS migration's comment for the full reasoning.
     const user = await runAsSystem(() => this.prisma.user.findUnique({ where: { email: dto.email } }));
-    // Mensagem genérica de propósito — nunca revelar se foi o e-mail ou a
-    // senha que errou, isso ajudaria alguém tentando adivinhar contas válidas.
-    if (!user || user.status !== 'ACTIVE' || !(await verifyPassword(user.passwordHash, dto.password))) {
+    if (!user) throw new UnauthorizedException('E-mail ou senha inválidos');
+
+    // Confirma a senha ANTES de checar o status — auditoria de segurança (17/09/2026): revelar
+    // "esta conta está bloqueada/travada" pra quem nem sabe a senha certa vazaria a existência e o
+    // estado de uma conta como um oráculo de enumeração. Só depois da senha bater é seguro dar uma
+    // mensagem específica (a pessoa já provou que é quem diz ser).
+    if (!(await verifyPassword(user.passwordHash, dto.password))) {
+      // Contador persistente de tentativas erradas — nunca reseta com o tempo (diferente do
+      // ThrottlerGuard por IP/e-mail, que já existia e continua ativo em paralelo), só com um login
+      // certo ou uma ação de admin (unblock/reset de senha). Só incrementa se a conta ainda está
+      // ACTIVE — uma já BLOCKED/LOCKED não precisa continuar acumulando.
+      if (user.status === 'ACTIVE') {
+        const failedLoginAttempts = user.failedLoginAttempts + 1;
+        await runAsSystem(() =>
+          this.prisma.user.update({
+            where: { id: user.id },
+            data:
+              failedLoginAttempts >= MAX_FAILED_LOGIN_ATTEMPTS
+                ? { failedLoginAttempts, status: 'LOCKED' }
+                : { failedLoginAttempts },
+          }),
+        );
+      }
+      // Mesma mensagem genérica sempre, mesmo na tentativa que acabou de travar a conta — nunca
+      // revelar o estado da conta pra uma senha errada.
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
+
+    if (user.status === 'BLOCKED') {
+      throw new ForbiddenException('Seu login foi bloqueado. Procure um administrador da sua empresa.');
+    }
+    if (user.status === 'LOCKED') {
+      throw new ForbiddenException(
+        'Seu login foi bloqueado por excesso de tentativas. Procure um administrador da sua empresa para redefinir sua senha.',
+      );
+    }
+
+    if (user.failedLoginAttempts > 0) {
+      await runAsSystem(() =>
+        this.prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0 } }),
+      );
+    }
+
     const accessToken = this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);

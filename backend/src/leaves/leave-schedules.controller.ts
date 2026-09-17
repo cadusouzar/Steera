@@ -5,7 +5,7 @@ import { ScheduleLeaveDto } from './dto/schedule-leave.dto';
 import { LeaveSchedulesService } from './leave-schedules.service';
 
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('RH_FUNCIONARIOS')
 @Controller()
 export class LeaveSchedulesController {
   constructor(private readonly service: LeaveSchedulesService) {}

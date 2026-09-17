@@ -6,7 +6,7 @@ import { UpdateEmployeeRecurringPaymentDto } from './dto/update-employee-recurri
 import { EmployeeRecurringPaymentsService } from './employee-recurring-payments.service';
 
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('RH_FUNCIONARIOS')
 @Controller()
 export class EmployeeRecurringPaymentsController {
   constructor(private readonly service: EmployeeRecurringPaymentsService) {}

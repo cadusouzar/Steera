@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -6,6 +6,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePontoAccessDto } from './dto/update-ponto-access.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,6 +45,25 @@ export class UsersController {
   @HttpCode(204)
   unblock(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.users.unblock(user.companyId, id);
+  }
+
+  @Roles('ADMIN')
+  @Patch(':id')
+  update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateUserDto) {
+    return this.users.update(user.companyId, id, dto);
+  }
+
+  @Roles('ADMIN')
+  @Delete(':id')
+  @HttpCode(204)
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.users.remove(user.companyId, id);
+  }
+
+  @Roles('ADMIN')
+  @Patch(':id/reset-password')
+  resetPassword(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.users.resetPassword(user.companyId, id);
   }
 
   // Sem @Roles('ADMIN') de propósito — assertHasFullPontoAccess já exige role

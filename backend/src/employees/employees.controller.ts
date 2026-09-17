@@ -13,7 +13,7 @@ import { toEmployeeDetail, toEmployeeListItem } from './employee-response.mapper
 import { EmployeesService } from './employees.service';
 
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('RH_FUNCIONARIOS')
 @Controller('employees')
 export class EmployeesController {
   constructor(
@@ -38,13 +38,14 @@ export class EmployeesController {
   // salário — mascarado/omitido da listagem de propósito, ver CLAUDE.md).
   // Checagem inline em vez de um guard/decorator novo (YAGNI — é o único
   // call site que precisa disso hoje): ADMIN sempre pode; um login EMPLOYEE
-  // só pode se `RH` estiver entre seus `modules` (é o caso legítimo de um
-  // EMPLOYEE fazendo administração de RH, que este plano passou a permitir
-  // pela primeira vez). Nunca gatear só por ADMIN — quebraria esse uso
-  // legítimo.
+  // só pode se `RH_FUNCIONARIOS` estiver entre seus `modules` (é o caso
+  // legítimo de um EMPLOYEE fazendo administração de RH, que este plano
+  // passou a permitir pela primeira vez — RH virou RH_CARGOS/
+  // RH_FUNCIONARIOS em 17/09/2026, ver o schema). Nunca gatear só por
+  // ADMIN — quebraria esse uso legítimo.
   @Get(':id')
   async findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    if (user.role !== 'ADMIN' && !user.modules?.includes('RH')) {
+    if (user.role !== 'ADMIN' && !user.modules?.includes('RH_FUNCIONARIOS')) {
       throw new ForbiddenException('Sem permissão para ver os dados completos deste funcionário');
     }
     return toEmployeeDetail(await this.employeesService.findOne(id));
@@ -69,6 +70,12 @@ export class EmployeesController {
   // TimeClockService/TimeAttendanceCalculationService, já prontos e já testados nas Tasks 6/7;
   // nenhuma lógica de negócio nova aqui. assertCanManage() de propósito ANTES de qualquer consulta
   // — 404 (nunca 403) pro alvo, mesmo padrão do resto do módulo de ponto.
+  //
+  // @RequireModule('PONTO_ADMINISTRACAO') aqui SOBRESCREVE o `RH_FUNCIONARIOS` de nível de classe
+  // (ModulesGuard lê o método antes da classe, nunca combina os dois) — são visões de PONTO, não de
+  // cadastro de funcionário, então pertencem ao módulo de Ponto desde 17/09/2026, mesmo estando
+  // fisicamente aninhadas sob /employees por conveniência de rota.
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Get(':employeeId/time-events')
   async listTimeEvents(
     @Param('employeeId') employeeId: string,
@@ -79,6 +86,8 @@ export class EmployeesController {
     return this.timeClock.listForEmployeeAdmin(user, employeeId, query);
   }
 
+  // Mesma sobrescrita de módulo do endpoint acima — ver o comentário lá.
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Get(':employeeId/time-summary')
   async timeSummary(
     @Param('employeeId') employeeId: string,

@@ -13,7 +13,7 @@ describe('UsersService', () => {
       employee: { findFirst: jest.fn() },
       user: {
         findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(),
-        create: jest.fn(), update: jest.fn(),
+        create: jest.fn(), update: jest.fn(), findUniqueOrThrow: jest.fn(), delete: jest.fn(),
       },
       company: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },
@@ -158,6 +158,7 @@ describe('UsersService', () => {
 
   it('block scopes the lookup to the current company and revokes active refresh tokens', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', role: 'EMPLOYEE', status: 'ACTIVE' });
     await service.block('c1', 'u1');
     expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
       where: { userId: 'u1', revokedAt: null },
@@ -170,9 +171,103 @@ describe('UsersService', () => {
     await expect(service.block('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  // Achado durante a auditoria de segurança (17/09/2026) — mesmo invariante que updatePontoAccess já
+  // protegia ("pelo menos um admin de acesso total"), agora estendido a "pelo menos um ADMIN ATIVO":
+  // sem isso, bloquear o último admin ativo deixaria a empresa sem ninguém pra desbloquear ninguém.
+  it('block rejects blocking the last ACTIVE ADMIN of the company', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
+    prisma.user.count.mockResolvedValue(1);
+    await expect(service.block('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('block allows blocking an ADMIN when at least one other ACTIVE ADMIN remains', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
+    prisma.user.count.mockResolvedValue(2);
+    await service.block('c1', 'admin1');
+    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'admin1' }, data: { status: 'BLOCKED' } });
+  });
+
   it('unblock 404s for a user from another company', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
     await expect(service.unblock('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('unblock resets status to ACTIVE and zeroes the failed-login-attempts counter', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
+    await service.unblock('c1', 'u1');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { status: 'ACTIVE', failedLoginAttempts: 0 },
+    });
+  });
+
+  describe('update', () => {
+    it('404s for a login from another company', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.update('c1', 'u-outra-empresa', { modules: [] })).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('updates the modules of an existing login without recreating it', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
+      prisma.user.update.mockResolvedValue({ id: 'u1', role: 'EMPLOYEE', modules: ['PONTO_REGISTRO'], hasFullPontoAccess: true });
+      const result = await service.update('c1', 'u1', { modules: ['PONTO_REGISTRO'] } as any);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { modules: ['PONTO_REGISTRO'] },
+        select: expect.any(Object),
+      });
+      expect(result.modules).toEqual(['PONTO_REGISTRO']);
+    });
+  });
+
+  describe('remove', () => {
+    it('404s for a login from another company', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.remove('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects deleting the last ACTIVE ADMIN of the company', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
+      prisma.user.count.mockResolvedValue(1);
+      await expect(service.remove('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('deletes a login for real (not a status change) when it is not the last active admin', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', role: 'EMPLOYEE', status: 'ACTIVE' });
+      await service.remove('c1', 'u1');
+      expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('404s for a login from another company', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.resetPassword('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('generates the same fixed temporary password used at creation, reactivates the login and zeroes the failed-attempt counter', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
+      const result = await service.resetPassword('c1', 'u1');
+      expect(result.temporaryPassword).toBe('Mudar@123');
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: expect.objectContaining({
+          mustChangePassword: true,
+          status: 'ACTIVE',
+          failedLoginAttempts: 0,
+        }),
+      });
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
   });
 
   describe('updatePontoAccess', () => {

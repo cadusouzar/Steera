@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
@@ -48,16 +48,81 @@ describe('AuthService', () => {
     await expect(service.login({ email: 'x@x.com', password: 'y' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('login rejects a blocked user even with the correct password', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'BLOCKED', passwordHash: 'h' });
+  // Auditoria de segurança (17/09/2026): a mensagem passou a ser específica (403, não mais o 401
+  // genérico) — mas só depois de confirmar a senha certa, nunca antes (ver os testes de
+  // "não revela" mais abaixo).
+  it('login rejects a blocked user with a specific 403 message, once the password is confirmed', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'BLOCKED', passwordHash: 'h', failedLoginAttempts: 0 });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
-    await expect(service.login({ email: 'x@x.com', password: 'y' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(service.login({ email: 'x@x.com', password: 'y' }, fakeRes)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.login({ email: 'x@x.com', password: 'y' }, fakeRes)).rejects.toThrow(/procure um administrador/i);
+  });
+
+  it('login rejects a locked (excesso de tentativas) user with its own specific 403 message', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'LOCKED', passwordHash: 'h', failedLoginAttempts: 5 });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+    await expect(service.login({ email: 'x@x.com', password: 'y' }, fakeRes)).rejects.toThrow(/redefinir sua senha/i);
   });
 
   it('login rejects an incorrect password', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h' });
+    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h', failedLoginAttempts: 0 });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
     await expect(service.login({ email: 'x@x.com', password: 'errada' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  // Achado durante a auditoria de segurança (17/09/2026): o rate-limit por janela de tempo
+  // (ThrottlerGuard) nunca acaba de verdade — dá pra esperar e tentar de novo. Este contador é
+  // persistente (só reseta com login certo ou ação de admin).
+  it('login increments the persistent failed-attempt counter on a wrong password, without locking before the 5th', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h', failedLoginAttempts: 2 });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+    await expect(service.login({ email: 'x@x.com', password: 'errada' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: '1' }, data: { failedLoginAttempts: 3 } });
+  });
+
+  it('login locks the account (status LOCKED) on reaching the 5th consecutive wrong password', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h', failedLoginAttempts: 4 });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+    // Mesma mensagem genérica, mesmo sendo a tentativa que travou a conta — nunca revela o estado.
+    await expect(service.login({ email: 'x@x.com', password: 'errada' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: '1' },
+      data: { failedLoginAttempts: 5, status: 'LOCKED' },
+    });
+  });
+
+  it('login never reveals a blocked/locked account status to a wrong password (no ForbiddenException, always the generic message)', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'BLOCKED', passwordHash: 'h', failedLoginAttempts: 0 });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+    const rejection = service.login({ email: 'x@x.com', password: 'errada' }, fakeRes);
+    await expect(rejection).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(rejection).rejects.not.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('login resets the failed-attempt counter to 0 on a successful login', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['DASHBOARD'], status: 'ACTIVE',
+      passwordHash: 'h', mustChangePassword: false, hasFullPontoAccess: true, failedLoginAttempts: 3,
+    });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+    prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+    await service.login({ email: 'x@x.com', password: 'certa' }, fakeRes);
+
+    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { failedLoginAttempts: 0 } });
+  });
+
+  it('login does not write to the database when the counter is already 0 on a successful login', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['DASHBOARD'], status: 'ACTIVE',
+      passwordHash: 'h', mustChangePassword: false, hasFullPontoAccess: true, failedLoginAttempts: 0,
+    });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+    prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+    await service.login({ email: 'x@x.com', password: 'certa' }, fakeRes);
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('signs hasFullPontoAccess into the access token payload', async () => {

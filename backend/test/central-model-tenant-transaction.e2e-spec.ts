@@ -113,7 +113,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
         email: empEmail,
         role: 'EMPLOYEE',
         employeeId: empRes.body.id,
-        modules: ['DASHBOARD', 'CLIENTES', 'RH', 'COMERCIAL', 'OPERACOES', 'FINANCAS'],
+        modules: ['DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS', 'PONTO_REGISTRO', 'PONTO_ADMINISTRACAO', 'COMERCIAL', 'OPERACOES', 'FINANCAS'],
       })
       .expect(201);
     const empUserId = loginRes.body.user.id;
@@ -123,11 +123,15 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
       .set('Authorization', adminToken)
       .expect(204);
 
-    await request(app.getHttpServer())
+    // 403 com mensagem específica, não mais o 401 genérico — mudança da auditoria de segurança de
+    // 17/09/2026 (ver AuthService.login()): a senha aqui está CORRETA (é a temporária de criação),
+    // então é seguro revelar que a conta está bloqueada.
+    const res = await request(app.getHttpServer())
       .post('/auth/login')
       .set('x-requested-with', 'XMLHttpRequest')
       .send({ email: empEmail, password: 'Mudar@123' })
-      .expect(401);
+      .expect(403);
+    expect(res.body.message).toMatch(/bloqueado/i);
   });
 
   it('PATCH .../ponto-access desliga hasFullPontoAccess de um segundo admin (User.count + User.update atômicos, sob advisory lock)', async () => {
@@ -135,7 +139,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
     const login2Res = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
-      .send({ email: admin2Email, role: 'ADMIN', modules: ['DASHBOARD', 'CLIENTES', 'RH', 'COMERCIAL', 'OPERACOES', 'FINANCAS'] })
+      .send({ email: admin2Email, role: 'ADMIN', modules: ['DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS', 'PONTO_REGISTRO', 'PONTO_ADMINISTRACAO', 'COMERCIAL', 'OPERACOES', 'FINANCAS'] })
       .expect(201);
     const admin2UserId = login2Res.body.user.id;
 

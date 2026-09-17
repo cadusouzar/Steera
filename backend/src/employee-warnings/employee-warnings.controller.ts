@@ -6,7 +6,7 @@ import { UpdateEmployeeWarningDto } from './dto/update-employee-warning.dto';
 import { EmployeeWarningsService } from './employee-warnings.service';
 
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('RH_FUNCIONARIOS')
 @Controller()
 export class EmployeeWarningsController {
   constructor(private readonly warningsService: EmployeeWarningsService) {}

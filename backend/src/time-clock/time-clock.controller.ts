@@ -2,6 +2,8 @@ import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, 
 import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { ModulesGuard } from '../auth/guards/modules.guard';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
 import { CreatePunchDto } from './dto/create-punch.dto';
@@ -18,9 +20,14 @@ interface UploadedPhoto {
   size: number;
 }
 
-// Sem @RequireModule aqui de propósito: bater o próprio ponto não depende de módulo — é uma ação
-// de "quem sou eu", não de "o que meu login pode administrar" (mesmo espírito de /auth/me).
-// JwtAuthGuard já é global (APP_GUARD em app.module.ts) — todo endpoint aqui exige login válido.
+// Exige o módulo `PONTO_REGISTRO` (desde a auditoria de segurança de 17/09/2026 — antes disso,
+// bater o próprio ponto não dependia de módulo nenhum, era liberado pra qualquer login
+// autenticado). Continua sendo uma ação de "quem sou eu" (não passa por PONTO_ADMINISTRACAO), só
+// que agora precisa ser concedida explicitamente pra cada login — Ponto virou um menu próprio,
+// independente de RH. JwtAuthGuard já é global (APP_GUARD em app.module.ts) — todo endpoint aqui
+// também exige login válido, além do módulo.
+@UseGuards(ModulesGuard)
+@RequireModule('PONTO_REGISTRO')
 @Controller('time-clock')
 export class TimeClockController {
   constructor(

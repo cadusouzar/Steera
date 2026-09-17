@@ -6,7 +6,7 @@ import { TimeManagementAuthService } from './time-management-auth.service';
 
 // Rota administrativa (mesmo espírito de EmployeesController/TimeEventsAdminController) — exige RH.
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('PONTO_ADMINISTRACAO')
 @Controller('time-management')
 export class TimeManagementController {
   constructor(private readonly timeManagementAuth: TimeManagementAuthService) {}

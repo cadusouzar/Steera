@@ -11,7 +11,7 @@ import { WorkLocationsService } from './work-locations.service';
 // Local de trabalho é infraestrutura física da empresa toda — mutação exige hasFullPontoAccess
 // (nunca "meu time", ver a spec de 15/09/2026). RolesGuard/@Roles('ADMIN') removidos desta classe.
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('PONTO_ADMINISTRACAO')
 @Controller('work-locations')
 export class WorkLocationsController {
   constructor(

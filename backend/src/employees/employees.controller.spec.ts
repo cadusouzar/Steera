@@ -59,19 +59,19 @@ describe('EmployeesController#findOne', () => {
     expect(result.bankDetails).toBe('segredo-bancario');
   });
 
-  it('allows an EMPLOYEE login with RH in modules to see full employee detail', async () => {
+  it('allows an EMPLOYEE login with RH_FUNCIONARIOS in modules to see full employee detail', async () => {
     const result = await controller.findOne('e1', {
       userId: 'u2',
       companyId: 'c1',
       role: 'EMPLOYEE',
-      modules: ['RH'],
+      modules: ['RH_FUNCIONARIOS'],
       mustChangePassword: false,
       hasFullPontoAccess: true,
     });
     expect(result.cpf).toBe('12345678900');
   });
 
-  it('rejects an EMPLOYEE login without RH in modules with a 403', async () => {
+  it('rejects an EMPLOYEE login without RH_FUNCIONARIOS in modules with a 403', async () => {
     await expect(
       controller.findOne('e1', {
         userId: 'u3',
@@ -95,7 +95,7 @@ describe('EmployeesController — aggregated time-tracking admin views', () => {
   let timeClock: { listForEmployeeAdmin: jest.Mock };
   let calculation: { calculateMonthlySummary: jest.Mock };
 
-  const user: AuthenticatedUser = { userId: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['RH'], mustChangePassword: false, hasFullPontoAccess: true };
+  const user: AuthenticatedUser = { userId: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['RH_FUNCIONARIOS'], mustChangePassword: false, hasFullPontoAccess: true };
 
   beforeEach(() => {
     timeManagementAuth = { assertCanManage: jest.fn().mockResolvedValue(undefined) };

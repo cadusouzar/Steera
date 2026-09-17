@@ -10,7 +10,7 @@ import { TimeClockService } from './time-clock.service';
 // deliberadamente NÃO exige o módulo RH — bater o próprio ponto é ação de "quem sou eu"). Esta
 // rota É administrativa (mesmo espírito de EmployeesController), então exige RH.
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('PONTO_ADMINISTRACAO')
 @Controller()
 export class TimeEventsAdminController {
   constructor(private readonly timeClock: TimeClockService) {}

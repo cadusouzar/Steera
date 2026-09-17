@@ -7,7 +7,7 @@ import { UpdateRoleDto } from './dto/update-role.dto';
 import { RolesService } from './roles.service';
 
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('RH_CARGOS')
 @Controller('roles')
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}

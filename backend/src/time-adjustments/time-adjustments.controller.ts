@@ -23,6 +23,12 @@ interface UploadedAttachment {
 export class TimeAdjustmentsController {
   constructor(private readonly service: TimeAdjustmentsService) {}
 
+  // Auto-atendimento: pedir ajuste/justificativa pra si mesmo é ação de "quem sou eu", mesmo
+  // espírito de TimeClockController não exigir módulo RH pra bater o próprio ponto — mas, desde a
+  // auditoria de segurança de 17/09/2026, exige o módulo `PONTO_REGISTRO` (antes disso não exigia
+  // módulo nenhum; ver o comentário completo em TimeClockController). Nunca `PONTO_ADMINISTRACAO`.
+  @UseGuards(ModulesGuard)
+  @RequireModule('PONTO_REGISTRO')
   @Post('time-adjustment-requests')
   @UseInterceptors(FileInterceptor('attachment', { limits: { fileSize: 5 * 1024 * 1024 } }))
   create(
@@ -33,11 +39,15 @@ export class TimeAdjustmentsController {
     return this.service.create(user, dto, attachment);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('PONTO_REGISTRO')
   @Get('time-adjustment-requests/me')
   listOwn(@CurrentUser() user: AuthenticatedUser) {
     return this.service.listOwn(user);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('PONTO_REGISTRO')
   @Patch('time-adjustment-requests/:id/cancel')
   cancel(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.service.cancel(user, id);
@@ -45,14 +55,11 @@ export class TimeAdjustmentsController {
 
   // Administrativa: ADMIN vê a empresa inteira, um superior direto vê só seus subordinados diretos
   // (TimeAdjustmentsService.listForAdmin resolve isso via TimeManagementAuthService — nunca filtra
-  // aqui no controller). @RequireModule('RH') aqui (e nas outras rotas administrativas abaixo,
-  // nunca nas de auto-atendimento acima) — mesma exigência de módulo RH que qualquer outra tela
-  // administrativa de RH, conforme a spec ("o login também precisa do módulo RH para acessar as
-  // telas administrativas de ponto"). Só nas rotas administrativas: criar/cancelar/ver a própria
-  // solicitação é ação de "quem sou eu", mesmo espírito de TimeClockController não exigir módulo
-  // pra bater o próprio ponto.
+  // aqui no controller). @RequireModule('PONTO_ADMINISTRACAO') aqui (e nas outras rotas
+  // administrativas abaixo, nunca nas de auto-atendimento acima) — Ponto virou um menu próprio,
+  // independente de RH, desde 17/09/2026 (era RH até então).
   @UseGuards(ModulesGuard)
-  @RequireModule('RH')
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Get('time-adjustment-requests')
   listForAdmin(
     @CurrentUser() user: AuthenticatedUser,
@@ -64,21 +71,21 @@ export class TimeAdjustmentsController {
   }
 
   @UseGuards(ModulesGuard)
-  @RequireModule('RH')
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Patch('time-adjustment-requests/:id/approve')
   approve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewAdjustmentRequestDto) {
     return this.service.approve(user, id, dto.reviewNote);
   }
 
   @UseGuards(ModulesGuard)
-  @RequireModule('RH')
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Patch('time-adjustment-requests/:id/reject')
   reject(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewAdjustmentRequestDto) {
     return this.service.reject(user, id, dto.reviewNote);
   }
 
   @UseGuards(ModulesGuard)
-  @RequireModule('RH')
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Post('employees/:employeeId/time-events/correct')
   proactiveCorrect(
     @CurrentUser() user: AuthenticatedUser,

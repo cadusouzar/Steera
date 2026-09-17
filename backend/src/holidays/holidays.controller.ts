@@ -7,7 +7,7 @@ import { CreateHolidayDto } from './dto/create-holiday.dto';
 import { HolidaysService } from './holidays.service';
 
 @UseGuards(ModulesGuard, RolesGuard)
-@RequireModule('RH')
+@RequireModule('PONTO_ADMINISTRACAO')
 @Roles('ADMIN')
 @Controller('holidays')
 export class HolidaysController {

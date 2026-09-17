@@ -122,7 +122,20 @@ model Subscription {
 enum AppModule {
   DASHBOARD
   CLIENTES
+  // `RH` nunca é mais atribuído a um login novo (a partir de 17/09/2026) — ver
+  // RH_CARGOS/RH_FUNCIONARIOS abaixo. Mantido no enum (nunca removido, o Postgres não permite
+  // remover um valor de enum sem recriar o tipo inteiro) só porque logins antigos ainda podem
+  // carregar esse valor num array já persistido; nenhum guard do backend confere mais por ele.
   RH
+  RH_CARGOS
+  RH_FUNCIONARIOS
+  // Ponto virou um menu próprio, independente de RH (17/09/2026) — ver DECISOES-TECNICAS no vault
+  // pro raciocínio completo. PONTO_REGISTRO cobre bater o próprio ponto e pedir ajuste/
+  // justificativa pra si mesmo (rotas de auto-atendimento, que até aqui nunca exigiam módulo
+  // nenhum); PONTO_ADMINISTRACAO cobre aprovar ajustes/justificativas de outros, escalas,
+  // feriados e configuração.
+  PONTO_REGISTRO
+  PONTO_ADMINISTRACAO
   COMERCIAL
   OPERACOES
   FINANCAS
@@ -142,15 +155,20 @@ enum UserRole {
 enum UserStatus {
   ACTIVE
   BLOCKED
+  // Setado automaticamente pelo próprio backend (nunca por um admin) quando `failedLoginAttempts`
+  // atinge o teto — ver AuthService.login(). Distinto de BLOCKED (sempre uma ação deliberada de um
+  // admin) só pra dar uma mensagem certa em cada caso; as duas ações de desbloqueio (unblock e
+  // reset de senha) tratam os dois status da mesma forma.
+  LOCKED
 }
 
 model User {
-  id                 String         @id @default(cuid())
-  companyId          String
-  company            Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  email              String         @unique
-  passwordHash       String
-  role               UserRole
+  id                  String         @id @default(cuid())
+  companyId           String
+  company             Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email               String         @unique
+  passwordHash        String
+  role                UserRole
   // Sem `@relation` de propósito: `Employee` é um modelo de tenant, fisicamente roteado pro schema
   // da empresa (ver tenant-rls.extension.ts) — uma FK de `public."User"` pra uma tabela que só
   // existe fisicamente dentro de `tenant_<companyId>` é estruturalmente impossível no Postgres (o
@@ -162,14 +180,18 @@ model User {
   // projeto usa `include: { employee: ... }` (todo lugar que precisa do Employee vinculado já faz a
   // busca manual em duas etapas, ver `TimeManagementAuthService.resolveOwnEmployee`), então remover
   // a relação Prisma não quebra nenhum join existente.
-  employeeId         String?        @unique
-  modules            AppModule[]
-  status             UserStatus     @default(ACTIVE)
-  mustChangePassword Boolean        @default(false)
-  hasFullPontoAccess Boolean        @default(true)
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  refreshTokens      RefreshToken[]
+  employeeId          String?        @unique
+  modules             AppModule[]
+  status              UserStatus     @default(ACTIVE)
+  // Incrementado a cada senha errada (nunca por e-mail inexistente — não há o que incrementar);
+  // zerado num login bem-sucedido ou numa ação de admin (unblock/reset de senha). Ver
+  // AuthService.login().
+  failedLoginAttempts Int            @default(0)
+  mustChangePassword  Boolean        @default(false)
+  hasFullPontoAccess  Boolean        @default(true)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  refreshTokens       RefreshToken[]
 
   @@index([companyId])
 }

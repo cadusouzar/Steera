@@ -6,7 +6,7 @@ import { ScheduleVacationDto } from './dto/schedule-vacation.dto';
 import { VacationSchedulesService } from './vacation-schedules.service';
 
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('RH_FUNCIONARIOS')
 @Controller()
 export class VacationSchedulesController {
   constructor(private readonly service: VacationSchedulesService) {}

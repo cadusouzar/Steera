@@ -10,7 +10,7 @@ import { TimeTrackingSettingsService } from './time-tracking-settings.service';
 // empresa exige hasFullPontoAccess; sobrescrita de time é autoatendimento ou exige acesso total
 // pra mexer na de outro superior). RolesGuard removido desta classe.
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('PONTO_ADMINISTRACAO')
 @Controller('time-tracking-settings')
 export class TimeTrackingSettingsController {
   constructor(private readonly settings: TimeTrackingSettingsService) {}

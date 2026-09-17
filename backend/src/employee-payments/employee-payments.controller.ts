@@ -7,7 +7,7 @@ import { UpdateEmployeePaymentDto } from './dto/update-employee-payment.dto';
 import { EmployeePaymentsService } from './employee-payments.service';
 
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('RH_FUNCIONARIOS')
 @Controller()
 export class EmployeePaymentsController {
   constructor(private readonly service: EmployeePaymentsService) {}

@@ -22,6 +22,19 @@ export const NOOP_WHEN_REPLAYED_FROM_EMPTY = [
   '20260911003700_restore_receivable_subscription_link',
 ];
 
+// Enums usados só por tabelas CENTRAIS (nunca por nenhuma tabela de tenant) — achado em
+// 17/09/2026 ao gerar a migration que adiciona valores a `AppModule`/`UserStatus` (ambos usados só
+// por `User`): `ALTER TYPE ... ADD VALUE` não batia em nenhum padrão do classificador abaixo, então
+// caía no branch "mantém por segurança" — só que, ao contrário de `CREATE TYPE` (sempre inofensivo
+// num schema de tenant, porque cria um tipo novo e sem uso), um `ALTER TYPE` mantido tentaria
+// adicionar o MESMO valor de novo no MESMO tipo compartilhado/global (`public."AppModule"`, nunca
+// duplicado por tenant) toda vez que uma empresa nova fosse provisionada depois da primeira — a
+// segunda empresa pra frente quebraria com "enum label already exists" e a transação de
+// provisionamento inteira sofreria rollback. Mantida como lista manual (mesmo padrão de
+// `NOOP_WHEN_REPLAYED_FROM_EMPTY`) porque o gerador só processa texto SQL, sem saber quais enums
+// pertencem a quais models — cada enum novo genuinamente central precisa ser adicionado aqui à mão.
+export const CENTRAL_ONLY_ENUM_NAMES = ['AppModule', 'UserStatus'];
+
 // Classifica cada comando SQL de uma migration como "de uma tabela de tenant" (mantido) ou "de uma
 // tabela central" (removido). Olha só pra tabela PRINCIPAL de cada comando (a que está sendo
 // criada/alterada/indexada) — uma referência de FK a uma tabela central dentro de um comando de
@@ -56,6 +69,12 @@ export function splitMigrationSqlByTenant(sql: string, tenantTableNames: readonl
     // mapear qual enum pertence a qual tabela.
     if (/^CREATE TYPE\s+"\w+"/i.test(statement)) {
       kept.push(statement);
+      continue;
+    }
+
+    const alterTypeMatch = statement.match(/^ALTER TYPE\s+"(\w+)"/i);
+    if (alterTypeMatch) {
+      if (!CENTRAL_ONLY_ENUM_NAMES.includes(alterTypeMatch[1])) kept.push(statement);
       continue;
     }
 

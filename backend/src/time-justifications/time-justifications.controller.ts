@@ -19,6 +19,11 @@ interface UploadedAttachment {
 export class TimeJustificationsController {
   constructor(private readonly service: TimeJustificationsService) {}
 
+  // Auto-atendimento: enviar justificativa/atestado próprio, mesmo espírito de TimeClockController
+  // não exigir módulo pra bater o próprio ponto — mas, desde a auditoria de segurança de
+  // 17/09/2026, exige o módulo `PONTO_REGISTRO` (antes disso não exigia módulo nenhum).
+  @UseGuards(ModulesGuard)
+  @RequireModule('PONTO_REGISTRO')
   @Post()
   @UseInterceptors(FileInterceptor('attachment', { limits: { fileSize: 5 * 1024 * 1024 } }))
   create(
@@ -29,15 +34,18 @@ export class TimeJustificationsController {
     return this.service.create(user, dto, attachment);
   }
 
+  @UseGuards(ModulesGuard)
+  @RequireModule('PONTO_REGISTRO')
   @Get('me')
   listOwn(@CurrentUser() user: AuthenticatedUser) {
     return this.service.listOwn(user);
   }
 
-  // Administrativa — exige módulo RH (mesmo padrão do resto do projeto e das rotas equivalentes de
-  // TimeAdjustmentsController), diferente de create/listOwn acima (auto-atendimento, "quem sou eu").
+  // Administrativa — exige módulo `PONTO_ADMINISTRACAO` (Ponto virou um menu próprio, independente
+  // de RH, desde 17/09/2026 — era RH até então), diferente de create/listOwn acima (auto-
+  // atendimento, "quem sou eu").
   @UseGuards(ModulesGuard)
-  @RequireModule('RH')
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Get()
   listForAdmin(
     @CurrentUser() user: AuthenticatedUser,
@@ -49,14 +57,14 @@ export class TimeJustificationsController {
   }
 
   @UseGuards(ModulesGuard)
-  @RequireModule('RH')
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Patch(':id/approve')
   approve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewJustificationDto) {
     return this.service.approve(user, id, dto.reviewNote);
   }
 
   @UseGuards(ModulesGuard)
-  @RequireModule('RH')
+  @RequireModule('PONTO_ADMINISTRACAO')
   @Patch(':id/reject')
   reject(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewJustificationDto) {
     return this.service.reject(user, id, dto.reviewNote);

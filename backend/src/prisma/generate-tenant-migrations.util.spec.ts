@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { NOOP_WHEN_REPLAYED_FROM_EMPTY, splitMigrationSqlByTenant } from '../../scripts/generate-tenant-migrations';
+import { CENTRAL_ONLY_ENUM_NAMES, NOOP_WHEN_REPLAYED_FROM_EMPTY, splitMigrationSqlByTenant } from '../../scripts/generate-tenant-migrations';
 
 const TENANT_TABLES = ['Client', 'Employee'] as const;
 
@@ -84,6 +84,31 @@ describe('splitMigrationSqlByTenant', () => {
     expect(result).toContain('pg_advisory_lock');
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  // Achado em 17/09/2026 ao gerar a migration que adiciona valores a AppModule/UserStatus (ambos
+  // usados só por `User`, uma tabela central): ALTER TYPE não batia em nenhum padrão anterior, caía
+  // no branch "mantém por segurança" — só que, ao contrário de CREATE TYPE, manter um ALTER TYPE
+  // faria toda empresa nova depois da primeira tentar adicionar o MESMO valor de novo no MESMO tipo
+  // global, quebrando com "enum label already exists".
+  it('remove ALTER TYPE de um enum central (sem aviso — classificado, não é o caso "desconhecido")', () => {
+    const sql = 'ALTER TYPE "AppModule" ADD VALUE \'RH_CARGOS\';';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result).not.toContain('AppModule');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('mantém ALTER TYPE de um enum que não está na lista de enums centrais conhecidos', () => {
+    const sql = 'ALTER TYPE "ClientStatus" ADD VALUE \'ARCHIVED\';';
+    expect(splitMigrationSqlByTenant(sql, TENANT_TABLES)).toContain('ClientStatus');
+  });
+});
+
+describe('CENTRAL_ONLY_ENUM_NAMES', () => {
+  it('contém AppModule e UserStatus, os dois únicos enums usados só por User hoje', () => {
+    expect(CENTRAL_ONLY_ENUM_NAMES).toEqual(['AppModule', 'UserStatus']);
   });
 });
 

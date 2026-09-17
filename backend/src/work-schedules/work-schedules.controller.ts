@@ -14,7 +14,7 @@ import { WorkSchedulesService } from './work-schedules.service';
 // decide por camada (empresa exige hasFullPontoAccess; time exige ser o próprio superior ou ter
 // hasFullPontoAccess; individual exige assertCanManage). RolesGuard não é mais usado aqui.
 @UseGuards(ModulesGuard)
-@RequireModule('RH')
+@RequireModule('PONTO_ADMINISTRACAO')
 @Controller('work-schedules')
 export class WorkSchedulesController {
   constructor(
