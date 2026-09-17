@@ -5,9 +5,9 @@ import { Response } from 'express';
 import { join } from 'path';
 import { listMigrationNames } from '../prisma/migration-files.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { runAsSystem } from '../prisma/tenant-context';
+import { getTenantCompanyId, runAsSystem, runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { assertValidSchemaName, tenantSchemaName } from '../prisma/tenant-schema.util';
-import { runTenantInteractiveTransaction, runTenantTransaction } from '../prisma/tenant-rls.extension';
+import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { applyMigrations } from '../prisma/tenant-migration.util';
 import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
@@ -235,16 +235,50 @@ export class AuthService {
     }
     const passwordHash = await hashPassword(dto.newPassword);
     // Mesmo padrão de UsersService.block(): update de senha + revogação de
-    // TODOS os refresh tokens ativos numa única $transaction. Sem isso, um
+    // TODOS os refresh tokens ativos numa única transação. Sem isso, um
     // usuário que troca a senha por suspeita de conta comprometida deixaria
     // um invasor com um refresh token já válido (não expirado, não
     // revogado) logado indefinidamente — a troca de senha "resolveria" nada
     // pra esse invasor. mustChangePassword some aqui também: é exatamente o
     // ato que ele existe pra forçar.
-    await runTenantTransaction(this.prisma, [
-      this.prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false } }),
-      this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-    ]);
+    //
+    // NUNCA runTenantTransaction/runTenantInteractiveTransaction aqui — achado durante a auditoria
+    // de segurança (17/09/2026), em duas rodadas:
+    //
+    // 1ª tentativa (a forma em array de runTenantTransaction, o código original): reproduzia ao
+    // vivo um 500 ("Record to update not found") pra toda empresa com schema físico
+    // (schema-per-tenant), porque as duas operações pré-construídas via `this.prisma` eram
+    // resolvidas dentro do `insideExplicitTx: true` do client de TENANT redirecionado, o que
+    // disparava CADA operação direto no client CENTRAL (de onde vieram) sem o `set_config` de RLS
+    // que só tinha sido emitido na conexão do client de tenant — a política de RLS de `User` (a
+    // única tabela central com RLS, ver migration `enable_row_level_security`) filtrava a linha
+    // como invisível.
+    //
+    // 2ª tentativa (runTenantInteractiveTransaction, com um `tx` de verdade): piorou pra um erro
+    // ainda mais claro — "table tenant_x.User does not exist" — porque `tx` aqui vem de
+    // `registry.withClient(...)`, um PrismaClient cujo `datasourceUrl` tem `?schema=tenant_x`
+    // embutido; pra QUALQUER query estruturada (não-raw) desse client, o engine do Prisma
+    // qualifica a tabela com esse schema fixo no nível da conexão, nunca com o `search_path` de
+    // runtime (que só importa pra SQL bruto solto, tipo `$queryRawUnsafe`). `User`/`RefreshToken`
+    // são tabelas CENTRAIS, só existem em `public` — não existe client de tenant nenhum capaz de
+    // alcançá-las via `.model.op()`, ponto. As duas transaction helpers deste arquivo (ver
+    // tenant-rls.extension.ts) foram desenhadas pra SEMPRE redirecionar pro client de tenant quando
+    // um registry + companyId estão ativos — o que é certo pras tabelas de tenant, mas não tem
+    // NENHUM caminho de volta pro client central quando a operação é 100% central. Por isso este
+    // call site (e o irmão em UsersService.block) monta a transação central manualmente: pega o
+    // `tx` do `this.prisma` (client central, schema=public) diretamente via `$transaction`, emite o
+    // `set_config` de RLS à mão como primeira instrução (mesma coisa que a extensão já faria
+    // sozinha pra uma chamada avulsa — só precisa ser explícito aqui porque `insideExplicitTx`
+    // suprime esse comportamento automático pras chamadas seguintes dentro do mesmo `tx`) e só
+    // então as duas operações de negócio, tudo atômico na mesma conexão.
+    const companyId = getTenantCompanyId();
+    await runInsideExplicitTenantTransaction(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+        await tx.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false } });
+        await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      }),
+    );
     // JwtAuthGuard agora bloqueia qualquer rota de negócio enquanto o access
     // token carregar mustChangePassword: true (ver esse guard) — o token
     // emitido no login/refresh anterior a esta troca ainda carrega esse

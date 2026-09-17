@@ -247,7 +247,9 @@ describe('UsersService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: { hasFullPontoAccess: false } });
       // As duas tentativas de fato disputaram o lock (não só a vencedora) e as duas recontaram —
       // é essa recontagem-dentro-do-lock, e não uma checagem antiga em cache, que barra a segunda.
-      expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+      // 4, não 2: cada tentativa agora emite 2 chamadas a $executeRaw (o set_config manual de RLS
+      // — ver o achado da auditoria de segurança de 17/09/2026 — e o pg_advisory_xact_lock em si).
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
       expect(prisma.user.count).toHaveBeenCalledTimes(2);
     });
   });

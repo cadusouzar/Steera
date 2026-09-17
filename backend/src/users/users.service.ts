@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { runTenantInteractiveTransaction, runTenantTransaction } from '../prisma/tenant-rls.extension';
+import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -122,10 +122,23 @@ export class UsersService {
     // encontrado nesta empresa" (nunca vaza pra um admin de outra empresa se
     // o id existe em outro tenant).
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
-    await runTenantTransaction(this.prisma, [
-      this.prisma.user.update({ where: { id: userId }, data: { status: 'BLOCKED' } }),
-      this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-    ]);
+    // NUNCA runTenantTransaction/runTenantInteractiveTransaction aqui — ver o comentário completo
+    // em AuthService.changePassword (achado durante a auditoria de segurança, 17/09/2026): `User`/
+    // `RefreshToken` são tabelas CENTRAIS, e nenhum client de TENANT consegue alcançá-las via
+    // `.model.op()` (o `datasourceUrl` desse client fixa o schema no nível da conexão pro engine do
+    // Prisma, não dá pra contornar com `search_path` de runtime) — as duas transaction helpers
+    // redirecionam pro client de tenant sempre que um registry+companyId estão ativos, o que nunca
+    // tem volta pro client central. Por isso a transação é montada à mão aqui: `tx` vem direto do
+    // client central (`this.prisma`), com o `set_config` de RLS emitido manualmente como primeira
+    // instrução (a extensão suprime isso pras chamadas seguintes uma vez dentro de
+    // `insideExplicitTx`).
+    await runInsideExplicitTenantTransaction(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+        await tx.user.update({ where: { id: userId }, data: { status: 'BLOCKED' } });
+        await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      }),
+    );
   }
 
   async unblock(companyId: string, userId: string) {
@@ -170,24 +183,37 @@ export class UsersService {
     // ambas passar o guard, e ambas escrever false, deixando a empresa com ZERO admins de acesso
     // total (estado irrecuperável sem acesso direto ao banco). Mesmo padrão já usado em
     // TimeClockService.createPunch para a corrida de marcação duplicada:
-    // pg_advisory_xact_lock dentro de runTenantInteractiveTransaction, recontando a condição
-    // DENTRO da mesma transação travada. Trava escopada por EMPRESA (hashtext(companyId)), não
-    // por usuário — o invariante protegido ("pelo menos um full-access admin") é por empresa, não
-    // por login, então duas requisições da MESMA empresa (mesmo mexendo em admins diferentes)
-    // precisam serializar entre si; duas requisições de empresas DIFERENTES nunca se bloqueiam.
-    await runTenantInteractiveTransaction(this.prisma, async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
+    // pg_advisory_xact_lock dentro de uma transação travada, recontando a condição DENTRO dela.
+    // Trava escopada por EMPRESA (hashtext(companyId)), não por usuário — o invariante protegido
+    // ("pelo menos um full-access admin") é por empresa, não por login, então duas requisições da
+    // MESMA empresa (mesmo mexendo em admins diferentes) precisam serializar entre si; duas
+    // requisições de empresas DIFERENTES nunca se bloqueiam.
+    //
+    // NUNCA runTenantInteractiveTransaction aqui — achado durante a auditoria de segurança
+    // (17/09/2026, mesmo bug do AuthService.changePassword/UsersService.block, ver o comentário
+    // completo em changePassword): `User` é tabela CENTRAL, e nenhum client de TENANT (o que
+    // `runTenantInteractiveTransaction` sempre usa quando um registry+companyId estão ativos)
+    // consegue alcançá-la via `.model.op()` — reproduzia ao vivo "table tenant_x.User does not
+    // exist" pra toda empresa com schema físico, ou seja, `hasFullPontoAccess` nunca conseguia ser
+    // desligado pra NENHUM admin de NENHUMA empresa nova. A transação é montada à mão: `tx` vem
+    // direto do client central, com o `set_config` de RLS emitido manualmente como primeira
+    // instrução.
+    await runInsideExplicitTenantTransaction(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
 
-      const fullAccessCount = await tx.user.count({
-        where: { companyId, role: 'ADMIN', hasFullPontoAccess: true },
-      });
-      if (fullAccessCount <= 1) {
-        throw new BadRequestException(
-          'A empresa precisa manter pelo menos um login ADMIN com acesso total ao Controle de Ponto',
-        );
-      }
+        const fullAccessCount = await tx.user.count({
+          where: { companyId, role: 'ADMIN', hasFullPontoAccess: true },
+        });
+        if (fullAccessCount <= 1) {
+          throw new BadRequestException(
+            'A empresa precisa manter pelo menos um login ADMIN com acesso total ao Controle de Ponto',
+          );
+        }
 
-      await tx.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess: false } });
-    });
+        await tx.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess: false } });
+      }),
+    );
   }
 }
