@@ -104,6 +104,21 @@ describe('splitMigrationSqlByTenant', () => {
     const sql = 'ALTER TYPE "ClientStatus" ADD VALUE \'ARCHIVED\';';
     expect(splitMigrationSqlByTenant(sql, TENANT_TABLES)).toContain('ClientStatus');
   });
+
+  // Achado em 17/09/2026 investigando um admin real vendo "sem acesso ao módulo": a migration de
+  // backfill dos módulos granulares tinha `SELECT set_config('app.rls_bypass', ...)` antes dos
+  // UPDATEs em "User" (tabela central com FORCE RLS) — sem esse classificador, o comando caía no
+  // branch "desconhecido, mantém com aviso", e replayar essa linha sozinha (sem os UPDATEs, já
+  // removidos por serem de tabela central) num schema de tenant novo é um no-op inofensivo, mas
+  // gerava aviso à toa toda vez que qualquer migration futura precisasse do mesmo bypass.
+  it('remove SELECT set_config de bypass de RLS (sem aviso — sempre setup de tabela central)', () => {
+    const sql = "SELECT set_config('app.rls_bypass', 'on', true);";
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result.trim()).toBe('');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });
 
 describe('CENTRAL_ONLY_ENUM_NAMES', () => {

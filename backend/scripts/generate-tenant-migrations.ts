@@ -78,6 +78,16 @@ export function splitMigrationSqlByTenant(sql: string, tenantTableNames: readonl
       continue;
     }
 
+    // SELECT set_config('app.rls_bypass', ...) — achado em 17/09/2026 junto do bug real que essa
+    // flag existe pra evitar (uma migration de dados numa tabela CENTRAL com FORCE RLS precisa dela
+    // pra não virar um no-op silencioso). Sempre um setup de sessão pra autorizar as escritas em
+    // tabela CENTRAL que vêm em seguida NA MESMA migration — nunca faz sentido sozinho num schema de
+    // tenant, cujo contexto de empresa já vem setado pela própria transação de provisionamento
+    // (`AuthService.register()`), então é sempre descartado aqui, sem exigir revisão manual.
+    if (/^SELECT set_config\('app\.rls_bypass'/i.test(statement)) {
+      continue;
+    }
+
     const tableMatch =
       statement.match(/^CREATE TABLE\s+"(\w+)"/i) ||
       statement.match(/^ALTER TABLE\s+"(\w+)"/i) ||
