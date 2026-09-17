@@ -139,4 +139,42 @@ describe('CustomFieldDefinitionsService', () => {
       );
     });
   });
+
+  describe('countOptionUsage', () => {
+    it('rejeita um campo que não é lista de opções', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition({ type: CustomFieldType.TEXT }));
+      await expect(service.countOptionUsage('def1', 'Pequeno')).rejects.toThrow(BadRequestException);
+    });
+
+    it('conta quantos registros usam a opção, pra um campo SELECT (coluna = valor)', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(
+        makeDefinition({ type: CustomFieldType.SELECT, columnName: 'custom_segmento' }),
+      );
+      prisma.$queryRawUnsafe.mockResolvedValue([{ count: 2n }]);
+
+      const count = await service.countOptionUsage('def1', 'Pequeno');
+
+      expect(count).toBe(2);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(prisma.$queryRawUnsafe).toHaveBeenCalledWith(
+        'SELECT count(*)::bigint as count FROM "Client" WHERE "custom_segmento" = $1',
+        'Pequeno',
+      );
+    });
+
+    it('conta quantos registros usam a opção, pra um campo MULTI_SELECT (opção dentro do array)', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(
+        makeDefinition({ type: CustomFieldType.MULTI_SELECT, columnName: 'custom_interesses' }),
+      );
+      prisma.$queryRawUnsafe.mockResolvedValue([{ count: 5n }]);
+
+      const count = await service.countOptionUsage('def1', 'RH');
+
+      expect(count).toBe(5);
+      expect(prisma.$queryRawUnsafe).toHaveBeenCalledWith(
+        'SELECT count(*)::bigint as count FROM "Client" WHERE $1 = ANY("custom_interesses")',
+        'RH',
+      );
+    });
+  });
 });

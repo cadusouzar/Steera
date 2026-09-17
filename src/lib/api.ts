@@ -28,6 +28,14 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
   }
 
   if (!res.ok) {
+    // Erro de servidor (5xx) nunca é um aviso pensado pra pessoa entender — é sempre algo
+    // inesperado (um bug, uma indisponibilidade). Mostrar a mensagem técnica crua que vem do
+    // servidor ("Internal server error" e afins) nunca ajuda o usuário final a saber o que fazer;
+    // toda mensagem específica e amigável (campo obrigatório, valor inválido, etc.) já vem como
+    // um 4xx, tratado no ramo abaixo.
+    if (res.status >= 500) {
+      throw new Error('Não foi possível concluir a ação. Tente novamente em instantes.');
+    }
     const body = await res.json().catch(() => ({}) as { message?: string });
     throw new Error(body.message || `Erro ${res.status} ao chamar ${path}`);
   }
@@ -49,6 +57,7 @@ interface ApiClient {
   totalPaid?: number | string;
   totalPending?: number | string;
   totalOverdue?: number | string;
+  customFields?: Record<string, unknown>;
 }
 interface ApiReceivable {
   id: string;
@@ -124,6 +133,7 @@ export interface ClientRecord {
   // forever and this stays null-ish for UI purposes (ClientTrashDrawer never
   // shows them, since listTrashedClients() already filters server-side).
   deactivatedAt: string | null;
+  customFields?: Record<string, unknown>;
 }
 export interface ClientTotals {
   totalPaid: number;
@@ -178,6 +188,7 @@ function mapClient(c: ApiClient): ClientRecord {
     status: c.status.toLowerCase() as 'active' | 'inactive',
     includeInRevenueReport: c.includeInRevenueReport,
     deactivatedAt: c.deactivatedAt ?? null,
+    customFields: c.customFields ?? {},
   };
 }
 
@@ -217,7 +228,7 @@ export async function createClient(dto: {
 
 export async function updateClient(
   id: string,
-  dto: Partial<{ name: string; category: string; contact: string; email: string }>,
+  dto: Partial<{ name: string; category: string; contact: string; email: string; customFields: Record<string, unknown> }>,
 ): Promise<ClientRecord> {
   const c = await request<ApiClient>(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
   return mapClient(c);
@@ -325,6 +336,7 @@ interface ApiRole {
   colorHex: string;
   description: string | null;
   active: boolean;
+  customFields?: Record<string, unknown>;
 }
 interface ApiEmployeeListItem {
   id: string;
@@ -357,6 +369,7 @@ interface ApiEmployeeDetail {
   payOnLastBusinessDay: boolean;
   bankDetails: string | null;
   salaryRecurrenceEnabled: boolean;
+  customFields?: Record<string, unknown>;
 }
 interface ApiWarning {
   id: string;
@@ -404,6 +417,7 @@ export interface Role {
   colorHex: string;
   description?: string;
   active: boolean;
+  customFields?: Record<string, unknown>;
 }
 export interface EmployeeListItem {
   id: string;
@@ -435,6 +449,7 @@ export interface EmployeeDetail {
   paymentDay: '5' | '15' | '20' | 'last';
   bankDetails?: string;
   salaryRecurrenceEnabled: boolean;
+  customFields?: Record<string, unknown>;
 }
 export interface EmployeeWarning {
   id: string;
@@ -500,6 +515,7 @@ function mapRole(r: ApiRole): Role {
     colorHex: r.colorHex,
     description: r.description ?? undefined,
     active: r.active,
+    customFields: r.customFields ?? {},
   };
 }
 
@@ -537,6 +553,7 @@ function mapEmployeeDetail(e: ApiEmployeeDetail): EmployeeDetail {
     paymentDay: toPaymentDay(e.paymentDueDay, e.payOnLastBusinessDay),
     bankDetails: e.bankDetails ?? undefined,
     salaryRecurrenceEnabled: e.salaryRecurrenceEnabled,
+    customFields: e.customFields ?? {},
   };
 }
 
@@ -635,7 +652,7 @@ export async function createRole(dto: {
 
 export async function updateRole(
   id: string,
-  dto: Partial<{ name: string; department: string; colorHex: string; description: string }>,
+  dto: Partial<{ name: string; department: string; colorHex: string; description: string; customFields: Record<string, unknown> }>,
 ): Promise<Role> {
   const r = await request<ApiRole>(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
   return mapRole(r);
@@ -1640,6 +1657,14 @@ export async function activateCustomFieldDefinition(id: string): Promise<CustomF
 
 export async function getCustomFieldFilledCount(id: string): Promise<number> {
   const res = await request<{ count: number }>(`/custom-fields/${id}/filled-count`);
+  return res.count;
+}
+
+// Usado antes de salvar a edição de um campo de lista de opções, pra cada opção que estiver
+// sendo removida — dá o número de registros que ficariam com o valor esvaziado, pro frontend
+// avisar o admin antes de confirmar.
+export async function getCustomFieldOptionUsageCount(id: string, option: string): Promise<number> {
+  const res = await request<{ count: number }>(`/custom-fields/${id}/option-usage?option=${encodeURIComponent(option)}`);
   return res.count;
 }
 

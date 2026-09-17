@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, Filter, X, AlertCircle, Briefcase, ChevronRight, Edit2, Save, DollarSign, Loader2, Ban, RotateCcw, User, Activity } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
+import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
@@ -152,6 +153,7 @@ const EmployeesList = () => {
         admissionDate: editForm.admissionDate, baseValue: editForm.baseValue,
         paymentDay: editForm.paymentDay, bankDetails: editForm.bankDetails,
         salaryRecurrenceEnabled: editForm.salaryRecurrenceEnabled,
+        customFields: editForm.customFields,
       });
 
       // Ligar/desligar a recorrência automática de salário nesta edição.
@@ -789,6 +791,11 @@ const EmployeesList = () => {
                                 />
                               </div>
                             </div>
+                            <CustomFieldsFormSection
+                              entity="employee"
+                              values={editForm.customFields ?? {}}
+                              onChange={(v) => setEditForm({ ...editForm, customFields: v })}
+                            />
                           </div>
                         </div>
                       </>

@@ -64,7 +64,13 @@ type ConfirmAction =
   | { kind: 'rename'; field: CustomFieldDefinition; newName: string }
   | { kind: 'deactivate'; field: CustomFieldDefinition }
   | { kind: 'reactivate'; field: CustomFieldDefinition }
-  | { kind: 'delete'; field: CustomFieldDefinition; filledCount: number };
+  | { kind: 'delete'; field: CustomFieldDefinition; filledCount: number }
+  | {
+      kind: 'options-removed';
+      field: CustomFieldDefinition;
+      removedOptions: { option: string; count: number }[];
+      pendingForm: EditFormState;
+    };
 
 const CustomFieldsSettings = () => {
   const currentUser = getCurrentUser();
@@ -89,6 +95,7 @@ const CustomFieldsSettings = () => {
   const [isConfirmBusy, setIsConfirmBusy] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [countLoadingId, setCountLoadingId] = useState<string | null>(null);
+  const [isCheckingOptionUsage, setIsCheckingOptionUsage] = useState(false);
 
   const loadDefinitions = useCallback(async () => {
     setIsLoading(true);
@@ -222,9 +229,9 @@ const CustomFieldsSettings = () => {
     }
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingField || !editForm || isSavingEdit || !isEditFormValid) return;
+    if (!editingField || !editForm || isSavingEdit || isCheckingOptionUsage || !isEditFormValid) return;
     const trimmedName = editForm.displayName.trim();
     if (trimmedName !== editingField.displayName) {
       // Renomear tem confirmação própria (texto combinado com o dono do
@@ -233,6 +240,39 @@ const CustomFieldsSettings = () => {
       setConfirmAction({ kind: 'rename', field: editingField, newName: trimmedName });
       return;
     }
+
+    // Se o campo é uma lista de opções e alguma opção foi removida, precisamos saber ANTES de
+    // salvar se algum registro já usa essa opção — sem isso, o registro fica silenciosamente com
+    // o campo vazio, sem nenhum aviso. Achado da revisão final: essa checagem estava na spec
+    // original e nunca tinha sido implementada.
+    if (hasOptions(editingField.type)) {
+      const originalOptions = editingField.configuration?.options ?? [];
+      const newOptions = parseOptions(editForm.optionsText);
+      const removed = originalOptions.filter(o => !newOptions.includes(o));
+      if (removed.length > 0) {
+        setIsCheckingOptionUsage(true);
+        setActionError(null);
+        try {
+          const counted = await Promise.all(
+            removed.map(async option => ({
+              option,
+              count: await api.getCustomFieldOptionUsageCount(editingField.id, option),
+            })),
+          );
+          const inUse = counted.filter(c => c.count > 0);
+          if (inUse.length > 0) {
+            setConfirmAction({ kind: 'options-removed', field: editingField, removedOptions: inUse, pendingForm: editForm });
+            return;
+          }
+        } catch (err) {
+          setActionError(err instanceof Error ? err.message : 'Não foi possível verificar o uso das opções removidas.');
+          return;
+        } finally {
+          setIsCheckingOptionUsage(false);
+        }
+      }
+    }
+
     performEditSave(editingField, editForm);
   };
 
@@ -276,6 +316,9 @@ const CustomFieldsSettings = () => {
       if (confirmAction.kind === 'rename') {
         if (!editForm) return;
         await performEditSave(confirmAction.field, editForm);
+        return;
+      } else if (confirmAction.kind === 'options-removed') {
+        await performEditSave(confirmAction.field, confirmAction.pendingForm);
         return;
       } else if (confirmAction.kind === 'deactivate') {
         const updated = await api.deactivateCustomFieldDefinition(confirmAction.field.id);
@@ -626,6 +669,12 @@ const CustomFieldsSettings = () => {
                   Obrigatório
                 </label>
 
+                <p className="text-xs text-muted">
+                  {createForm.displayName.trim()
+                    ? <>Isso vai adicionar o campo <strong className="text-foreground/80">"{createForm.displayName.trim()}"</strong> ao cadastro de {ENTITY_OPTIONS.find(o => o.value === entity)?.label}. Só esta empresa vai ver esse campo.</>
+                    : <>O campo vai ser adicionado ao cadastro de {ENTITY_OPTIONS.find(o => o.value === entity)?.label}, visível só para esta empresa.</>}
+                </p>
+
                 <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
                   <button
                     type="button"
@@ -773,11 +822,11 @@ const CustomFieldsSettings = () => {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     type="submit"
-                    disabled={!isEditFormValid || isSavingEdit}
+                    disabled={!isEditFormValid || isSavingEdit || isCheckingOptionUsage}
                     className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
-                    {isSavingEdit && <Loader2 size={16} className="animate-spin" />}
-                    {isSavingEdit ? 'Salvando...' : 'Salvar'}
+                    {(isSavingEdit || isCheckingOptionUsage) && <Loader2 size={16} className="animate-spin" />}
+                    {isSavingEdit ? 'Salvando...' : isCheckingOptionUsage ? 'Verificando...' : 'Salvar'}
                   </motion.button>
                 </div>
               </form>
@@ -806,18 +855,21 @@ const CustomFieldsSettings = () => {
               className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
             >
               <div className={`absolute top-0 left-0 right-0 h-1.5 opacity-80 ${
-                confirmAction.kind === 'delete' ? 'bg-red-500' : confirmAction.kind === 'deactivate' ? 'bg-orange-500' : 'bg-gradient-to-r from-primary via-accent to-primary'
+                confirmAction.kind === 'delete' || confirmAction.kind === 'options-removed'
+                  ? 'bg-red-500'
+                  : confirmAction.kind === 'deactivate' ? 'bg-orange-500' : 'bg-gradient-to-r from-primary via-accent to-primary'
               }`} />
 
               <div className="flex items-center gap-3 mb-4 mt-2">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                  confirmAction.kind === 'delete'
+                  confirmAction.kind === 'delete' || confirmAction.kind === 'options-removed'
                     ? 'bg-red-500/10 text-red-500'
                     : confirmAction.kind === 'deactivate'
                       ? 'bg-orange-500/10 text-orange-500'
                       : 'bg-primary/10 text-primary'
                 }`}>
                   {confirmAction.kind === 'delete' && <Trash2 size={20} />}
+                  {confirmAction.kind === 'options-removed' && <AlertTriangle size={20} />}
                   {confirmAction.kind === 'deactivate' && <Ban size={20} />}
                   {confirmAction.kind === 'reactivate' && <RotateCcw size={20} />}
                   {confirmAction.kind === 'rename' && <Pencil size={20} />}
@@ -827,6 +879,7 @@ const CustomFieldsSettings = () => {
                   {confirmAction.kind === 'deactivate' && 'Desativar campo'}
                   {confirmAction.kind === 'reactivate' && 'Reativar campo'}
                   {confirmAction.kind === 'delete' && 'Excluir campo'}
+                  {confirmAction.kind === 'options-removed' && 'Opção em uso'}
                 </h2>
               </div>
 
@@ -840,6 +893,20 @@ const CustomFieldsSettings = () => {
                 <p className="text-sm text-foreground/90 mb-6">
                   O campo vai passar a se chamar '{confirmAction.newName}'. Os dados já preenchidos não mudam.
                 </p>
+              )}
+
+              {confirmAction.kind === 'options-removed' && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm flex items-start gap-2.5">
+                  <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                  <div className="space-y-1.5">
+                    {confirmAction.removedOptions.map(({ option, count }) => (
+                      <p key={option}>
+                        {count} {count === 1 ? 'registro está usando' : 'registros estão usando'} a opção '{option}'.
+                        Se você remover, o campo {count === 1 ? 'desse registro fica' : 'desses registros fica'} vazio.
+                      </p>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {confirmAction.kind === 'deactivate' && (
@@ -901,7 +968,7 @@ const CustomFieldsSettings = () => {
                   onClick={handleConfirm}
                   disabled={isConfirmBusy || (confirmAction.kind === 'delete' && !isDeleteConfirmValid)}
                   className={`flex-1 py-3 rounded-xl font-bold text-white transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2 ${
-                    confirmAction.kind === 'delete'
+                    confirmAction.kind === 'delete' || confirmAction.kind === 'options-removed'
                       ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20'
                       : 'bg-primary hover:bg-primary/90 shadow-primary/20'
                   }`}
@@ -911,6 +978,7 @@ const CustomFieldsSettings = () => {
                   {confirmAction.kind === 'deactivate' && (isConfirmBusy ? 'Desativando...' : 'Confirmar Desativação')}
                   {confirmAction.kind === 'reactivate' && (isConfirmBusy ? 'Reativando...' : 'Confirmar Reativação')}
                   {confirmAction.kind === 'delete' && (isConfirmBusy ? 'Excluindo...' : 'Excluir Definitivamente')}
+                  {confirmAction.kind === 'options-removed' && (isConfirmBusy ? 'Salvando...' : 'Remover Mesmo Assim')}
                 </motion.button>
               </div>
             </motion.div>

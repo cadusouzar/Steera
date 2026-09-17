@@ -105,6 +105,7 @@ const Roles = () => {
       const saved = await api.updateRole(updatedRole.id, {
         name: updatedRole.name, department: updatedRole.department,
         colorHex: updatedRole.colorHex, description: updatedRole.description,
+        customFields: updatedRole.customFields,
       });
       setRoles(prev => prev.map(r => r.id === saved.id ? saved : r));
       setSelectedRole(null);
@@ -506,6 +507,12 @@ const Roles = () => {
                         ))}
                       </div>
                     </div>
+
+                    <CustomFieldsFormSection
+                      entity="role"
+                      values={selectedRole.customFields ?? {}}
+                      onChange={(v) => setSelectedRole({ ...selectedRole, customFields: v })}
+                    />
 
                   </div>
                 </div>

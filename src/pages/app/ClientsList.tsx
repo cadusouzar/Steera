@@ -149,7 +149,7 @@ const ClientsList = () => {
 
   const handleUpdateClient = async (
     clientId: string,
-    dto: Partial<{ name: string; category: string; contact: string; email: string }>,
+    dto: Partial<{ name: string; category: string; contact: string; email: string; customFields: Record<string, unknown> }>,
   ): Promise<boolean> => {
     try {
       const updated = await api.updateClient(clientId, dto);

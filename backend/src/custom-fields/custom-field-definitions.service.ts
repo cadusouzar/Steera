@@ -106,6 +106,27 @@ export class CustomFieldDefinitionsService {
     });
   }
 
+  // Usado pelo frontend antes de salvar uma edição que remove uma opção de um campo SELECT/
+  // MULTI_SELECT — dá o número exato de registros que ficariam com o campo esvaziado, pra
+  // avisar o admin antes de confirmar (achado da revisão final: essa checagem estava na spec
+  // original e nunca tinha sido implementada). `option` é sempre um parâmetro de valor (nunca
+  // interpolado em SQL), igual a `countFilledValues`.
+  async countOptionUsage(id: string, option: string): Promise<number> {
+    const def = await this.assertExists(id);
+    if (def.type !== CustomFieldType.SELECT && def.type !== CustomFieldType.MULTI_SELECT) {
+      throw new BadRequestException('Esse campo não é uma lista de opções');
+    }
+    const tableName = CUSTOM_FIELD_ENTITIES[def.entity as CustomFieldEntityKey];
+    const isMulti = def.type === CustomFieldType.MULTI_SELECT;
+    const sql = isMulti
+      ? `SELECT count(*)::bigint as count FROM "${tableName}" WHERE $1 = ANY("${def.columnName}")`
+      : `SELECT count(*)::bigint as count FROM "${tableName}" WHERE "${def.columnName}" = $1`;
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const rows = await tx.$queryRawUnsafe<{ count: bigint }[]>(sql, option);
+      return Number(rows[0].count);
+    });
+  }
+
   async remove(id: string): Promise<void> {
     const def = await this.assertExists(id);
     await runTenantInteractiveTransaction(this.prisma, async (tx) => {

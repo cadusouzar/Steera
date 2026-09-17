@@ -7,6 +7,7 @@ import { CustomFieldValuesService } from './custom-field-values.service';
 import { CustomFieldEntityKey } from './custom-field-entities';
 import { CreateCustomFieldDefinitionDto } from './dto/create-custom-field-definition.dto';
 import { CustomFieldEntityQueryDto } from './dto/custom-field-entity-query.dto';
+import { CustomFieldOptionQueryDto } from './dto/custom-field-option-query.dto';
 import { UpdateCustomFieldDefinitionDto } from './dto/update-custom-field-definition.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -58,6 +59,12 @@ export class CustomFieldsController {
   @Get(':id/filled-count')
   async filledCount(@Param('id') id: string) {
     return { count: await this.definitions.countFilledValues(id) };
+  }
+
+  @Roles('ADMIN')
+  @Get(':id/option-usage')
+  async optionUsage(@Param('id') id: string, @Query() query: CustomFieldOptionQueryDto) {
+    return { count: await this.definitions.countOptionUsage(id, query.option) };
   }
 
   @Roles('ADMIN')
