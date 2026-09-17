@@ -22,16 +22,16 @@ const ENTITY_OPTIONS: { value: CustomFieldEntity; label: string }[] = [
 // vem de `TYPE_LABELS` (Task 10) — este mapa só refina o texto exibido,
 // já que `TYPE_LABELS` tem rótulos mais genéricos (ex.: "Texto" pra TEXT e
 // LONG_TEXT ao mesmo tempo) do que o combinado aqui.
-const TYPE_PICKER: Record<CustomFieldType, { icon: string; label: string }> = {
-  TEXT: { icon: '📝', label: 'Texto curto' },
-  LONG_TEXT: { icon: '📄', label: 'Texto longo' },
-  NUMBER: { icon: '🔢', label: 'Número' },
-  CURRENCY: { icon: '💰', label: 'Valor em dinheiro' },
-  DATE: { icon: '📅', label: 'Data' },
-  DATETIME: { icon: '🕐', label: 'Data e hora' },
-  BOOLEAN: { icon: '✅', label: 'Sim ou não' },
-  SELECT: { icon: '📋', label: 'Lista de opções' },
-  MULTI_SELECT: { icon: '☑️', label: 'Lista de opções (múltipla escolha)' },
+const TYPE_PICKER: Record<CustomFieldType, { icon: string; label: string; example?: string }> = {
+  TEXT: { icon: '📝', label: 'Texto curto', example: 'Ex.: código interno, apelido' },
+  LONG_TEXT: { icon: '📄', label: 'Texto longo', example: 'Ex.: observações, anotações' },
+  NUMBER: { icon: '🔢', label: 'Número', example: 'Ex.: quantidade, idade' },
+  CURRENCY: { icon: '💰', label: 'Valor em dinheiro', example: 'Ex.: comissão, valor extra' },
+  DATE: { icon: '📅', label: 'Data', example: 'Ex.: aniversário, vencimento' },
+  DATETIME: { icon: '🕐', label: 'Data e hora', example: 'Ex.: horário de um evento' },
+  BOOLEAN: { icon: '✅', label: 'Sim ou não', example: 'Ex.: recebe comissão?' },
+  SELECT: { icon: '📋', label: 'Lista de opções', example: 'Ex.: Segmento: Pequeno, Médio, Grande' },
+  MULTI_SELECT: { icon: '☑️', label: 'Lista de opções (múltipla escolha)', example: 'Ex.: Interesses: Financeiro, RH, Vendas' },
   EMAIL: { icon: '📧', label: 'E-mail' },
   PHONE: { icon: '📞', label: 'Telefone' },
 };
@@ -270,16 +270,14 @@ const CustomFieldsSettings = () => {
   const handleConfirm = async () => {
     if (!confirmAction || isConfirmBusy) return;
 
-    if (confirmAction.kind === 'rename') {
-      if (!editForm) return;
-      await performEditSave(confirmAction.field, editForm);
-      return;
-    }
-
     setIsConfirmBusy(true);
     setActionError(null);
     try {
-      if (confirmAction.kind === 'deactivate') {
+      if (confirmAction.kind === 'rename') {
+        if (!editForm) return;
+        await performEditSave(confirmAction.field, editForm);
+        return;
+      } else if (confirmAction.kind === 'deactivate') {
         const updated = await api.deactivateCustomFieldDefinition(confirmAction.field.id);
         setDefinitions(prev => prev.map(d => d.id === updated.id ? updated : d));
       } else if (confirmAction.kind === 'reactivate') {
@@ -578,6 +576,11 @@ const CustomFieldsSettings = () => {
                           <span className={`text-sm font-bold leading-tight ${isSelected ? 'text-primary' : 'text-foreground/80'}`}>
                             {TYPE_PICKER[type].label}
                           </span>
+                          {TYPE_PICKER[type].example && (
+                            <span className="text-xs text-muted mt-0.5 leading-tight">
+                              {TYPE_PICKER[type].example}
+                            </span>
+                          )}
                         </motion.button>
                       );
                     })}
@@ -826,6 +829,12 @@ const CustomFieldsSettings = () => {
                   {confirmAction.kind === 'delete' && 'Excluir campo'}
                 </h2>
               </div>
+
+              {actionError && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 dark:text-red-400 text-sm">
+                  {actionError}
+                </div>
+              )}
 
               {confirmAction.kind === 'rename' && (
                 <p className="text-sm text-foreground/90 mb-6">
