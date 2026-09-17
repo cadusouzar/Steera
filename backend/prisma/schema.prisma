@@ -211,6 +211,7 @@ model Company {
   fileAssets             FileAsset[]
   auditLogs              AuditLog[]
   tenantMigrations       TenantMigration[]
+  customFieldDefinitions CustomFieldDefinition[]
 }
 
 model Role {
@@ -720,6 +721,40 @@ model AuditLog {
 
   @@index([companyId, createdAt])
   @@index([companyId, employeeId])
+}
+
+enum CustomFieldType {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  CURRENCY
+  DATE
+  DATETIME
+  BOOLEAN
+  SELECT
+  MULTI_SELECT
+  EMAIL
+  PHONE
+}
+
+model CustomFieldDefinition {
+  id            String          @id @default(cuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entity        String
+  displayName   String
+  columnName    String
+  type          CustomFieldType
+  required      Boolean         @default(false)
+  defaultValue  String?
+  description   String?
+  configuration Json?
+  displayOrder  Int             @default(0)
+  active        Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([companyId, entity, columnName])
 }
 
 // Metadado central sobre tenants (não é dado operacional de empresa nenhuma) — registra quais
