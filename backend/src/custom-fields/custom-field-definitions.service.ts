@@ -87,10 +87,16 @@ export class CustomFieldDefinitionsService {
   async countFilledValues(id: string): Promise<number> {
     const def = await this.assertExists(id);
     const tableName = CUSTOM_FIELD_ENTITIES[def.entity as CustomFieldEntityKey];
-    const rows = await this.prisma.$queryRawUnsafe<{ count: bigint }[]>(
-      `SELECT count(*)::bigint as count FROM "${tableName}" WHERE "${def.columnName}" IS NOT NULL`,
-    );
-    return Number(rows[0].count);
+    // `$queryRawUnsafe` nunca passa pela extensão de roteamento schema-per-tenant (mesma limitação
+    // documentada em CustomFieldValuesService.getValuesForRecords) — sem envolver numa transação de
+    // tenant, esta leitura sempre rodava contra o schema `public` do client central, nunca contra o
+    // schema físico da empresa dona do campo, e sempre retornava 0.
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const rows = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+        `SELECT count(*)::bigint as count FROM "${tableName}" WHERE "${def.columnName}" IS NOT NULL`,
+      );
+      return Number(rows[0].count);
+    });
   }
 
   async remove(id: string): Promise<void> {

@@ -95,11 +95,14 @@ describe('CustomFieldDefinitionsService', () => {
   });
 
   describe('countFilledValues', () => {
-    it('conta quantos registros têm valor preenchido na coluna', async () => {
+    it('conta quantos registros têm valor preenchido na coluna, dentro de uma transação de tenant', async () => {
       prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition());
       prisma.$queryRawUnsafe.mockResolvedValue([{ count: 3n }]);
       const count = await service.countFilledValues('def1');
       expect(count).toBe(3);
+      // A leitura precisa passar por `runTenantInteractiveTransaction` (nunca `this.prisma` direto)
+      // pra resolver contra o schema físico certo — `$transaction` sendo chamado é a prova disso.
+      expect(prisma.$transaction).toHaveBeenCalled();
       expect(prisma.$queryRawUnsafe).toHaveBeenCalledWith(
         'SELECT count(*)::bigint as count FROM "Client" WHERE "custom_segmento" IS NOT NULL',
       );

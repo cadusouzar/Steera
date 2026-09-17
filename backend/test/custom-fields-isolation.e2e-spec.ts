@@ -124,4 +124,30 @@ describe('Campos personalizados: isolamento entre empresas em Clientes (e2e)', (
       .send({ name: 'Cliente Inválido', contact: '(11) 90000-0002', customFields: { custom_regiao: 'Sul' } })
       .expect(400);
   });
+
+  it('GET /custom-fields/:id/filled-count conta um registro real no schema físico da empresa, não 0', async () => {
+    const createField = await request(app.getHttpServer())
+      .post('/custom-fields')
+      .set('Authorization', tokenA)
+      .send({ entity: 'client', displayName: 'Prioridade Filled Count', type: 'TEXT' })
+      .expect(201);
+    const fieldId = createField.body.id;
+    const columnName = createField.body.columnName;
+
+    await request(app.getHttpServer())
+      .post('/clients')
+      .set('Authorization', tokenA)
+      .send({
+        name: 'Cliente Filled Count',
+        contact: '(11) 90000-0003',
+        customFields: { [columnName]: 'Alta' },
+      })
+      .expect(201);
+
+    const filledCount = await request(app.getHttpServer())
+      .get(`/custom-fields/${fieldId}/filled-count`)
+      .set('Authorization', tokenA)
+      .expect(200);
+    expect(filledCount.body).toEqual({ count: 1 });
+  });
 });
