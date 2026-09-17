@@ -65,7 +65,14 @@ export class CustomFieldDefinitionsService {
   }
 
   async update(id: string, dto: UpdateCustomFieldDefinitionDto): Promise<CustomFieldDefinition> {
-    await this.assertExists(id);
+    const def = await this.assertExists(id);
+    if (
+      dto.configuration !== undefined &&
+      (def.type === CustomFieldType.SELECT || def.type === CustomFieldType.MULTI_SELECT) &&
+      (!dto.configuration?.options || dto.configuration.options.length === 0)
+    ) {
+      throw new BadRequestException('Campos de lista de opções precisam de pelo menos uma opção');
+    }
     return this.prisma.customFieldDefinition.update({
       where: { id },
       data: { ...dto, configuration: (dto.configuration ?? undefined) as Prisma.InputJsonValue },

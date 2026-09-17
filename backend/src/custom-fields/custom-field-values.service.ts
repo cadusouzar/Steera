@@ -90,7 +90,7 @@ export class CustomFieldValuesService {
       if (def.columnName in provided) {
         resolved[def.columnName] = this.validateValue(def, provided[def.columnName]);
       } else if (def.defaultValue !== null && def.defaultValue !== undefined) {
-        resolved[def.columnName] = this.parseDefaultValue(def);
+        resolved[def.columnName] = this.validateValue(def, this.parseDefaultValue(def));
       } else if (def.required) {
         throw new BadRequestException(`O campo "${def.displayName}" é obrigatório`);
       }
@@ -141,9 +141,21 @@ export class CustomFieldValuesService {
     switch (definition.type) {
       case CustomFieldType.NUMBER:
       case CustomFieldType.CURRENCY: {
-        const n = Number(value);
-        if (Number.isNaN(n)) throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um número`);
-        return n;
+        if (typeof value !== 'number' && typeof value !== 'string') {
+          throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um número`);
+        }
+        const trimmed = typeof value === 'string' ? value.trim() : value;
+        if (trimmed === '' || Number.isNaN(Number(trimmed))) {
+          throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um número`);
+        }
+        return Number(trimmed);
+      }
+      case CustomFieldType.DATE:
+      case CustomFieldType.DATETIME: {
+        if (Number.isNaN(new Date(value as any).getTime())) {
+          throw new BadRequestException(`O campo "${definition.displayName}" precisa ser uma data válida`);
+        }
+        return String(value);
       }
       case CustomFieldType.BOOLEAN:
         if (typeof value !== 'boolean') {

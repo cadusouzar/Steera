@@ -53,6 +53,37 @@ describe('CustomFieldDefinitionsService', () => {
     });
   });
 
+  describe('update', () => {
+    it('rejeita configuration.options vazio pra um campo SELECT já existente', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition({ type: CustomFieldType.SELECT }));
+      await expect(
+        service.update('def1', { configuration: { options: [] } } as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.customFieldDefinition.update).not.toHaveBeenCalled();
+    });
+
+    it('rejeita configuration sem options pra um campo MULTI_SELECT já existente', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition({ type: CustomFieldType.MULTI_SELECT }));
+      await expect(
+        service.update('def1', { configuration: {} } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('aceita configuration.options preenchido pra um campo SELECT já existente', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition({ type: CustomFieldType.SELECT }));
+      prisma.customFieldDefinition.update.mockResolvedValue(makeDefinition({ type: CustomFieldType.SELECT }));
+      await service.update('def1', { configuration: { options: ['A', 'B'] } } as any);
+      expect(prisma.customFieldDefinition.update).toHaveBeenCalled();
+    });
+
+    it('não exige options ao atualizar um campo TEXT sem mexer em configuration', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition({ type: CustomFieldType.TEXT }));
+      prisma.customFieldDefinition.update.mockResolvedValue(makeDefinition({ type: CustomFieldType.TEXT }));
+      await service.update('def1', { displayName: 'Novo nome' } as any);
+      expect(prisma.customFieldDefinition.update).toHaveBeenCalled();
+    });
+  });
+
   describe('deactivate/reactivate', () => {
     it('rejeita desativar um campo já desativado', async () => {
       prisma.customFieldDefinition.findFirst.mockResolvedValue(makeDefinition({ active: false }));

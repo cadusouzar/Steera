@@ -201,5 +201,56 @@ describe('CustomFieldValuesService', () => {
         service.resolveValuesForCreate('client', { custom_inexistente: 'x' }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('rejeita um defaultValue malformado pra um campo NUMBER em vez de aplicá-lo sem validar', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.NUMBER, columnName: 'custom_qtd', defaultValue: 'abc' }),
+      ]);
+      await expect(service.resolveValuesForCreate('client', {})).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita um defaultValue de SELECT fora da lista de opções em vez de aplicá-lo sem validar', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({
+          type: CustomFieldType.SELECT, columnName: 'custom_seg', defaultValue: 'Fora-da-lista',
+          configuration: { options: ['Pequeno', 'Médio'] },
+        }),
+      ]);
+      await expect(service.resolveValuesForCreate('client', {})).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('validateValue (via resolveValuesForCreate/setValues)', () => {
+    it('rejeita string não-parseável como data pra um campo DATE', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.DATE, columnName: 'custom_data' }),
+      ]);
+      await expect(
+        service.resolveValuesForCreate('client', { custom_data: 'não é uma data' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('aceita uma data ISO válida pra um campo DATETIME', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.DATETIME, columnName: 'custom_data' }),
+      ]);
+      const resolved = await service.resolveValuesForCreate('client', {
+        custom_data: '2026-09-17T10:00:00.000Z',
+      });
+      expect(resolved).toEqual({ custom_data: '2026-09-17T10:00:00.000Z' });
+    });
+
+    it.each([['string vazia', ''], ['array', []], ['booleano', true]])(
+      'rejeita %s pra um campo NUMBER em vez de coagir silenciosamente',
+      async (_label, badValue) => {
+        const tx = { $executeRawUnsafe: jest.fn(), customFieldDefinition: { findMany: jest.fn() } };
+        tx.customFieldDefinition.findMany.mockResolvedValue([
+          makeDefinition({ type: CustomFieldType.NUMBER, columnName: 'custom_qtd' }),
+        ]);
+        await expect(
+          service.setValues('client', 'rec1', { custom_qtd: badValue }, tx as any),
+        ).rejects.toThrow(BadRequestException);
+      },
+    );
   });
 });
