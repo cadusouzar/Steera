@@ -1574,3 +1574,71 @@ export async function fetchProtectedFileObjectUrl(downloadUrl: string, isRetry =
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }
+
+// ---- Custom Fields ----
+export type CustomFieldType =
+  | 'TEXT' | 'LONG_TEXT' | 'NUMBER' | 'CURRENCY' | 'DATE' | 'DATETIME'
+  | 'BOOLEAN' | 'SELECT' | 'MULTI_SELECT' | 'EMAIL' | 'PHONE';
+
+export type CustomFieldEntity = 'client' | 'role' | 'employee';
+
+export interface CustomFieldDefinition {
+  id: string;
+  entity: CustomFieldEntity;
+  displayName: string;
+  columnName: string;
+  type: CustomFieldType;
+  required: boolean;
+  defaultValue: string | null;
+  description: string | null;
+  configuration: { options?: string[] } | null;
+  displayOrder: number;
+  active: boolean;
+}
+
+export async function listCustomFieldDefinitions(entity: CustomFieldEntity): Promise<CustomFieldDefinition[]> {
+  return request<CustomFieldDefinition[]>(`/custom-fields?entity=${entity}`);
+}
+
+export async function listActiveCustomFields(entity: CustomFieldEntity): Promise<CustomFieldDefinition[]> {
+  return request<CustomFieldDefinition[]>(`/custom-fields/active?entity=${entity}`);
+}
+
+export async function createCustomFieldDefinition(dto: {
+  entity: CustomFieldEntity;
+  displayName: string;
+  type: CustomFieldType;
+  required?: boolean;
+  defaultValue?: string;
+  description?: string;
+  configuration?: { options?: string[] };
+}): Promise<CustomFieldDefinition> {
+  return request<CustomFieldDefinition>('/custom-fields', { method: 'POST', body: JSON.stringify(dto) });
+}
+
+export async function updateCustomFieldDefinition(
+  id: string,
+  dto: Partial<{
+    displayName: string; required: boolean; defaultValue: string; description: string;
+    configuration: { options?: string[] }; displayOrder: number;
+  }>,
+): Promise<CustomFieldDefinition> {
+  return request<CustomFieldDefinition>(`/custom-fields/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
+}
+
+export async function deactivateCustomFieldDefinition(id: string): Promise<CustomFieldDefinition> {
+  return request<CustomFieldDefinition>(`/custom-fields/${id}/deactivate`, { method: 'PATCH' });
+}
+
+export async function activateCustomFieldDefinition(id: string): Promise<CustomFieldDefinition> {
+  return request<CustomFieldDefinition>(`/custom-fields/${id}/activate`, { method: 'PATCH' });
+}
+
+export async function getCustomFieldFilledCount(id: string): Promise<number> {
+  const res = await request<{ count: number }>(`/custom-fields/${id}/filled-count`);
+  return res.count;
+}
+
+export async function deleteCustomFieldDefinition(id: string): Promise<void> {
+  await request<void>(`/custom-fields/${id}`, { method: 'DELETE' });
+}
