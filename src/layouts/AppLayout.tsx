@@ -7,27 +7,35 @@ import UserProfileDrawer from '../components/UserProfileDrawer';
 import { getCurrentUser } from '../lib/auth';
 import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield, Settings } from 'lucide-react';
 
-// Espelha o enum `AppModule` do backend (backend/prisma/schema.prisma) —
-// os valores já chegam em maiúsculo de getCurrentUser()?.modules (vindos
-// direto de /auth/login, /auth/me e do refresh), sem precisar de normalização.
-type AppModule = 'DASHBOARD' | 'CLIENTES' | 'RH' | 'COMERCIAL' | 'OPERACOES' | 'FINANCAS';
+// Espelha o enum `AppModule` do backend (backend/prisma/schema.prisma) — os valores já chegam em
+// maiúsculo de getCurrentUser()?.modules (vindos direto de /auth/login, /auth/me e do refresh),
+// sem precisar de normalização. `RH` sozinho nunca é mais atribuído a um login novo (17/09/2026) —
+// RH virou RH_CARGOS/RH_FUNCIONARIOS, e Ponto virou um menu próprio (PONTO_REGISTRO/
+// PONTO_ADMINISTRACAO), independente de RH. Mantido no tipo só pra não quebrar um login antigo que
+// ainda carregue esse valor num token já emitido — nenhum `hasModule('RH')` é mais usado abaixo.
+type AppModule =
+  | 'DASHBOARD' | 'CLIENTES' | 'RH' | 'RH_CARGOS' | 'RH_FUNCIONARIOS'
+  | 'PONTO_REGISTRO' | 'PONTO_ADMINISTRACAO' | 'COMERCIAL' | 'OPERACOES' | 'FINANCAS';
 
 const AppLayout = () => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+  const currentUser = getCurrentUser();
 
   // Filtro de navegação por módulo: convenção de UI apenas (esconde links
   // que o usuário não tem em `modules`) — não é a fronteira de segurança
   // real, que já é garantida pelo backend (Tasks 4-7) e pelo RequireAuth
   // (Task 9). Regra deliberada do plano: módulos valem igualmente para
   // ADMIN e EMPLOYEE — nenhum bypass aqui pra `role === 'ADMIN'`.
-  const userModules = getCurrentUser()?.modules ?? [];
+  const userModules = currentUser?.modules ?? [];
   const hasModule = (module: AppModule) => userModules.includes(module);
+  const isAdmin = currentUser?.role === 'admin';
 
   const isActive = (path: string) => path === '/app' ? location.pathname === '/app' : (location.pathname === path || location.pathname.startsWith(`${path}/`));
 
   // State for submenus
   const [isHrOpen, setIsHrOpen] = useState(false);
+  const [isPontoOpen, setIsPontoOpen] = useState(false);
   const [isOperationsOpen, setIsOperationsOpen] = useState(false);
   const [isCommercialOpen, setIsCommercialOpen] = useState(false);
   
@@ -36,10 +44,14 @@ const AppLayout = () => {
 
   // Auto-open submenu if active route is inside it
   useEffect(() => {
-    // `startsWith('/app/ponto')` já cobre /app/ponto-administracao também (prefixo de string) —
-    // sem precisar de uma condição separada.
-    if (location.pathname.startsWith('/app/funcionarios') || location.pathname.startsWith('/app/cargos') || location.pathname.startsWith('/app/ponto')) {
+    if (location.pathname.startsWith('/app/funcionarios') || location.pathname.startsWith('/app/cargos')) {
       setIsHrOpen(true);
+    }
+    // `startsWith('/app/ponto')` já cobre /app/ponto-administracao também (prefixo de string) —
+    // sem precisar de uma condição separada. Ponto virou um submenu próprio, independente de RH
+    // (17/09/2026).
+    if (location.pathname.startsWith('/app/ponto')) {
+      setIsPontoOpen(true);
     }
     if (location.pathname.startsWith('/app/estoque') || location.pathname.startsWith('/app/compras')) {
       setIsOperationsOpen(true);
@@ -87,13 +99,14 @@ const AppLayout = () => {
             </Link>
           )}
 
-          {/* Recursos Humanos Submenu */}
-          {hasModule('RH') && (
+          {/* Recursos Humanos Submenu — só Cargos/Funcionários desde 17/09/2026 (Ponto virou um
+              menu próprio, independente, logo abaixo) */}
+          {(hasModule('RH_CARGOS') || hasModule('RH_FUNCIONARIOS')) && (
           <div className="space-y-1">
-            <button 
+            <button
               onClick={() => setIsHrOpen(!isHrOpen)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                (isActive('/app/funcionarios') || isActive('/app/cargos') || isActive('/app/ponto') || isActive('/app/ponto-administracao'))
+                (isActive('/app/funcionarios') || isActive('/app/cargos'))
                   ? 'bg-primary/5 text-primary'
                   : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
               }`}
@@ -104,25 +117,59 @@ const AppLayout = () => {
               </div>
               <ChevronDown size={16} className={`transition-transform duration-300 ${isHrOpen ? 'rotate-180' : ''}`} />
             </button>
-            
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isHrOpen ? 'max-h-52 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+
+            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isHrOpen ? 'max-h-24 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <div className="pl-11 pr-2 space-y-1">
-                <Link 
-                  to="/app/funcionarios" 
+                {hasModule('RH_FUNCIONARIOS') && (
+                <Link
+                  to="/app/funcionarios"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
                     isActive('/app/funcionarios') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
                   }`}
                 >
                   Funcionários
                 </Link>
-                <Link 
-                  to="/app/cargos" 
+                )}
+                {hasModule('RH_CARGOS') && (
+                <Link
+                  to="/app/cargos"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
                     isActive('/app/cargos') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
                   }`}
                 >
                   Cargos
                 </Link>
+                )}
+              </div>
+            </div>
+          </div>
+          )}
+
+          {/* Ponto Submenu (novo em 17/09/2026, independente de Recursos Humanos) — "Controle de
+              Ponto" (bater o próprio ponto) e "Administração de Ponto" (aprovar ajustes/
+              justificativas de outros, escalas, feriados, configuração) são módulos
+              INDEPENDENTES: dá pra conceder um sem o outro, ex. um login que só bate o próprio
+              ponto, sem enxergar a administração. */}
+          {(hasModule('PONTO_REGISTRO') || hasModule('PONTO_ADMINISTRACAO')) && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setIsPontoOpen(!isPontoOpen)}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
+                (isActive('/app/ponto') || isActive('/app/ponto-administracao'))
+                  ? 'bg-primary/5 text-primary'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Users size={18} />
+                Ponto
+              </div>
+              <ChevronDown size={16} className={`transition-transform duration-300 ${isPontoOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isPontoOpen ? 'max-h-24 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+              <div className="pl-11 pr-2 space-y-1">
+                {hasModule('PONTO_REGISTRO') && (
                 <Link
                   to="/app/ponto"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
@@ -131,6 +178,8 @@ const AppLayout = () => {
                 >
                   Controle de Ponto
                 </Link>
+                )}
+                {hasModule('PONTO_ADMINISTRACAO') && (
                 <Link
                   to="/app/ponto-administracao"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
@@ -139,6 +188,7 @@ const AppLayout = () => {
                 >
                   Administração de Ponto
                 </Link>
+                )}
               </div>
             </div>
           </div>
@@ -244,27 +294,36 @@ const AppLayout = () => {
           </Link>
           )}
 
-          <div className="text-xs font-semibold text-muted uppercase tracking-wider mt-8 pt-6 border-t border-border/40 mb-4 px-2">Administração</div>
-          
-          <Link 
-            to="/app/usuarios" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-              isActive('/app/usuarios') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-            }`}
-          >
-            <Shield size={18} />
-            Usuários e Acessos
-          </Link>
+          {/* Seção Administração — achado num teste manual do usuário (17/09/2026): estava
+              aparecendo pra QUALQUER login autenticado, inclusive EMPLOYEE, mesmo o backend já
+              exigindo @Roles('ADMIN') pra qualquer ação de escrita nas duas telas. Gateada por
+              role agora (não por módulo — gerenciar logins/campos personalizados nunca foi uma
+              questão de módulo, sempre foi admin-only). */}
+          {isAdmin && (
+            <>
+              <div className="text-xs font-semibold text-muted uppercase tracking-wider mt-8 pt-6 border-t border-border/40 mb-4 px-2">Administração</div>
 
-          <Link
-            to="/app/campos-personalizados"
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-              isActive('/app/campos-personalizados') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-            }`}
-          >
-            <Settings size={18} />
-            Campos Personalizados
-          </Link>
+              <Link
+                to="/app/usuarios"
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
+                  isActive('/app/usuarios') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                <Shield size={18} />
+                Usuários e Acessos
+              </Link>
+
+              <Link
+                to="/app/campos-personalizados"
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
+                  isActive('/app/campos-personalizados') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                <Settings size={18} />
+                Campos Personalizados
+              </Link>
+            </>
+          )}
         </nav>
         
 

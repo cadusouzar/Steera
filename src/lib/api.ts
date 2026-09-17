@@ -831,7 +831,10 @@ interface ApiSystemUser {
   role: 'ADMIN' | 'EMPLOYEE';
   employeeId: string | null;
   modules: string[];
-  status: 'ACTIVE' | 'BLOCKED';
+  // LOCKED: travado pelo próprio backend por excesso de tentativas de senha erradas (17/09/2026) —
+  // diferente de BLOCKED (sempre uma ação deliberada de um admin), mas os dois usam a mesma ação
+  // de desbloqueio (unblock/reset de senha).
+  status: 'ACTIVE' | 'BLOCKED' | 'LOCKED';
   hasFullPontoAccess: boolean;
 }
 
@@ -841,7 +844,7 @@ export interface SystemUser {
   role: 'admin' | 'employee';
   employeeId: string | null;
   modules: string[];
-  status: 'active' | 'blocked';
+  status: 'active' | 'blocked' | 'locked';
   hasFullPontoAccess: boolean;
 }
 
@@ -878,6 +881,29 @@ export async function createSystemUser(dto: {
     }),
   });
   return { user: mapSystemUser(res.user), temporaryPassword: res.temporaryPassword };
+}
+
+// Edição de um login já existente (17/09/2026) — hoje só os módulos, sem precisar bloquear e
+// recriar o login do zero (limitação anterior, documentada no CLAUDE.md/vault).
+export async function updateSystemUser(id: string, dto: { modules: string[] }): Promise<SystemUser> {
+  const res = await request<ApiSystemUser>(`/companies/me/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ modules: dto.modules }),
+  });
+  return mapSystemUser(res);
+}
+
+// Exclusão de verdade (17/09/2026) — diferente de bloquear, que é reversível. O backend recusa
+// excluir o último ADMIN ativo da empresa.
+export async function deleteSystemUser(id: string): Promise<void> {
+  await request(`/companies/me/users/${id}`, { method: 'DELETE' });
+}
+
+// Redefinição de senha por um admin (17/09/2026) — gera uma senha temporária nova (mesmo padrão
+// da criação, devolvida uma única vez), reativa o login e zera o contador de tentativas erradas —
+// é o caminho de saída de um login LOCKED por excesso de tentativas.
+export async function resetSystemUserPassword(id: string): Promise<{ temporaryPassword: string }> {
+  return request<{ temporaryPassword: string }>(`/companies/me/users/${id}/reset-password`, { method: 'PATCH' });
 }
 
 export async function blockSystemUser(id: string): Promise<void> {

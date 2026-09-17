@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, Search, X, UserPlus, FileQuestion, LayoutDashboard, HeartHandshake, Users,
   TrendingUp, Package, BarChart3, Loader2, KeyRound, Copy, Check, ShieldOff, ShieldCheck,
+  Pencil, Trash2, AlertTriangle, Clock,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
@@ -16,19 +17,41 @@ const ROLE_OPTIONS = [
   { value: 'employee', label: 'Funcionário' },
 ];
 
-// Ids em maiúsculo pra bater 1:1 com o enum `AppModule` do backend
-// (backend/prisma/schema.prisma) — módulos valem igualmente pra login
-// ADMIN e EMPLOYEE, então o mesmo conjunto de checkboxes aparece nos dois casos.
-const AVAILABLE_MODULES = [
+interface ModuleOption { id: string; label: string; icon: React.ReactNode }
+interface ModuleGroup { id: string; groupLabel: string; groupIcon: React.ReactNode; options: ModuleOption[] }
+
+// Ids em maiúsculo pra bater 1:1 com o enum `AppModule` do backend (backend/prisma/schema.prisma)
+// — módulos valem igualmente pra login ADMIN e EMPLOYEE, então o mesmo seletor aparece nos dois
+// casos. Módulos sem sub-divisão continuam soltos; RH e Ponto viraram grupos com dois
+// sub-módulos independentes cada um (17/09/2026 — antes "RH" cobria Cargos/Funcionários/Ponto de
+// uma vez só; ver DECISOES-TECNICAS no vault pro raciocínio completo).
+const STANDALONE_MODULES: ModuleOption[] = [
   { id: 'DASHBOARD', label: 'Visão Geral', icon: <LayoutDashboard size={16}/> },
   { id: 'CLIENTES', label: 'Clientes', icon: <HeartHandshake size={16}/> },
-  { id: 'RH', label: 'Recursos Humanos', icon: <Users size={16}/> },
   { id: 'COMERCIAL', label: 'Comercial', icon: <TrendingUp size={16}/> },
   { id: 'OPERACOES', label: 'Operações', icon: <Package size={16}/> },
   { id: 'FINANCAS', label: 'Finanças', icon: <BarChart3 size={16}/> },
 ];
 
-const moduleLabel = (id: string) => AVAILABLE_MODULES.find(m => m.id === id)?.label ?? id;
+const MODULE_GROUPS: ModuleGroup[] = [
+  {
+    id: 'rh', groupLabel: 'Recursos Humanos', groupIcon: <Users size={16}/>,
+    options: [
+      { id: 'RH_CARGOS', label: 'Cargos', icon: <Users size={14}/> },
+      { id: 'RH_FUNCIONARIOS', label: 'Funcionários', icon: <Users size={14}/> },
+    ],
+  },
+  {
+    id: 'ponto', groupLabel: 'Ponto', groupIcon: <Clock size={16}/>,
+    options: [
+      { id: 'PONTO_REGISTRO', label: 'Bater o próprio ponto', icon: <Clock size={14}/> },
+      { id: 'PONTO_ADMINISTRACAO', label: 'Administração de Ponto', icon: <Clock size={14}/> },
+    ],
+  },
+];
+
+const ALL_MODULE_OPTIONS: ModuleOption[] = [...STANDALONE_MODULES, ...MODULE_GROUPS.flatMap(g => g.options)];
+const moduleLabel = (id: string) => ALL_MODULE_OPTIONS.find(m => m.id === id)?.label ?? id;
 
 interface UserFormState {
   email: string;
@@ -38,6 +61,66 @@ interface UserFormState {
 }
 
 const emptyForm: UserFormState = { email: '', role: 'admin', employeeId: '', modules: ['DASHBOARD'] };
+
+// Grade de módulos reaproveitada pelos modais de criação E edição — evita duas cópias divergentes
+// do mesmo seletor (achado ao planejar a edição de módulos, 17/09/2026).
+const ModulesPicker: React.FC<{ selected: string[]; onToggle: (id: string) => void }> = ({ selected, onToggle }) => {
+  const renderOption = (mod: ModuleOption) => {
+    const isSelected = selected.includes(mod.id);
+    return (
+      <motion.button
+        whileTap={{ scale: 0.97 }}
+        type="button"
+        key={mod.id}
+        onClick={() => onToggle(mod.id)}
+        className={`relative flex flex-col items-start p-4 rounded-xl border transition-all duration-200 h-full overflow-hidden w-full ${
+          isSelected
+            ? 'border-primary bg-primary/5 shadow-sm'
+            : 'border-border/60 bg-background hover:border-border hover:bg-secondary/30'
+        }`}
+      >
+        <div className="flex items-start justify-between w-full mb-3">
+          <div className={`p-2.5 rounded-lg transition-colors ${
+            isSelected ? 'bg-primary/10 text-primary' : 'bg-secondary/50 text-muted-foreground group-hover:text-foreground'
+          }`}>
+            {mod.icon}
+          </div>
+          <div className={`shrink-0 w-5 h-5 mt-1 rounded-full border-2 flex items-center justify-center transition-all ${
+            isSelected ? 'border-primary bg-primary text-white' : 'border-border/80 bg-transparent'
+          }`}>
+            {isSelected && (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+          </div>
+        </div>
+        <span className={`text-sm font-bold text-left leading-tight w-full ${isSelected ? 'text-primary' : 'text-foreground/80'}`}>
+          {mod.label}
+        </span>
+      </motion.button>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+        {STANDALONE_MODULES.map(renderOption)}
+      </div>
+      {MODULE_GROUPS.map(group => (
+        <div key={group.id}>
+          <div className="flex items-center gap-2 text-xs font-bold text-muted uppercase tracking-wider mb-2">
+            {group.groupIcon}
+            {group.groupLabel}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            {group.options.map(renderOption)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const UsersManagement = () => {
   const currentUser = getCurrentUser();
@@ -58,11 +141,24 @@ const UsersManagement = () => {
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [pontoAccessSaving, setPontoAccessSaving] = useState<string | null>(null);
 
-  // Senha temporária devolvida pela criação — só existe nessa única resposta,
-  // nunca mais recuperável depois. Fica num banner que só some com ação
-  // explícita do admin (nunca no backdrop/Escape), pra garantir que ele
-  // realmente copiou/anotou antes de perder o valor.
-  const [createdCredential, setCreatedCredential] = useState<{ email: string; temporaryPassword: string } | null>(null);
+  // Edição de módulos de um login já existente (17/09/2026) — sem precisar bloquear e recriar.
+  const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
+  const [editModules, setEditModules] = useState<string[]>([]);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // Exclusão de verdade (17/09/2026) — confirmação em duas etapas, nunca window.confirm().
+  const [deletingUser, setDeletingUser] = useState<SystemUser | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Redefinição de senha por um admin (17/09/2026) — confirmação em duas etapas antes de gerar.
+  const [resettingPasswordUser, setResettingPasswordUser] = useState<SystemUser | null>(null);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  // Senha temporária devolvida pela criação OU por um reset de senha — só existe nessa única
+  // resposta, nunca mais recuperável depois. Fica num banner que só some com ação explícita do
+  // admin (nunca no backdrop/Escape), pra garantir que ele realmente copiou/anotou antes de perder
+  // o valor.
+  const [tempPasswordBanner, setTempPasswordBanner] = useState<{ email: string; temporaryPassword: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -85,10 +181,13 @@ const UsersManagement = () => {
 
   useEscapeKey(() => {
     if (isModalOpen) setIsModalOpen(false);
+    if (editingUser) setEditingUser(null);
+    if (deletingUser) setDeletingUser(null);
+    if (resettingPasswordUser) setResettingPasswordUser(null);
   });
 
   useEffect(() => {
-    if (isModalOpen || createdCredential) {
+    if (isModalOpen || editingUser || deletingUser || resettingPasswordUser || tempPasswordBanner) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -96,7 +195,7 @@ const UsersManagement = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isModalOpen, createdCredential]);
+  }, [isModalOpen, editingUser, deletingUser, resettingPasswordUser, tempPasswordBanner]);
 
   const employeeById = useMemo(() => {
     const map = new Map<string, EmployeeListItem>();
@@ -173,7 +272,7 @@ const UsersManagement = () => {
         modules: formData.modules,
       });
       setUsers(prev => [...prev, result.user]);
-      setCreatedCredential({ email: result.user.email, temporaryPassword: result.temporaryPassword });
+      setTempPasswordBanner({ email: result.user.email, temporaryPassword: result.temporaryPassword });
       setIsModalOpen(false);
       setFormData(emptyForm);
     } catch (err) {
@@ -218,18 +317,85 @@ const UsersManagement = () => {
   };
 
   const closeCredentialBanner = () => {
-    setCreatedCredential(null);
+    setTempPasswordBanner(null);
     setCopied(false);
   };
 
   const handleCopyPassword = async () => {
-    if (!createdCredential) return;
+    if (!tempPasswordBanner) return;
     try {
-      await navigator.clipboard.writeText(createdCredential.temporaryPassword);
+      await navigator.clipboard.writeText(tempPasswordBanner.temporaryPassword);
       setCopied(true);
     } catch {
       // Sem acesso à área de transferência (navegador/permite) — o admin
       // ainda pode selecionar e copiar manualmente o texto exibido.
+    }
+  };
+
+  const openEditModal = (user: SystemUser) => {
+    setEditingUser(user);
+    setEditModules(user.modules);
+    setActionError(null);
+  };
+
+  const closeEditModal = () => {
+    setEditingUser(null);
+    setActionError(null);
+  };
+
+  const toggleEditModule = (moduleId: string) => {
+    setEditModules(prev => (prev.includes(moduleId) ? prev.filter(m => m !== moduleId) : [...prev, moduleId]));
+  };
+
+  const handleSaveModules = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser || isSavingEdit) return;
+    setIsSavingEdit(true);
+    setActionError(null);
+    try {
+      const updated = await api.updateSystemUser(editingUser.id, { modules: editModules });
+      setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+      closeEditModal();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar os módulos deste usuário.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingUser || isDeleting) return;
+    setIsDeleting(true);
+    setActionError(null);
+    try {
+      await api.deleteSystemUser(deletingUser.id);
+      setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
+      setDeletingUser(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível excluir este login.');
+      setDeletingUser(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleConfirmResetPassword = async () => {
+    if (!resettingPasswordUser || isResettingPassword) return;
+    setIsResettingPassword(true);
+    setActionError(null);
+    try {
+      const result = await api.resetSystemUserPassword(resettingPasswordUser.id);
+      const email = resettingPasswordUser.email;
+      setResettingPasswordUser(null);
+      setTempPasswordBanner({ email, temporaryPassword: result.temporaryPassword });
+      // Reset também reativa o login (sai de bloqueado/travado) e zera o contador de tentativas —
+      // recarrega pra refletir o novo status na tabela sem precisar adivinhar o valor localmente.
+      await loadData();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível redefinir a senha deste usuário.');
+      setResettingPasswordUser(null);
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -414,6 +580,14 @@ const UsersManagement = () => {
                                 <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                                 Ativo
                               </span>
+                            ) : user.status === 'locked' ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                                title="Travado automaticamente por excesso de tentativas de senha erradas"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                Travado (tentativas)
+                              </span>
                             ) : (
                               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
                                 <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
@@ -422,8 +596,22 @@ const UsersManagement = () => {
                             )}
                           </td>
                           {isAdmin && (
-                            <td className="px-8 py-5 text-right w-40">
-                              <div className="flex items-center justify-end gap-2">
+                            <td className="px-8 py-5 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => openEditModal(user)}
+                                  className="p-2 rounded-lg transition-colors text-muted hover:text-primary hover:bg-primary/10"
+                                  title="Editar Módulos"
+                                >
+                                  <Pencil size={16} />
+                                </button>
+                                <button
+                                  onClick={() => setResettingPasswordUser(user)}
+                                  className="p-2 rounded-lg transition-colors text-muted hover:text-primary hover:bg-primary/10"
+                                  title="Redefinir Senha"
+                                >
+                                  <KeyRound size={16} />
+                                </button>
                                 <button
                                   onClick={() => handleToggleStatus(user)}
                                   disabled={pendingUserId === user.id}
@@ -441,6 +629,13 @@ const UsersManagement = () => {
                                   ) : (
                                     <ShieldCheck size={16} />
                                   )}
+                                </button>
+                                <button
+                                  onClick={() => setDeletingUser(user)}
+                                  className="p-2 rounded-lg transition-colors text-muted hover:text-red-600 hover:bg-red-500/10"
+                                  title="Excluir Login"
+                                >
+                                  <Trash2 size={16} />
                                 </button>
                               </div>
                             </td>
@@ -568,48 +763,7 @@ const UsersManagement = () => {
                     Selecione quais áreas do sistema este usuário poderá visualizar e editar.
                   </p>
 
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-                    {AVAILABLE_MODULES.map(mod => {
-                      const isSelected = formData.modules.includes(mod.id);
-                      return (
-                        <motion.button
-                          whileTap={{ scale: 0.97 }}
-                          type="button"
-                          key={mod.id}
-                          onClick={() => toggleModule(mod.id)}
-                          className={`relative flex flex-col items-start p-4 rounded-xl border transition-all duration-200 h-full overflow-hidden w-full ${
-                            isSelected
-                              ? 'border-primary bg-primary/5 shadow-sm'
-                              : 'border-border/60 bg-background hover:border-border hover:bg-secondary/30'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between w-full mb-3">
-                            <div className={`p-2.5 rounded-lg transition-colors ${
-                              isSelected ? 'bg-primary/10 text-primary' : 'bg-secondary/50 text-muted-foreground group-hover:text-foreground'
-                            }`}>
-                              {mod.icon}
-                            </div>
-
-                            {/* Check Circle */}
-                            <div className={`shrink-0 w-5 h-5 mt-1 rounded-full border-2 flex items-center justify-center transition-all ${
-                              isSelected ? 'border-primary bg-primary text-white' : 'border-border/80 bg-transparent'
-                            }`}>
-                              {isSelected && (
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </div>
-                          </div>
-                          <span className={`text-sm font-bold text-left leading-tight w-full ${
-                            isSelected ? 'text-primary' : 'text-foreground/80'
-                          }`}>
-                            {mod.label}
-                          </span>
-                        </motion.button>
-                      )
-                    })}
-                  </div>
+                  <ModulesPicker selected={formData.modules} onToggle={toggleModule} />
                 </div>
 
                 <p className="text-xs text-muted bg-secondary/20 border border-border/40 rounded-xl px-4 py-3 flex items-center gap-2">
@@ -643,8 +797,211 @@ const UsersManagement = () => {
         document.body
       )}
 
-      {/* Banner: senha temporária (uma única exibição, fecha só por ação explícita) */}
-      {createdCredential && createPortal(
+      {/* Modal de Edição de Módulos (17/09/2026) — mesmo seletor da criação, sem os campos de
+          e-mail/tipo/funcionário (imutáveis depois de criado, ver CLAUDE.md/DECISOES-TECNICAS). */}
+      {editingUser && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeEditModal}
+            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
+          />
+          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
+              <div className="flex items-center justify-between mb-6 mt-2">
+                <div>
+                  <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
+                    <Pencil size={22} className="text-primary"/>
+                    Editar Módulos
+                  </h2>
+                  <p className="text-sm text-muted mt-1 break-all">{editingUser.email}</p>
+                </div>
+                <button
+                  onClick={closeEditModal}
+                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors shrink-0"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {actionError && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
+                  {actionError}
+                </div>
+              )}
+
+              <form onSubmit={handleSaveModules} className="space-y-6">
+                <div>
+                  <label className="block text-xs font-bold text-foreground/80 mb-3 uppercase tracking-wider flex items-center gap-2">
+                    <Shield size={14} className="text-primary" />
+                    Módulos Autorizados
+                  </label>
+                  <p className="text-xs text-muted mb-4">
+                    Altera imediatamente o que este login pode visualizar e editar — não precisa recriar o acesso.
+                  </p>
+                  <ModulesPicker selected={editModules} onToggle={toggleEditModule} />
+                </div>
+
+                <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
+                  <button
+                    type="button"
+                    onClick={closeEditModal}
+                    className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
+                  >
+                    Cancelar
+                  </button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    type="submit"
+                    disabled={isSavingEdit}
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                  >
+                    {isSavingEdit && <Loader2 size={16} className="animate-spin" />}
+                    {isSavingEdit ? 'Salvando...' : 'Salvar Módulos'}
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* Confirmação de exclusão (17/09/2026) — sempre explica o efeito antes de agir, nunca
+          window.confirm(). Diferente de bloquear: some de vez, não é reversível. */}
+      {deletingUser && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !isDeleting && setDeletingUser(null)}
+            className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-sm"
+          />
+          <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-background border border-red-500/30 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center text-red-600 dark:text-red-400 shrink-0">
+                  <AlertTriangle size={20} />
+                </div>
+                <h2 className="text-xl font-heading font-bold text-foreground">Excluir este login?</h2>
+              </div>
+              <p className="text-sm text-muted mb-2">
+                <span className="font-medium text-foreground break-all">{deletingUser.email}</span> vai ser excluído
+                permanentemente — diferente de bloquear, essa ação não pode ser desfeita e o login some de vez da
+                lista.
+              </p>
+              {actionError && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-4 text-red-600 dark:text-red-400 text-sm">
+                  {actionError}
+                </div>
+              )}
+              <div className="flex gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setDeletingUser(null)}
+                  disabled={isDeleting}
+                  className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDelete}
+                  disabled={isDeleting}
+                  className="flex-1 py-3 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                >
+                  {isDeleting && <Loader2 size={16} className="animate-spin" />}
+                  {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* Confirmação de redefinição de senha (17/09/2026) — explica o efeito (nova senha
+          temporária, sessões ativas encerradas) antes de gerar. */}
+      {resettingPasswordUser && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !isResettingPassword && setResettingPasswordUser(null)}
+            className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-sm"
+          />
+          <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-background border border-primary/30 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <KeyRound size={20} />
+                </div>
+                <h2 className="text-xl font-heading font-bold text-foreground">Redefinir senha deste login?</h2>
+              </div>
+              <p className="text-sm text-muted mb-2">
+                Uma nova senha temporária vai ser gerada para{' '}
+                <span className="font-medium text-foreground break-all">{resettingPasswordUser.email}</span>. A senha
+                atual deixa de funcionar, todas as sessões ativas desse login são encerradas, e ele será obrigado a
+                trocar a senha no próximo acesso — use isso se o usuário esqueceu a senha ou teve o login travado por
+                excesso de tentativas.
+              </p>
+              {actionError && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-4 text-red-600 dark:text-red-400 text-sm">
+                  {actionError}
+                </div>
+              )}
+              <div className="flex gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setResettingPasswordUser(null)}
+                  disabled={isResettingPassword}
+                  className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmResetPassword}
+                  disabled={isResettingPassword}
+                  className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                >
+                  {isResettingPassword && <Loader2 size={16} className="animate-spin" />}
+                  {isResettingPassword ? 'Gerando...' : 'Redefinir Senha'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* Banner: senha temporária (uma única exibição, fecha só por ação explícita) — reaproveitado
+          tanto pela criação de um login quanto pelo reset de senha de um já existente. */}
+      {tempPasswordBanner && createPortal(
         <AnimatePresence>
           <motion.div
             initial={{ opacity: 0 }}
@@ -666,7 +1023,7 @@ const UsersManagement = () => {
                   <KeyRound size={20} />
                 </div>
                 <h2 className="text-xl font-heading font-bold text-foreground">
-                  Acesso criado com sucesso
+                  Senha temporária gerada
                 </h2>
               </div>
 
@@ -677,11 +1034,11 @@ const UsersManagement = () => {
 
               <div className="bg-secondary/20 border border-border/40 rounded-xl p-4 mb-4">
                 <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Login</p>
-                <p className="text-sm font-medium text-foreground mb-3 break-all">{createdCredential.email}</p>
+                <p className="text-sm font-medium text-foreground mb-3 break-all">{tempPasswordBanner.email}</p>
                 <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Senha Temporária</p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-base font-bold text-foreground bg-background border border-border/60 rounded-lg px-3 py-2 break-all">
-                    {createdCredential.temporaryPassword}
+                    {tempPasswordBanner.temporaryPassword}
                   </code>
                   <button
                     type="button"
