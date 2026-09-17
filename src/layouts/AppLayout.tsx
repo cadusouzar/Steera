@@ -5,7 +5,7 @@ import ThemeToggle from '../components/ThemeToggle';
 import UserProfileDropdown from '../components/UserProfileDropdown';
 import UserProfileDrawer from '../components/UserProfileDrawer';
 import { getCurrentUser } from '../lib/auth';
-import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield } from 'lucide-react';
+import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield, Settings } from 'lucide-react';
 
 // Espelha o enum `AppModule` do backend (backend/prisma/schema.prisma) —
 // os valores já chegam em maiúsculo de getCurrentUser()?.modules (vindos
@@ -254,6 +254,16 @@ const AppLayout = () => {
           >
             <Shield size={18} />
             Usuários e Acessos
+          </Link>
+
+          <Link
+            to="/app/campos-personalizados"
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
+              isActive('/app/campos-personalizados') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+            }`}
+          >
+            <Settings size={18} />
+            Campos Personalizados
           </Link>
         </nav>
         
