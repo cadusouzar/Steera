@@ -3,18 +3,18 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings, Plus, X, FileQuestion, Loader2, Pencil, Ban, RotateCcw, Trash2, AlertTriangle,
+  HeartHandshake, Briefcase, User,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
-import CustomSelect from '../../components/CustomSelect';
 import { getCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { CustomFieldDefinition, CustomFieldEntity, CustomFieldType } from '../../lib/api';
 import { TYPE_LABELS } from '../../components/CustomFieldsFormSection';
 
-const ENTITY_OPTIONS: { value: CustomFieldEntity; label: string }[] = [
-  { value: 'client', label: 'Clientes' },
-  { value: 'role', label: 'Cargos' },
-  { value: 'employee', label: 'Funcionários' },
+const ENTITY_OPTIONS: { value: CustomFieldEntity; label: string; icon: typeof User }[] = [
+  { value: 'client', label: 'Clientes', icon: HeartHandshake },
+  { value: 'role', label: 'Cargos', icon: Briefcase },
+  { value: 'employee', label: 'Funcionários', icon: User },
 ];
 
 // Ícone + rótulo exatos combinados com o dono do produto para o seletor de
@@ -376,15 +376,27 @@ const CustomFieldsSettings = () => {
 
         {/* Action Bar: entidade + status */}
         <div className="glass-panel p-4 rounded-2xl border border-border/60 mb-8 flex flex-col md:flex-row md:items-center gap-4 shadow-sm">
-          <div className="w-full md:w-64">
+          <div className="w-full md:w-auto">
             <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
               Cadastro
             </label>
-            <CustomSelect
-              value={entity}
-              onChange={(val) => setEntity(val as CustomFieldEntity)}
-              options={ENTITY_OPTIONS}
-            />
+            <div className="flex items-center gap-2 flex-wrap">
+              {ENTITY_OPTIONS.map(({ value, label, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setEntity(value)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                    entity === value
+                      ? 'bg-primary/10 text-primary border border-primary/30'
+                      : 'text-muted border border-transparent hover:bg-secondary/50'
+                  }`}
+                >
+                  <Icon size={16} />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-2 md:ml-auto">
             <button
