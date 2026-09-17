@@ -38,12 +38,9 @@ function makeBase(): FakeBase {
 let fakeBase: FakeBase;
 
 // Fake de registry consistente com a interface real: `withClient` é o único método que a extensão
-// e as transaction helpers realmente chamam em produção quando a empresa TEM schema físico —
-// `getClient`/`release` existem só porque a interface os declara. `hasPhysicalSchema` default
-// `true` (a maioria dos testes exercita o caminho normal, com schema); o achado da revisão final
-// (empresa legada sem schema) tem seus próprios testes dedicados abaixo, passando `false`
-// explicitamente.
-function makeFakeRegistry(tenantClient: unknown, hasPhysicalSchema = true) {
+// e as transaction helpers realmente chamam em produção — `getClient`/`release` existem só porque
+// a interface os declara.
+function makeFakeRegistry(tenantClient: unknown) {
   const releaseSpy = jest.fn();
   const getClientSpy = jest.fn().mockResolvedValue(tenantClient);
   const withClientSpy = jest.fn(async (companyId: string, fn: (c: unknown) => Promise<unknown>) => {
@@ -54,8 +51,7 @@ function makeFakeRegistry(tenantClient: unknown, hasPhysicalSchema = true) {
       releaseSpy(companyId);
     }
   });
-  const hasPhysicalSchemaSpy = jest.fn().mockResolvedValue(hasPhysicalSchema);
-  return { getClient: getClientSpy, release: releaseSpy, withClient: withClientSpy, hasPhysicalSchema: hasPhysicalSchemaSpy };
+  return { getClient: getClientSpy, release: releaseSpy, withClient: withClientSpy };
 }
 
 describe('tenantRlsExtension — modo bypass (inalterado)', () => {
@@ -142,25 +138,6 @@ describe('tenantRlsExtension — modelo de tenant sob contexto real: redireciona
   });
 });
 
-describe('tenantRlsExtension — empresa legada, sem schema físico (achado na revisão final)', () => {
-  it('modelo de tenant NUNCA redireciona quando a empresa não tem schema físico — roda no client central, só com set_config', async () => {
-    fakeBase = makeBase();
-    const registry = makeFakeRegistry(undefined, false); // hasPhysicalSchema: false
-    const ext = tenantRlsExtension(fakeBase as any, registry as any);
-    const allOperations = (ext as any).query.$allModels.$allOperations;
-
-    const result = await runWithTenant('empresalegadasemschema1234', () =>
-      allOperations({ model: 'Client', operation: 'findMany', args: {}, query: async () => 'query-result-legado' }),
-    );
-
-    expect(result).toBe('query-result'); // makeBase()'s $transaction mock returns this literal, see makeBase() above
-    expect(registry.hasPhysicalSchema).toHaveBeenCalledWith('empresalegadasemschema1234');
-    expect(registry.withClient).not.toHaveBeenCalled();
-    expect(fakeBase.executedRawUnsafe).toEqual([]); // sem SET LOCAL search_path — não há schema pra apontar
-    expect(fakeBase.$transaction).toHaveBeenCalledWith(['set-config-stmt', expect.any(Promise)]);
-  });
-});
-
 describe('tenantRlsExtension — defesa em profundidade: modelo central num client de tenant (achado na revisão final)', () => {
   it('lança um erro explícito em vez de rodar silenciosamente contra o schema errado', async () => {
     fakeBase = makeBase();
@@ -232,28 +209,6 @@ describe('runTenantInteractiveTransaction — resolve pro client certo', () => {
     expect(registry.release).toHaveBeenCalledWith('companyabc123456789012345');
   });
 
-  it('empresa legada, sem schema físico: roda no prisma central passado, sem SET LOCAL search_path, sem tocar no registry.withClient', async () => {
-    const executed: string[] = [];
-    const prisma = {
-      $transaction: jest.fn(async (fn: any) =>
-        fn({
-          $executeRawUnsafe: jest.fn((sql: string) => { executed.push(sql); }),
-          $executeRaw: jest.fn(() => undefined),
-        }),
-      ),
-    };
-    const registry = makeFakeRegistry(undefined, false); // hasPhysicalSchema: false
-
-    const result = await runWithTenant('empresalegadasemschema1234', () =>
-      runTenantInteractiveTransaction(prisma as any, async () => 'ok-legado', registry as any),
-    );
-
-    expect(result).toBe('ok-legado');
-    expect(registry.hasPhysicalSchema).toHaveBeenCalledWith('empresalegadasemschema1234');
-    expect(registry.withClient).not.toHaveBeenCalled();
-    expect(executed).toEqual([]); // nenhum SET LOCAL search_path — não há schema pra apontar
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe('runTenantTransaction — forma array (mantida por completude, sem caller real após a Task 4)', () => {

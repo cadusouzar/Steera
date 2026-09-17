@@ -168,25 +168,17 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
     expect(checkedA + checkedB).toBe(ROUNDS);
   });
 
-  it('a wrong/nonexistent tenant context sees zero rows, not an error and not everyone else\'s rows', async () => {
-    // Directly exercises the Prisma extension with a bogus companyId — the
-    // same mechanism the interceptor uses, just pointed at a company that
-    // does not exist. Per the RLS policy's safe default, this must come back
-    // empty, never throw, and never return real data from A or B.
-    //
-    // History: this briefly threw instead of returning [] during the
-    // schema-per-tenant routing fix, between the physical-routing change
-    // (which redirected every tenant-model query to a per-company schema)
-    // and the `hasPhysicalSchema` fallback fix (revision review, same plan)
-    // that made a company with no physical schema — including, as here, a
-    // company that doesn't exist at all — fall back to the central client
-    // exactly like a legacy pre-routing-fix company would. With that
-    // fallback in place, the original graceful behavior is restored.
+  it('a wrong/nonexistent tenant context fails hard instead of silently returning someone else\'s rows', async () => {
+    // Directly exercises the Prisma extension with a bogus companyId — the same mechanism the
+    // interceptor uses, just pointed at a company that does not exist. Every real company always
+    // has a physical schema now (every legacy pre-schema-per-tenant company was deleted, and the
+    // registry no longer supports operating without one), so a bogus companyId has nowhere to
+    // route to and the query throws (the schema itself doesn't exist) — a clean, safe failure, never
+    // silent data from A or B.
     const { runWithTenant } = await import('../src/prisma/tenant-context');
-    const rows = await runWithTenant('nonexistentcompanyid1234567890', () =>
-      prisma.client.findMany({ where: {} }),
-    );
-    expect(rows).toEqual([]);
+    await expect(
+      runWithTenant('nonexistentcompanyid1234567890', () => prisma.client.findMany({ where: {} })),
+    ).rejects.toThrow();
   });
 
   it('no tenant context at all sees zero rows', async () => {

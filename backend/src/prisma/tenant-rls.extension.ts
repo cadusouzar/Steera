@@ -13,10 +13,6 @@ export interface TenantClientResolver {
   getClient(companyId: string): Promise<PrismaClient>;
   release(companyId: string): void;
   withClient<T>(companyId: string, fn: (client: PrismaClient) => Promise<T>): Promise<T>;
-  // Achado na revisão final: uma empresa cadastrada antes da Fase 1 do schema-per-tenant nunca
-  // teve `tenant_<companyId>` criado. Sem checar isto antes de redirecionar, toda query dessa
-  // empresa quebraria com "table does not exist" — ver os dois call sites abaixo.
-  hasPhysicalSchema(companyId: string): Promise<boolean>;
 }
 
 const TENANT_TABLE_SET: ReadonlySet<string> = new Set(TENANT_TABLE_NAMES);
@@ -57,15 +53,7 @@ export function tenantRlsExtension(base: PrismaClient, registry?: TenantClientRe
             return results[results.length - 1];
           }
 
-          const isTenantModel =
-            registry !== undefined &&
-            model !== undefined &&
-            TENANT_TABLE_SET.has(model) &&
-            // Empresa legada, sem schema físico (sempre anterior à Fase 1 do schema-per-tenant, que
-            // é aditiva de propósito) — trata como se fosse um modelo central: roda no client base,
-            // exatamente o comportamento de antes desta correção. Sem isso, toda query de tenant
-            // dessa empresa quebraria com "table does not exist".
-            (await registry.hasPhysicalSchema(store.companyId!));
+          const isTenantModel = registry !== undefined && model !== undefined && TENANT_TABLE_SET.has(model);
 
           if (!isTenantModel) {
             // Defesa em profundidade (achado na revisão final): se ISTO é a extensão de um client de
@@ -82,8 +70,7 @@ export function tenantRlsExtension(base: PrismaClient, registry?: TenantClientRe
                   'acessados pelo client central (sem registry, isto é o client de um tenant específico).',
               );
             }
-            // Modelo central (ou empresa legada sem schema físico, ver `isTenantModel` acima) — roda
-            // aqui mesmo, só com o set_config (RLS, defesa em profundidade).
+            // Modelo central — roda aqui mesmo, só com o set_config (RLS, defesa em profundidade).
             const results = await base.$transaction([
               base.$executeRaw`SELECT set_config('app.current_company_id', ${store.companyId}, true)`,
               query(args),
@@ -118,26 +105,19 @@ export function tenantRlsExtension(base: PrismaClient, registry?: TenantClientRe
   });
 }
 
-/** Emite as instruções de setup (SET LOCAL search_path + set_config, só o set_config sem search_path
- * pra empresa legada sem schema físico, ou só o set_config de bypass) que precedem o corpo de uma
- * transação explícita — usado tanto pela forma array quanto pela interativa abaixo. Sempre reemite
- * o `, public` quando a empresa TEM schema físico, mesmo quando o client já é o de um tenant
+/** Emite as instruções de setup (SET LOCAL search_path + set_config, ou só o set_config de bypass)
+ * que precedem o corpo de uma transação explícita — usado tanto pela forma array quanto pela
+ * interativa abaixo. Sempre reemite o `, public`, mesmo quando o client já é o de um tenant
  * específico (cuja conexão já resolve `tenant_x` sozinha, sem o fallback pra `public`) — necessário
  * pra qualquer SQL bruto dentro da transação que precise alcançar uma tabela central (ex.: a
- * réplica de migrations, que tem `REFERENCES "Company"`). Pra empresa legada (sem schema físico,
- * achado na revisão final — Fase 1 do schema-per-tenant é aditiva de propósito), nunca muda o
- * search_path — o comportamento é o de sempre, `public` como já é o default da conexão. */
+ * réplica de migrations, que tem `REFERENCES "Company"`). */
 function buildSetupStatements(
   prisma: { $executeRaw: PrismaClient['$executeRaw']; $executeRawUnsafe: PrismaClient['$executeRawUnsafe'] },
   companyId: string | undefined,
   bypass: boolean | undefined,
-  hasPhysicalSchema: boolean,
 ): Prisma.PrismaPromise<unknown>[] {
   if (bypass) {
     return [prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`];
-  }
-  if (!hasPhysicalSchema) {
-    return [prisma.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`];
   }
   const schemaName = tenantSchemaName(companyId!);
   assertValidSchemaName(schemaName);
@@ -163,7 +143,7 @@ export function getRegisteredTenantClientResolver(): TenantClientResolver | unde
   return registeredResolver;
 }
 
-export async function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unknown>[]>(
+export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unknown>[]>(
   prisma: {
     $transaction: PrismaClient['$transaction'];
     $executeRaw: PrismaClient['$executeRaw'];
@@ -188,20 +168,7 @@ export async function runTenantTransaction<T extends readonly Prisma.PrismaPromi
   }
 
   if (store.bypass || !registry) {
-    const setupStatements = buildSetupStatements(prisma, store.companyId, store.bypass, true);
-    const transact = prisma.$transaction.bind(prisma) as (
-      ops: Prisma.PrismaPromise<unknown>[],
-    ) => Promise<unknown[]>;
-    return runInsideExplicitTenantTransaction(async () => {
-      const results = await transact([...setupStatements, ...(ops as unknown as Prisma.PrismaPromise<unknown>[])]);
-      return results.slice(setupStatements.length) as unknown as { [K in keyof T]: Awaited<T[K]> };
-    });
-  }
-
-  if (!(await registry.hasPhysicalSchema(store.companyId!))) {
-    // Empresa legada, sem schema físico — roda no client central passado, sem redirecionar. Ver o
-    // comentário de `hasPhysicalSchema` na interface `TenantClientResolver`.
-    const setupStatements = buildSetupStatements(prisma, store.companyId, false, false);
+    const setupStatements = buildSetupStatements(prisma, store.companyId, store.bypass);
     const transact = prisma.$transaction.bind(prisma) as (
       ops: Prisma.PrismaPromise<unknown>[],
     ) => Promise<unknown[]>;
@@ -218,7 +185,7 @@ export async function runTenantTransaction<T extends readonly Prisma.PrismaPromi
   // branch (`!isTenantModel` sempre roda no client base pra eles) e não têm motivo pra migrar.
   // Este branch fica aqui por completude/simetria da API, não por ter um chamador real hoje.
   return registry.withClient(store.companyId!, (tenantClient) => {
-    const setupStatements = buildSetupStatements(tenantClient, store.companyId, false, true);
+    const setupStatements = buildSetupStatements(tenantClient, store.companyId, false);
     return runInsideExplicitTenantTransaction(async () => {
       const results = await tenantClient.$transaction([...setupStatements, ...(ops as unknown as Prisma.PrismaPromise<unknown>[])]);
       return results.slice(setupStatements.length) as unknown as { [K in keyof T]: Awaited<T[K]> };
@@ -226,7 +193,7 @@ export async function runTenantTransaction<T extends readonly Prisma.PrismaPromi
   }) as unknown as Promise<{ [K in keyof T]: Awaited<T[K]> }>;
 }
 
-export async function runTenantInteractiveTransaction<T>(
+export function runTenantInteractiveTransaction<T>(
   prisma: { $transaction: PrismaClient['$transaction'] },
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
   registryOverride?: TenantClientResolver,
@@ -240,17 +207,7 @@ export async function runTenantInteractiveTransaction<T>(
 
   if (store.bypass || !registry) {
     return prisma.$transaction(async (tx) => {
-      const setupStatements = buildSetupStatements(tx, store.companyId, store.bypass, true);
-      for (const stmt of setupStatements) await stmt;
-      return runInsideExplicitTenantTransaction(() => fn(tx));
-    });
-  }
-
-  if (!(await registry.hasPhysicalSchema(store.companyId!))) {
-    // Empresa legada, sem schema físico — roda no client central passado, sem redirecionar. Ver o
-    // comentário de `hasPhysicalSchema` na interface `TenantClientResolver`.
-    return prisma.$transaction(async (tx) => {
-      const setupStatements = buildSetupStatements(tx, store.companyId, false, false);
+      const setupStatements = buildSetupStatements(tx, store.companyId, store.bypass);
       for (const stmt of setupStatements) await stmt;
       return runInsideExplicitTenantTransaction(() => fn(tx));
     });
@@ -258,7 +215,7 @@ export async function runTenantInteractiveTransaction<T>(
 
   return registry.withClient(store.companyId!, (tenantClient) =>
     (tenantClient as unknown as { $transaction: PrismaClient['$transaction'] }).$transaction(async (tx) => {
-      const setupStatements = buildSetupStatements(tx, store.companyId, false, true);
+      const setupStatements = buildSetupStatements(tx, store.companyId, false);
       for (const stmt of setupStatements) await stmt;
       return runInsideExplicitTenantTransaction(() => fn(tx));
     }),

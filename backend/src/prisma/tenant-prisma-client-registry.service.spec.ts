@@ -191,43 +191,4 @@ describe('TenantPrismaClientRegistry', () => {
     // ainda estava em andamento (não elegível pra expulsão).
     expect((clientA as unknown as ReturnType<typeof makeFakeClient>).$disconnect).toHaveBeenCalledTimes(1);
   });
-
-  describe('hasPhysicalSchema (achado na revisão final: empresa legada, sem schema)', () => {
-    it('devolve o resultado de checkSchemaExists e cacheia — não consulta de novo pra mesma empresa', async () => {
-      const checkSchemaExists = jest.fn().mockResolvedValue(true);
-      const registry = new TenantPrismaClientRegistry({
-        maxSize: 10,
-        evictionTimeoutMs: 1000,
-        createClient: jest.fn(),
-        checkSchemaExists,
-      });
-
-      const first = await registry.hasPhysicalSchema(companyId1);
-      const second = await registry.hasPhysicalSchema(companyId1);
-
-      expect(first).toBe(true);
-      expect(second).toBe(true);
-      expect(checkSchemaExists).toHaveBeenCalledTimes(1);
-      expect(checkSchemaExists).toHaveBeenCalledWith(companyId1, `tenant_${companyId1}`);
-    });
-
-    it('devolve false pra uma empresa sem schema físico, e continua cacheando o "false"', async () => {
-      const checkSchemaExists = jest.fn().mockResolvedValue(false);
-      const registry = new TenantPrismaClientRegistry({
-        maxSize: 10,
-        evictionTimeoutMs: 1000,
-        createClient: jest.fn(),
-        checkSchemaExists,
-      });
-
-      expect(await registry.hasPhysicalSchema(companyId1)).toBe(false);
-      expect(await registry.hasPhysicalSchema(companyId1)).toBe(false);
-      expect(checkSchemaExists).toHaveBeenCalledTimes(1);
-    });
-
-    it('sem checkSchemaExists configurado (default de testes que não se importam com isto), assume que o schema existe', async () => {
-      const registry = new TenantPrismaClientRegistry({ maxSize: 10, evictionTimeoutMs: 1000, createClient: jest.fn() });
-      expect(await registry.hasPhysicalSchema(companyId1)).toBe(true);
-    });
-  });
 });
