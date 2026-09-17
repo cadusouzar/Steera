@@ -17,6 +17,7 @@ import { LeavesModule } from './leaves/leaves.module';
 import { HolidaysModule } from './holidays/holidays.module';
 import { BillingModule } from './billing/billing.module';
 import { ClientsModule } from './clients/clients.module';
+import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReceivablesModule } from './receivables/receivables.module';
 import { ReportsModule } from './reports/reports.module';
@@ -72,6 +73,7 @@ import { TenantMigrationModule } from './tenant-migration/tenant-migration.modul
     HolidaysModule,
     BillingModule,
     ClientsModule,
+    CustomFieldsModule,
     ReceivablesModule,
     SubscriptionsModule,
     ReportsModule,
