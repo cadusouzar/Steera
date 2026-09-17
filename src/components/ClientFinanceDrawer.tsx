@@ -27,7 +27,7 @@ interface ClientFinanceDrawerProps {
   onDismissError?: () => void;
   onUpdateClient: (
     clientId: string,
-    dto: Partial<{ name: string; category: string; contact: string; email: string; customFields: Record<string, unknown> }>,
+    dto: Partial<{ name: string; category: string; contact: string; email: string | null; customFields: Record<string, unknown> }>,
   ) => Promise<boolean>;
   onDeactivateClient: (clientId: string, includeInRevenueReport: boolean) => Promise<boolean>;
   // Only ever offered for a client kept in the report (includeInRevenueReport
@@ -92,7 +92,10 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   const handleSaveEdit = async () => {
     if (!editForm.name || !editForm.contact) return;
     setIsSaving(true);
-    const ok = await onUpdateClient(client.id, { ...editForm, customFields: editCustomFields });
+    // `null` explícito (nunca string vazia) pra limpar o e-mail — o backend só aceita "sem
+    // e-mail" como null/undefined, uma string vazia ainda cai na validação de formato e
+    // vazava um erro técnico cru pro usuário (achado durante a auditoria de segurança).
+    const ok = await onUpdateClient(client.id, { ...editForm, email: editForm.email || null, customFields: editCustomFields });
     setIsSaving(false);
     if (ok) setIsEditing(false);
   };

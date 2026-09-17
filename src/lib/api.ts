@@ -228,7 +228,7 @@ export async function createClient(dto: {
 
 export async function updateClient(
   id: string,
-  dto: Partial<{ name: string; category: string; contact: string; email: string; customFields: Record<string, unknown> }>,
+  dto: Partial<{ name: string; category: string; contact: string; email: string | null; customFields: Record<string, unknown> }>,
 ): Promise<ClientRecord> {
   const c = await request<ApiClient>(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
   return mapClient(c);

@@ -149,8 +149,9 @@ const ClientsList = () => {
 
   const handleUpdateClient = async (
     clientId: string,
-    dto: Partial<{ name: string; category: string; contact: string; email: string; customFields: Record<string, unknown> }>,
+    dto: Partial<{ name: string; category: string; contact: string; email: string | null; customFields: Record<string, unknown> }>,
   ): Promise<boolean> => {
+    setActionError(null);
     try {
       const updated = await api.updateClient(clientId, dto);
       setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
@@ -168,6 +169,7 @@ const ClientsList = () => {
   // false) — quem é mantido no relatório continua na lista, só com o selo
   // "Inativo", já que precisa ficar alcançável pra ser reativado.
   const handleDeactivateClient = async (clientId: string, includeInRevenueReport: boolean): Promise<boolean> => {
+    setActionError(null);
     try {
       const updated = await api.deactivateClient(clientId, includeInRevenueReport);
       if (includeInRevenueReport) {
@@ -192,6 +194,7 @@ const ClientsList = () => {
   // inativo mantido no relatório; o grupo removido do relatório vai pra
   // lixeira e reativa por lá).
   const handleRestoreClient = async (clientId: string): Promise<boolean> => {
+    setActionError(null);
     try {
       const updated = await api.restoreClient(clientId);
       setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
@@ -204,6 +207,7 @@ const ClientsList = () => {
   };
 
   const handleMarkAsPaid = async (_clientId: string, receivableId: string) => {
+    setActionError(null);
     try {
       await api.payReceivable(receivableId);
       await refreshClientDetails(_clientId);
@@ -213,6 +217,7 @@ const ClientsList = () => {
   };
 
   const handleUnmarkAsPaid = async (_clientId: string, receivableId: string) => {
+    setActionError(null);
     try {
       await api.unpayReceivable(receivableId);
       await refreshClientDetails(_clientId);
@@ -222,6 +227,7 @@ const ClientsList = () => {
   };
 
   const handleDeleteReceivable = async (_clientId: string, receivableId: string) => {
+    setActionError(null);
     try {
       await api.deleteReceivable(receivableId);
       await refreshClientDetails(_clientId);
@@ -231,6 +237,7 @@ const ClientsList = () => {
   };
 
   const handleDeleteSubscription = async (clientId: string, subId: string) => {
+    setActionError(null);
     try {
       await api.deleteSubscription(subId);
       await refreshClientDetails(clientId);
@@ -240,6 +247,7 @@ const ClientsList = () => {
   };
 
   const handleAddReceivable = async (clientId: string, newRec: Omit<Receivable, 'id'>) => {
+    setActionError(null);
     try {
       await api.createReceivable(clientId, {
         description: newRec.description,
@@ -253,6 +261,7 @@ const ClientsList = () => {
   };
 
   const handleAddSubscription = async (clientId: string, sub: Omit<Subscription, 'id'>) => {
+    setActionError(null);
     try {
       await api.createSubscription(clientId, {
         description: sub.description,
@@ -266,6 +275,7 @@ const ClientsList = () => {
   };
 
   const handleGenerateSubscriptionCharge = async (clientId: string, subId: string): Promise<boolean> => {
+    setActionError(null);
     try {
       await api.generateCharge(subId);
       await refreshClientDetails(clientId);

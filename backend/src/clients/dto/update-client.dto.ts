@@ -4,6 +4,9 @@ export class UpdateClientDto {
   @IsOptional() @IsString() @MinLength(1) name?: string;
   @IsOptional() @IsString() category?: string;
   @IsOptional() @IsString() @MinLength(1) contact?: string;
-  @IsOptional() @IsEmail() email?: string;
+  // `null` (nunca string vazia) é como o frontend limpa este campo — @IsOptional() já ignora
+  // `null`/`undefined`, mas nunca uma string vazia, que continuaria caindo em @IsEmail() e
+  // vazando "email must be an email" (achado durante a auditoria de segurança, 17/09/2026).
+  @IsOptional() @IsEmail() email?: string | null;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
