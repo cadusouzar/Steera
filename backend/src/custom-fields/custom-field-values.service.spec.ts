@@ -149,5 +149,42 @@ describe('CustomFieldValuesService', () => {
       const resolved = await service.resolveValuesForCreate('client', { custom_seg: 'Grande' });
       expect(resolved).toEqual({ custom_seg: 'Grande' });
     });
+
+    it('rejeita null explícito pra um campo obrigatório sem defaultValue', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ columnName: 'custom_seg', required: true, defaultValue: null }),
+      ]);
+      await expect(
+        service.resolveValuesForCreate('client', { custom_seg: null }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita valor não-numérico pra um campo NUMBER', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.NUMBER, columnName: 'custom_qtd' }),
+      ]);
+      await expect(
+        service.resolveValuesForCreate('client', { custom_qtd: 'abc' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita valor fora da lista de opções pra um campo SELECT', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({
+          type: CustomFieldType.SELECT, columnName: 'custom_seg',
+          configuration: { options: ['Pequeno', 'Médio'] },
+        }),
+      ]);
+      await expect(
+        service.resolveValuesForCreate('client', { custom_seg: 'Enorme' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita uma chave que não corresponde a nenhum campo ativo', async () => {
+      prisma.customFieldDefinition.findMany.mockResolvedValue([makeDefinition()]);
+      await expect(
+        service.resolveValuesForCreate('client', { custom_inexistente: 'x' }),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });

@@ -54,14 +54,21 @@ export class CustomFieldValuesService {
     values: Record<string, unknown> | undefined,
   ): Promise<Record<string, unknown>> {
     const definitions = await this.getActiveDefinitions(entity);
-    const resolved: Record<string, unknown> = { ...(values ?? {}) };
+    const provided = values ?? {};
+
+    const unknownKeys = Object.keys(provided).filter((k) => !definitions.some((d) => d.columnName === k));
+    if (unknownKeys.length > 0) {
+      throw new BadRequestException(`Campo(s) personalizado(s) desconhecido(s): ${unknownKeys.join(', ')}`);
+    }
+
+    const resolved: Record<string, unknown> = {};
     for (const def of definitions) {
-      if (resolved[def.columnName] === undefined) {
-        if (def.defaultValue !== null && def.defaultValue !== undefined) {
-          resolved[def.columnName] = this.parseDefaultValue(def);
-        } else if (def.required) {
-          throw new BadRequestException(`O campo "${def.displayName}" é obrigatório`);
-        }
+      if (def.columnName in provided) {
+        resolved[def.columnName] = this.validateValue(def, provided[def.columnName]);
+      } else if (def.defaultValue !== null && def.defaultValue !== undefined) {
+        resolved[def.columnName] = this.parseDefaultValue(def);
+      } else if (def.required) {
+        throw new BadRequestException(`O campo "${def.displayName}" é obrigatório`);
       }
     }
     return resolved;
