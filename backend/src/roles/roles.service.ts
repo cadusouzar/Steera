@@ -1,7 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { CompanyContextService } from '../company/company-context.service';
+import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { QueryRolesDto } from './dto/query-roles.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -11,6 +13,7 @@ export class RolesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companyContext: CompanyContextService,
+    private readonly customFieldValues: CustomFieldValuesService,
   ) {}
 
   // Checagem em nível de aplicação (não uma constraint única no banco): o
@@ -27,8 +30,15 @@ export class RolesService {
   async create(dto: CreateRoleDto): Promise<Role> {
     const companyId = await this.companyContext.getCurrentCompanyId();
     await this.assertNoActiveDuplicate(companyId, dto.name);
-    return this.prisma.role.create({
-      data: { ...dto, companyId, colorHex: dto.colorHex ?? '#2563EB' },
+    const { customFields, ...nativeDto } = dto;
+    const resolvedCustomFields = await this.customFieldValues.resolveValuesForCreate('role', customFields);
+
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const created = await tx.role.create({
+        data: { ...nativeDto, companyId, colorHex: dto.colorHex ?? '#2563EB' },
+      });
+      await this.customFieldValues.setValues('role', created.id, resolvedCustomFields, tx);
+      return this.withCustomFields(created, tx);
     });
   }
 
@@ -55,12 +65,17 @@ export class RolesService {
       this.prisma.role.count({ where }),
     ]);
 
-    return { items, total, page, pageSize };
+    const customFieldsMap = await this.customFieldValues.getValuesForRecords('role', items.map((i) => i.id));
+    const itemsWithCustomFields = items.map((item) => ({ ...item, customFields: customFieldsMap.get(item.id) ?? {} }));
+
+    return { items: itemsWithCustomFields, total, page, pageSize };
   }
 
   async findActive() {
     const companyId = await this.companyContext.getCurrentCompanyId();
-    return this.prisma.role.findMany({ where: { companyId, active: true }, orderBy: { name: 'asc' } });
+    const items = await this.prisma.role.findMany({ where: { companyId, active: true }, orderBy: { name: 'asc' } });
+    const customFieldsMap = await this.customFieldValues.getValuesForRecords('role', items.map((i) => i.id));
+    return items.map((item) => ({ ...item, customFields: customFieldsMap.get(item.id) ?? {} }));
   }
 
   private async assertExists(id: string): Promise<Role> {
@@ -71,7 +86,7 @@ export class RolesService {
   }
 
   findOne(id: string) {
-    return this.assertExists(id);
+    return this.assertExists(id).then((role) => this.withCustomFields(role));
   }
 
   async update(id: string, dto: UpdateRoleDto) {
@@ -79,7 +94,23 @@ export class RolesService {
     if (dto.name && dto.name !== role.name) {
       await this.assertNoActiveDuplicate(role.companyId, dto.name, id);
     }
-    return this.prisma.role.update({ where: { id }, data: dto });
+    const { customFields, ...nativeDto } = dto;
+
+    return runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const updated = await tx.role.update({ where: { id }, data: nativeDto });
+      if (customFields) await this.customFieldValues.setValues('role', id, customFields, tx);
+      return this.withCustomFields(updated, tx);
+    });
+  }
+
+  // `tx` opcional: create/update já estão dentro de uma transação de tenant e passam a mesma pra
+  // reaproveitar a conexão (ver o comentário em CustomFieldValuesService.getActiveDefinitions).
+  private async withCustomFields<T extends { id: string }>(
+    record: T,
+    tx?: Prisma.TransactionClient,
+  ): Promise<T & { customFields: Record<string, unknown> }> {
+    const map = await this.customFieldValues.getValuesForRecords('role', [record.id], tx);
+    return { ...record, customFields: map.get(record.id) ?? {} };
   }
 
   async deactivate(id: string) {

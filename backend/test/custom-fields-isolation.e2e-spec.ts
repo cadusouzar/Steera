@@ -150,4 +150,25 @@ describe('Campos personalizados: isolamento entre empresas em Clientes (e2e)', (
       .expect(200);
     expect(filledCount.body).toEqual({ count: 1 });
   });
+
+  it('isolamento se repete em Cargos: campo de A nunca aparece pra B', async () => {
+    await request(app.getHttpServer())
+      .post('/custom-fields')
+      .set('Authorization', tokenA)
+      .send({ entity: 'role', displayName: 'Nível de senioridade', type: 'SELECT', configuration: { options: ['Júnior', 'Pleno', 'Sênior'] } })
+      .expect(201);
+
+    const activeFieldsB = await request(app.getHttpServer())
+      .get('/custom-fields/active?entity=role')
+      .set('Authorization', tokenB)
+      .expect(200);
+    expect(activeFieldsB.body).toEqual([]);
+
+    const createA = await request(app.getHttpServer())
+      .post('/roles')
+      .set('Authorization', tokenA)
+      .send({ name: 'Desenvolvedor', department: 'Tecnologia', customFields: { custom_nivel_de_senioridade: 'Sênior' } })
+      .expect(201);
+    expect(createA.body.customFields).toEqual({ custom_nivel_de_senioridade: 'Sênior' });
+  });
 });
