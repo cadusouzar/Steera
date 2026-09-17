@@ -8,6 +8,7 @@ import ClientTrashDrawer from '../../components/ClientTrashDrawer';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
 import type { ClientRecord, ClientTotals } from '../../lib/api';
+import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 
 export type { Receivable, Subscription } from '../../lib/api';
 import type { Receivable, Subscription } from '../../lib/api';
@@ -38,6 +39,7 @@ const ClientsList = () => {
   // New Client Form Modal State
   const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
   const [newClient, setNewClient] = useState({ name: '', category: '', contact: '', email: '' });
+  const [newClientCustomFields, setNewClientCustomFields] = useState<Record<string, unknown>>({});
   const [isCreating, setIsCreating] = useState(false);
 
   useEscapeKey(() => {
@@ -114,10 +116,12 @@ const ClientsList = () => {
         category: newClient.category || undefined,
         contact: newClient.contact,
         email: newClient.email || undefined,
+        customFields: newClientCustomFields,
       });
       setClients(prev => [{ ...created, receivables: [], subscriptions: [] }, ...prev]);
       setTotalsByClientId(prev => ({ ...prev, [created.id]: EMPTY_TOTALS }));
       setNewClient({ name: '', category: '', contact: '', email: '' });
+      setNewClientCustomFields({});
       setIsNewClientModalOpen(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível criar o cliente.');
@@ -510,6 +514,7 @@ const ClientsList = () => {
                   <label className="block text-sm font-medium text-foreground/80 mb-1.5">E-mail (Opcional)</label>
                   <input value={newClient.email} onChange={e => setNewClient({...newClient, email: e.target.value})} type="email" className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" placeholder="email@exemplo.com" />
                 </div>
+                <CustomFieldsFormSection entity="client" values={newClientCustomFields} onChange={setNewClientCustomFields} />
                 <div className="pt-4 flex gap-3">
                   <button type="button" onClick={() => setIsNewClientModalOpen(false)} className="flex-1 py-3 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">Cancelar</button>
                   <button type="submit" disabled={isCreating} className="flex-1 py-3 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-colors shadow-md shadow-primary/20">

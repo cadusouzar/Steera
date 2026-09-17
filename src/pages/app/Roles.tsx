@@ -5,6 +5,7 @@ import { Plus, Search, X, FileQuestion, Briefcase, ChevronRight, Check, Ban, Rot
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
 import type { Role } from '../../lib/api';
+import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 
 const COLOR_SWATCHES = [
   '#3B82F6', '#A855F7', '#EC4899', '#EF4444',
@@ -25,6 +26,7 @@ const Roles = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [newRole, setNewRole] = useState({ name: '', department: '', colorHex: '#2563EB', description: '' });
+  const [newRoleCustomFields, setNewRoleCustomFields] = useState<Record<string, unknown>>({});
 
   const loadRoles = useCallback(async () => {
     setIsLoading(true);
@@ -83,9 +85,11 @@ const Roles = () => {
       const created = await api.createRole({
         name: newRole.name, department: newRole.department,
         colorHex: newRole.colorHex, description: newRole.description || undefined,
+        customFields: newRoleCustomFields,
       });
       setRoles(prev => [...prev, created]);
       setNewRole({ name: '', department: '', colorHex: '#2563EB', description: '' });
+      setNewRoleCustomFields({});
       setIsModalOpen(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível criar o cargo.');
@@ -392,6 +396,7 @@ const Roles = () => {
                       placeholder="Atribuições e responsabilidades..."
                     />
                   </div>
+                  <CustomFieldsFormSection entity="role" values={newRoleCustomFields} onChange={setNewRoleCustomFields} />
                   <div className="pt-6 flex gap-3">
                     <button
                       type="button"

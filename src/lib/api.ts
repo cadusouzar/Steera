@@ -209,6 +209,7 @@ export async function createClient(dto: {
   category?: string;
   contact: string;
   email?: string;
+  customFields?: Record<string, unknown>;
 }): Promise<ClientRecord> {
   const c = await request<ApiClient>('/clients', { method: 'POST', body: JSON.stringify(dto) });
   return mapClient(c);
@@ -488,6 +489,7 @@ export interface EmployeeFormInput {
   paymentDay: '5' | '15' | '20' | 'last';
   bankDetails?: string;
   salaryRecurrenceEnabled?: boolean;
+  customFields?: Record<string, unknown>;
 }
 
 function mapRole(r: ApiRole): Role {
@@ -556,6 +558,7 @@ function toEmployeeDto(input: EmployeeFormInput) {
     payOnLastBusinessDay,
     bankDetails: input.bankDetails || undefined,
     salaryRecurrenceEnabled: input.salaryRecurrenceEnabled,
+    customFields: input.customFields,
   };
 }
 
@@ -624,6 +627,7 @@ export async function listActiveRoles(): Promise<Role[]> {
 
 export async function createRole(dto: {
   name: string; department: string; colorHex?: string; description?: string;
+  customFields?: Record<string, unknown>;
 }): Promise<Role> {
   const r = await request<ApiRole>('/roles', { method: 'POST', body: JSON.stringify(dto) });
   return mapRole(r);

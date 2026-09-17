@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Save, User, Briefcase, DollarSign, AlertTriangle, Loader2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
+import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import * as api from '../../lib/api';
 import type { EmployeeListItem, Role } from '../../lib/api';
 
@@ -34,6 +35,7 @@ const EmployeeForm = () => {
   const [paymentDay, setPaymentDay] = useState<'5' | '15' | '20' | 'last'>('5');
   const [bankDetails, setBankDetails] = useState('');
   const [salaryRecurrenceEnabled, setSalaryRecurrenceEnabled] = useState(true);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
     api.listActiveRoles().then(setRoles).catch(() => {
@@ -75,7 +77,7 @@ const EmployeeForm = () => {
         fullName, cpf, roleId, managerId: managerId || undefined, email: email || undefined, phone: phone || undefined,
         address: address || undefined, contractType, admissionDate, department,
         baseValue: Number(baseValue), paymentDay, bankDetails: bankDetails || undefined,
-        salaryRecurrenceEnabled,
+        salaryRecurrenceEnabled, customFields,
       });
 
       let recurrenceWarning = false;
@@ -311,6 +313,8 @@ const EmployeeForm = () => {
                 </div>
               </motion.div>
             )}
+
+            <CustomFieldsFormSection entity="employee" values={customFields} onChange={setCustomFields} />
           </form>
         </div>
       </motion.div>

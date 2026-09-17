@@ -1,0 +1,114 @@
+import React, { useEffect, useState } from 'react';
+import { CustomFieldDefinition, CustomFieldEntity, listActiveCustomFields } from '../lib/api';
+
+const TYPE_LABELS: Record<string, string> = {
+  TEXT: 'Texto', LONG_TEXT: 'Texto', NUMBER: 'Número', CURRENCY: 'Valor em dinheiro',
+  DATE: 'Data', DATETIME: 'Data e hora', BOOLEAN: 'Sim ou não', SELECT: 'Lista de opções',
+  MULTI_SELECT: 'Lista de opções', EMAIL: 'E-mail', PHONE: 'Telefone',
+};
+
+interface Props {
+  entity: CustomFieldEntity;
+  values: Record<string, unknown>;
+  onChange: (values: Record<string, unknown>) => void;
+}
+
+const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) => {
+  const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    listActiveCustomFields(entity)
+      .then((result) => { if (!cancelled) setFields(result); })
+      .finally(() => { if (!cancelled) setIsLoading(false); });
+    return () => { cancelled = true; };
+  }, [entity]);
+
+  if (isLoading || fields.length === 0) return null;
+
+  const setField = (columnName: string, value: unknown) => {
+    onChange({ ...values, [columnName]: value });
+  };
+
+  return (
+    <div className="mt-6 pt-6 border-t border-border/40">
+      <div className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Campos personalizados</div>
+      <div className="space-y-4">
+        {fields.map((field) => (
+          <div key={field.id}>
+            <label className="block text-sm font-medium text-foreground mb-1.5">
+              {field.displayName}{field.required && <span className="text-red-500"> *</span>}
+            </label>
+            {field.description && <p className="text-xs text-muted mb-1.5">{field.description}</p>}
+            {renderInput(field, values[field.columnName], (v) => setField(field.columnName, v))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+function renderInput(field: CustomFieldDefinition, value: unknown, onChange: (v: unknown) => void) {
+  const baseClass = 'w-full px-3 py-2 rounded-lg border border-border bg-panel text-foreground text-sm';
+
+  switch (field.type) {
+    case 'LONG_TEXT':
+      return (
+        <textarea className={baseClass} rows={3} value={(value as string) ?? ''}
+          onChange={(e) => onChange(e.target.value)} />
+      );
+    case 'NUMBER':
+    case 'CURRENCY':
+      return (
+        <input type="number" step="0.01" className={baseClass} value={(value as number) ?? ''}
+          onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
+      );
+    case 'DATE':
+      return (
+        <input type="date" className={baseClass} value={(value as string) ?? ''}
+          onChange={(e) => onChange(e.target.value)} />
+      );
+    case 'DATETIME':
+      return (
+        <input type="datetime-local" className={baseClass} value={(value as string) ?? ''}
+          onChange={(e) => onChange(e.target.value)} />
+      );
+    case 'BOOLEAN':
+      return (
+        <input type="checkbox" className="w-5 h-5" checked={Boolean(value)}
+          onChange={(e) => onChange(e.target.checked)} />
+      );
+    case 'SELECT':
+      return (
+        <select className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Selecione...</option>
+          {(field.configuration?.options ?? []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      );
+    case 'MULTI_SELECT': {
+      const selected = Array.isArray(value) ? (value as string[]) : [];
+      return (
+        <div className="flex flex-wrap gap-2">
+          {(field.configuration?.options ?? []).map((opt) => (
+            <label key={opt} className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-lg border border-border">
+              <input type="checkbox" checked={selected.includes(opt)}
+                onChange={(e) => onChange(e.target.checked ? [...selected, opt] : selected.filter((o) => o !== opt))} />
+              {opt}
+            </label>
+          ))}
+        </div>
+      );
+    }
+    case 'EMAIL':
+      return <input type="email" className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)} />;
+    case 'PHONE':
+      return <input type="tel" className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)} />;
+    default:
+      return <input type="text" className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)} />;
+  }
+}
+
+export default CustomFieldsFormSection;
+export { TYPE_LABELS };
