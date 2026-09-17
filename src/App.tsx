@@ -10,6 +10,8 @@ import Roles from './pages/app/Roles';
 import EmployeesList from './pages/app/EmployeesList';
 import EmployeeForm from './pages/app/EmployeeForm';
 import ClientsList from './pages/app/ClientsList';
+import ClientForm from './pages/app/ClientForm';
+import RoleForm from './pages/app/RoleForm';
 import InventoryList from './pages/app/InventoryList';
 import QuotesList from './pages/app/QuotesList';
 import PurchasingList from './pages/app/PurchasingList';
@@ -34,11 +36,13 @@ function App() {
             <Route path="/app" element={<AppLayout />}>
               <Route index element={<Overview />} />
               <Route path="cargos" element={<Roles />} />
+              <Route path="cargos/novo" element={<RoleForm />} />
               <Route path="funcionarios" element={<EmployeesList />} />
               <Route path="funcionarios/novo" element={<EmployeeForm />} />
               <Route path="ponto" element={<TimeTracking />} />
               <Route path="ponto-administracao" element={<TimeTrackingAdmin />} />
               <Route path="clientes" element={<ClientsList />} />
+              <Route path="clientes/novo" element={<ClientForm />} />
               <Route path="estoque" element={<InventoryList />} />
               <Route path="compras" element={<PurchasingList />} />
               <Route path="orcamentos" element={<QuotesList />} />

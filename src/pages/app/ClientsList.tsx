@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, Filter, X, HeartHandshake, FileText, CheckCircle2, AlertCircle, Clock, Loader2, ChevronRight, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import ClientFinanceDrawer from '../../components/ClientFinanceDrawer';
 import ClientReportModal from '../../components/ClientReportModal';
 import ClientTrashDrawer from '../../components/ClientTrashDrawer';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
 import type { ClientRecord, ClientTotals } from '../../lib/api';
-import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 
 export type { Receivable, Subscription } from '../../lib/api';
 import type { Receivable, Subscription } from '../../lib/api';
@@ -23,6 +23,7 @@ const EMPTY_TOTALS: ClientTotals = { totalPaid: 0, totalPending: 0, totalOverdue
 const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
 const ClientsList = () => {
+  const navigate = useNavigate();
   const [clients, setClients] = useState<Client[]>([]);
   const [totalsByClientId, setTotalsByClientId] = useState<Record<string, ClientTotals>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -36,21 +37,14 @@ const ClientsList = () => {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
 
-  // New Client Form Modal State
-  const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
-  const [newClient, setNewClient] = useState({ name: '', category: '', contact: '', email: '' });
-  const [newClientCustomFields, setNewClientCustomFields] = useState<Record<string, unknown>>({});
-  const [isCreating, setIsCreating] = useState(false);
-
   useEscapeKey(() => {
     setSelectedClient(null);
-    setIsNewClientModalOpen(false);
     setIsReportModalOpen(false);
     setIsTrashOpen(false);
   });
 
   useEffect(() => {
-    if (selectedClient || isNewClientModalOpen || isReportModalOpen || isTrashOpen) {
+    if (selectedClient || isReportModalOpen || isTrashOpen) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -58,7 +52,7 @@ const ClientsList = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [selectedClient, isNewClientModalOpen, isReportModalOpen, isTrashOpen]);
+  }, [selectedClient, isReportModalOpen, isTrashOpen]);
 
   const loadClients = useCallback(async () => {
     setIsLoading(true);
@@ -102,32 +96,6 @@ const ClientsList = () => {
 
     setTotalsByClientId(prev => ({ ...prev, [clientId]: totals }));
     setSelectedClient(prev => (prev && prev.id === clientId ? { ...prev, receivables, subscriptions } : prev));
-  };
-
-  const handleCreateClient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newClient.name || isCreating) return;
-
-    setIsCreating(true);
-    setActionError(null);
-    try {
-      const created = await api.createClient({
-        name: newClient.name,
-        category: newClient.category || undefined,
-        contact: newClient.contact,
-        email: newClient.email || undefined,
-        customFields: newClientCustomFields,
-      });
-      setClients(prev => [{ ...created, receivables: [], subscriptions: [] }, ...prev]);
-      setTotalsByClientId(prev => ({ ...prev, [created.id]: EMPTY_TOTALS }));
-      setNewClient({ name: '', category: '', contact: '', email: '' });
-      setNewClientCustomFields({});
-      setIsNewClientModalOpen(false);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível criar o cliente.');
-    } finally {
-      setIsCreating(false);
-    }
   };
 
   const handleSelectClient = async (client: Client) => {
@@ -318,7 +286,7 @@ const ClientsList = () => {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => setIsNewClientModalOpen(true)}
+            onClick={() => navigate('/app/clientes/novo')}
             className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 text-sm"
           >
             <Plus size={18} />
@@ -483,59 +451,6 @@ const ClientsList = () => {
           </div>
         </div>
       </div>
-
-      {/* New Client Modal */}
-      <AnimatePresence>
-        {isNewClientModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsNewClientModalOpen(false)}
-            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex justify-center items-center p-4"
-          >
-            <motion.div
-              onClick={(e) => e.stopPropagation()}
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-background border border-border/60 rounded-3xl w-full max-w-md flex flex-col shadow-2xl relative overflow-hidden"
-            >
-              <div className="p-6 border-b border-border flex items-center justify-between">
-                <h2 className="text-xl font-heading font-bold text-foreground">Novo Cliente</h2>
-                <button onClick={() => setIsNewClientModalOpen(false)} className="p-2 text-muted hover:text-foreground rounded-full hover:bg-secondary transition-colors">
-                  <X size={20} />
-                </button>
-              </div>
-              <form onSubmit={handleCreateClient} className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-foreground/80 mb-1.5">Nome Completo</label>
-                  <input required value={newClient.name} onChange={e => setNewClient({...newClient, name: e.target.value})} type="text" className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" placeholder="Ex: Ana Laura / Rex" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-foreground/80 mb-1.5">Categoria / Observação</label>
-                  <input value={newClient.category} onChange={e => setNewClient({...newClient, category: e.target.value})} type="text" className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" placeholder="Ex: Turma A / Pastor Alemão" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-foreground/80 mb-1.5">Telefone/Contato</label>
-                  <input required value={newClient.contact} onChange={e => setNewClient({...newClient, contact: e.target.value})} type="text" className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" placeholder="(00) 00000-0000" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-foreground/80 mb-1.5">E-mail (Opcional)</label>
-                  <input value={newClient.email} onChange={e => setNewClient({...newClient, email: e.target.value})} type="email" className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" placeholder="email@exemplo.com" />
-                </div>
-                <CustomFieldsFormSection entity="client" values={newClientCustomFields} onChange={setNewClientCustomFields} />
-                <div className="pt-4 flex gap-3">
-                  <button type="button" onClick={() => setIsNewClientModalOpen(false)} className="flex-1 py-3 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">Cancelar</button>
-                  <button type="submit" disabled={isCreating} className="flex-1 py-3 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-colors shadow-md shadow-primary/20">
-                    {isCreating ? 'Cadastrando...' : 'Cadastrar'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Finance Drawer Component */}
       {selectedClient && createPortal(

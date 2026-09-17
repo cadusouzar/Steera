@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, X, FileQuestion, Briefcase, ChevronRight, Check, Ban, RotateCcw, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
 import type { Role } from '../../lib/api';
@@ -13,11 +14,11 @@ const COLOR_SWATCHES = [
 ];
 
 const Roles = () => {
+  const navigate = useNavigate();
   const [roles, setRoles] = useState<Role[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Drawer state
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
@@ -25,8 +26,6 @@ const Roles = () => {
   const [isSaving, setIsSaving] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [newRole, setNewRole] = useState({ name: '', department: '', colorHex: '#2563EB', description: '' });
-  const [newRoleCustomFields, setNewRoleCustomFields] = useState<Record<string, unknown>>({});
 
   const loadRoles = useCallback(async () => {
     setIsLoading(true);
@@ -46,12 +45,11 @@ const Roles = () => {
 
   useEscapeKey(() => {
     setSelectedRole(null);
-    setIsModalOpen(false);
   });
 
-  // Prevent background scrolling when Drawer/Modal is open
+  // Prevent background scrolling when Drawer is open
   useEffect(() => {
-    if (isModalOpen || selectedRole) {
+    if (selectedRole) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -59,7 +57,7 @@ const Roles = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isModalOpen, selectedRole]);
+  }, [selectedRole]);
 
   // Reset deactivate confirmation when drawer changes
   useEffect(() => {
@@ -75,28 +73,6 @@ const Roles = () => {
         role.department.toLowerCase().includes(lowerQuery)
     );
   }, [roles, searchQuery]);
-
-  const handleAddRole = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newRole.name.trim() || !newRole.department.trim() || isSaving) return;
-    setIsSaving(true);
-    setActionError(null);
-    try {
-      const created = await api.createRole({
-        name: newRole.name, department: newRole.department,
-        colorHex: newRole.colorHex, description: newRole.description || undefined,
-        customFields: newRoleCustomFields,
-      });
-      setRoles(prev => [...prev, created]);
-      setNewRole({ name: '', department: '', colorHex: '#2563EB', description: '' });
-      setNewRoleCustomFields({});
-      setIsModalOpen(false);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível criar o cargo.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   const handleUpdateRole = async (updatedRole: Role) => {
     setIsSaving(true);
@@ -163,7 +139,7 @@ const Roles = () => {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => { setActionError(null); setIsModalOpen(true); }}
+            onClick={() => navigate('/app/cargos/novo')}
             className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
           >
             <Plus size={18} />
@@ -303,128 +279,9 @@ const Roles = () => {
         </div>
       </motion.div>
 
-      {/* PORTALS FOR MODAL AND DRAWER */}
+      {/* PORTALS FOR DRAWER */}
 
-      {/* 1. Modal: Novo Cargo */}
-      {isModalOpen && createPortal(
-        <AnimatePresence>
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsModalOpen(false)}
-              className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-            />
-            <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
-              >
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-                <div className="flex items-center justify-between mb-8 mt-2">
-                  <h2 className="text-2xl font-heading font-bold text-foreground">Novo Cargo</h2>
-                  <button
-                    onClick={() => setIsModalOpen(false)}
-                    className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-                {actionError && (
-                  <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-                    {actionError}
-                  </div>
-                )}
-                <form onSubmit={handleAddRole} className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-foreground/90 mb-2">
-                      Nome do Cargo <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      autoFocus
-                      value={newRole.name}
-                      onChange={(e) => setNewRole({ ...newRole, name: e.target.value })}
-                      className="w-full bg-background border border-border/80 rounded-xl px-4 py-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm placeholder:text-muted/60"
-                      placeholder="Ex: Diretor de Arte"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-foreground/90 mb-2">
-                      Departamento <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={newRole.department}
-                      onChange={(e) => setNewRole({ ...newRole, department: e.target.value })}
-                      className="w-full bg-background border border-border/80 rounded-xl px-4 py-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm placeholder:text-muted/60"
-                      placeholder="Ex: Criação"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-foreground/90 mb-2">Cor de Identificação</label>
-                    <div className="flex flex-wrap gap-3 mb-3">
-                      {COLOR_SWATCHES.map(hex => (
-                        <button
-                          key={hex} type="button"
-                          onClick={() => setNewRole({ ...newRole, colorHex: hex })}
-                          style={{ backgroundColor: hex }}
-                          className={`w-9 h-9 rounded-full transition-transform flex items-center justify-center ${newRole.colorHex === hex ? 'ring-4 ring-primary/30 scale-110' : 'hover:scale-105 opacity-90'}`}
-                        >
-                          {newRole.colorHex === hex && <Check size={14} className="text-white" />}
-                        </button>
-                      ))}
-                    </div>
-                    <input
-                      type="text" value={newRole.colorHex}
-                      onChange={(e) => setNewRole({ ...newRole, colorHex: e.target.value })}
-                      pattern="^#[0-9A-Fa-f]{6}$" placeholder="#2563EB"
-                      className="w-32 bg-background border border-border/80 rounded-xl px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-foreground/90 mb-2">Descrição (opcional)</label>
-                    <textarea
-                      rows={3} value={newRole.description}
-                      onChange={(e) => setNewRole({ ...newRole, description: e.target.value })}
-                      className="w-full bg-background border border-border/80 rounded-xl p-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                      placeholder="Atribuições e responsabilidades..."
-                    />
-                  </div>
-                  <CustomFieldsFormSection entity="role" values={newRoleCustomFields} onChange={setNewRoleCustomFields} />
-                  <div className="pt-6 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsModalOpen(false)}
-                      className="flex-1 py-4 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-base"
-                    >
-                      Cancelar
-                    </button>
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      type="submit"
-                      disabled={!newRole.name.trim() || !newRole.department.trim() || isSaving}
-                      className="flex-1 py-4 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-base"
-                    >
-                      {isSaving ? 'Salvando...' : 'Salvar Cargo'}
-                    </motion.button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          </>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* 2. Drawer: Detalhes do Cargo */}
+      {/* Drawer: Detalhes do Cargo */}
       {selectedRole && createPortal(
         <AnimatePresence>
           <>

@@ -35,9 +35,9 @@ const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) 
   return (
     <div className="mt-6 pt-6 border-t border-border/40">
       <div className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Campos personalizados</div>
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
         {fields.map((field) => (
-          <div key={field.id}>
+          <div key={field.id} className={needsFullWidth(field.type) ? 'md:col-span-2' : undefined}>
             <label className="block text-sm font-medium text-foreground mb-1.5">
               {field.displayName}{field.required && <span className="text-red-500"> *</span>}
             </label>
@@ -49,6 +49,12 @@ const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) 
     </div>
   );
 };
+
+// Campos que se beneficiam de mais espaço horizontal (texto longo, ou várias opções de múltipla
+// escolha que podem quebrar linha) ocupam a largura toda em vez de disputar a coluna com o vizinho.
+function needsFullWidth(type: CustomFieldDefinition['type']): boolean {
+  return type === 'LONG_TEXT' || type === 'MULTI_SELECT';
+}
 
 function renderInput(field: CustomFieldDefinition, value: unknown, onChange: (v: unknown) => void) {
   const baseClass = 'w-full px-3 py-2 rounded-lg border border-border bg-panel text-foreground text-sm';
