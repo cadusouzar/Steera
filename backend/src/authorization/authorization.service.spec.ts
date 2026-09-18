@@ -54,6 +54,10 @@ describe('AuthorizationService', () => {
       prisma.employee.findMany.mockResolvedValue([{ id: 'emp-2' }]);
       const result = await service.resolveScope(Scope.EQUIPE, employeeLogin);
       expect(result).toEqual(['emp-2']);
+      expect(prisma.employee.findMany).toHaveBeenCalledWith({
+        where: { managerId: 'emp-1', companyId: 'company-1' },
+        select: { id: true },
+      });
     });
 
     it('DEPARTAMENTO resolves to employees sharing the caller\'s departmentId', async () => {
