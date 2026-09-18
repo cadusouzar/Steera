@@ -6,6 +6,9 @@ import { ValidationError } from 'class-validator';
 const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   cpf: 'CPF',
   email: 'E-mail',
+  password: 'Senha',
+  currentPassword: 'Senha atual',
+  newPassword: 'Nova senha',
   name: 'Nome',
   description: 'Descrição',
   reason: 'Motivo',

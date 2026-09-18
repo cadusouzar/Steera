@@ -38,6 +38,15 @@ describe('translateValidationErrors', () => {
       .toBe('CPF deve ser um texto');
   });
 
+  it('traduz os três campos de senha (achado no smoke test final: password caía no fallback em inglês)', () => {
+    expect(translateValidationErrors([err('password', { minLength: 'password must be longer than or equal to 8 characters' })]))
+      .toBe('Senha deve ter pelo menos 8 caracteres');
+    expect(translateValidationErrors([err('currentPassword', { isNotEmpty: 'currentPassword should not be empty' })]))
+      .toBe('Senha atual é obrigatório');
+    expect(translateValidationErrors([err('newPassword', { minLength: 'newPassword must be longer than or equal to 8 characters' })]))
+      .toBe('Nova senha deve ter pelo menos 8 caracteres');
+  });
+
   it('converte um nome de campo camelCase desconhecido em palavras separadas', () => {
     expect(translateValidationErrors([err('someNewField', { isBoolean: 'someNewField must be a boolean value' })]))
       .toBe('Some new field deve ser verdadeiro ou falso');
