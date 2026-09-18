@@ -70,7 +70,8 @@ export class AuthService {
   // Formato único do objeto `user` devolvido por register()/login()/getProfile() — montado à mão
   // (nunca o row cru do Prisma) pra nunca vazar passwordHash, e com hasFullPontoAccess já
   // normalizado pelo mesmo helper que assina o JWT, pra o frontend nunca ver um valor diferente do
-  // que o token carrega.
+  // que o token carrega. `company` é opcional só pra não quebrar os testes unitários existentes
+  // (mocks de Prisma que não incluem a relação) — todo call site real sempre a inclui via `include`.
   private toPublicUser(user: {
     id: string;
     email: string;
@@ -79,6 +80,7 @@ export class AuthService {
     mustChangePassword: boolean;
     employeeId: string | null;
     hasFullPontoAccess: boolean;
+    company?: { name: string; planTier: string; maxEmployeeLogins: number } | null;
   }) {
     return {
       id: user.id,
@@ -88,6 +90,9 @@ export class AuthService {
       mustChangePassword: user.mustChangePassword,
       employeeId: user.employeeId,
       hasFullPontoAccess: effectiveHasFullPontoAccess(user),
+      companyName: user.company?.name ?? null,
+      planTier: user.company?.planTier ?? null,
+      maxEmployeeLogins: user.company?.maxEmployeeLogins ?? null,
     };
   }
 
@@ -114,14 +119,17 @@ export class AuthService {
 
   async register(dto: { companyName: string; email: string; password: string }, res: Response) {
     const passwordHash = await hashPassword(dto.password);
-    let user;
+    let result: {
+      user: { id: string; companyId: string; email: string; role: string; modules: string[]; mustChangePassword: boolean; employeeId: string | null; hasFullPontoAccess: boolean };
+      company: { name: string; planTier: string; maxEmployeeLogins: number };
+    };
     try {
       // runAsSystem: this is THE call site that creates a brand new tenant —
       // there is no companyId to scope by yet (it's created inside this very
       // transaction), and this route is @Public() (no req.user, no tenant
       // context from TenantContextInterceptor). See the RLS migration's
       // comment and the RLS report for the full reasoning on this bypass.
-      user = await runAsSystem(() =>
+      result = await runAsSystem(() =>
         runTenantInteractiveTransaction(this.prisma, async (tx) => {
           // Achado ao rodar a suíte e2e inteira (não previsto no brief): toda migration de tenant
           // que adiciona uma FK pra `companyId` termina em `ALTER TABLE ... REFERENCES
@@ -156,7 +164,7 @@ export class AuthService {
           await applyMigrations(tx, company.id, schemaName, TENANT_MIGRATIONS_DIR, listMigrationNames(TENANT_MIGRATIONS_DIR));
           // "User" só existe em `public` — resolve corretamente mesmo com o search_path acima
           // apontando primeiro pro schema do tenant (o PostgreSQL cai pro próximo item da lista).
-          return tx.user.create({
+          const createdUser = await tx.user.create({
             data: {
               companyId: company.id,
               email: dto.email,
@@ -165,6 +173,7 @@ export class AuthService {
               modules: ALL_MODULES,
             },
           });
+          return { user: createdUser, company };
         }),
       );
     } catch (err) {
@@ -176,13 +185,16 @@ export class AuthService {
       }
       throw err;
     }
+    const { user, company } = result;
     const accessToken = this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
     // register() é o único lugar onde o próprio usuário escolhe a senha (não
     // uma temporária gerada pelo sistema) — mustChangePassword nasce false
-    // aqui, ao contrário de UsersService.create().
-    return { accessToken, user: this.toPublicUser(user) };
+    // aqui, ao contrário de UsersService.create(). `company` já está em
+    // escopo (acabou de ser criado nesta mesma transação), sem precisar de
+    // include nenhum.
+    return { accessToken, user: this.toPublicUser({ ...user, company }) };
   }
 
   async login(dto: { email: string; password: string }, res: Response) {
@@ -190,7 +202,14 @@ export class AuthService {
     // there is no way to know which company a user belongs to before we've
     // found them by email — this lookup is legitimately cross-tenant by
     // necessity. See the RLS migration's comment for the full reasoning.
-    const user = await runAsSystem(() => this.prisma.user.findUnique({ where: { email: dto.email } }));
+    // `include: { company: ... }` — a tela de perfil do frontend mostra o nome/plano reais da
+    // empresa, sem precisar de uma segunda chamada.
+    const user = await runAsSystem(() =>
+      this.prisma.user.findUnique({
+        where: { email: dto.email },
+        include: { company: { select: { name: true, planTier: true, maxEmployeeLogins: true } } },
+      }),
+    );
     if (!user) throw new UnauthorizedException('E-mail ou senha inválidos');
 
     // Confirma a senha ANTES de checar o status — auditoria de segurança (17/09/2026): revelar
@@ -348,7 +367,10 @@ export class AuthService {
   // perfil pra lidar, venha ele de login ou de uma renovação de sessão após
   // reload.
   async getProfile(userId: string) {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: { company: { select: { name: true, planTier: true, maxEmployeeLogins: true } } },
+    });
     return this.toPublicUser(user);
   }
 

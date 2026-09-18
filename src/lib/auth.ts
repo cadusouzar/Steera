@@ -28,6 +28,14 @@ export interface CurrentUser {
   // inteira" das telas administrativas de Ponto — agora com exatamente o mesmo
   // significado que o backend aplica.
   hasFullPontoAccess: boolean;
+  // Nome/plano reais da empresa (Company.name/planTier/maxEmployeeLogins) — usados pelo menu de
+  // perfil (UserProfileDropdown/UserProfileDrawer) pra mostrar dados reais da conta em vez de
+  // mock. Sempre presentes na prática (todo User tem uma Company); o tipo é nullable só porque o
+  // backend devolve `null` defensivamente quando `company` não vem populado (nunca acontece fora
+  // de teste unitário do backend).
+  companyName: string | null;
+  planTier: 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
+  maxEmployeeLogins: number | null;
 }
 
 interface ApiUser {
@@ -38,6 +46,9 @@ interface ApiUser {
   mustChangePassword: boolean;
   employeeId: string | null;
   hasFullPontoAccess: boolean;
+  companyName: string | null;
+  planTier: 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
+  maxEmployeeLogins: number | null;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -63,6 +74,9 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     mustChangePassword: user.mustChangePassword,
     employeeId: user.employeeId,
     hasFullPontoAccess: user.hasFullPontoAccess,
+    companyName: user.companyName,
+    planTier: user.planTier,
+    maxEmployeeLogins: user.maxEmployeeLogins,
   };
 }
 

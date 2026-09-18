@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Settings, LogOut, ChevronDown } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import { logout } from '../lib/auth';
+import { User, LogOut, ChevronDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { getCurrentUser, logout } from '../lib/auth';
 
 interface UserProfileDropdownProps {
   onOpenProfile: () => void;
@@ -12,6 +12,10 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const currentUser = getCurrentUser();
+  const email = currentUser?.email ?? '';
+  const avatarInitial = email.charAt(0).toUpperCase() || '?';
+  const roleLabel = currentUser?.role === 'admin' ? 'Administrador' : 'Funcionário';
 
   // Chama o logout real (POST /auth/logout, limpa a sessão em memória) e só
   // então navega pra /login — RequireAuth (Task 9) já garante que voltar
@@ -45,7 +49,7 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
         className="flex items-center gap-2 p-1 pr-2 rounded-full hover:bg-secondary/50 transition-colors border border-transparent hover:border-border/50"
       >
         <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background flex items-center justify-center text-white font-heading font-bold text-sm shadow-sm">
-          C
+          {avatarInitial}
         </div>
         <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
@@ -61,12 +65,15 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
             className="absolute right-0 mt-2 w-64 bg-background border border-border rounded-2xl shadow-xl overflow-hidden z-[100]"
           >
             <div className="p-4 border-b border-border/50 bg-secondary/10">
-              <p className="font-bold text-foreground text-sm">Carlos Eduardo</p>
-              <p className="text-xs text-muted font-medium mt-0.5 truncate">carlos@exemplo.com</p>
+              <p className="font-bold text-foreground text-sm truncate">{email}</p>
+              <p className="text-xs text-muted font-medium mt-0.5 truncate">
+                {roleLabel}
+                {currentUser?.companyName ? ` · ${currentUser.companyName}` : ''}
+              </p>
             </div>
-            
+
             <div className="p-2 space-y-1">
-              <button 
+              <button
                 onClick={() => {
                   setIsOpen(false);
                   onOpenProfile();
@@ -76,15 +83,6 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
                 <User size={16} className="text-primary/70" />
                 Meu Perfil
               </button>
-              
-              <Link 
-                to="/app" 
-                onClick={() => setIsOpen(false)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-foreground/80 hover:text-foreground hover:bg-secondary/50 transition-colors text-left"
-              >
-                <Settings size={16} className="text-accent/70" />
-                Configurações da Conta
-              </Link>
             </div>
             
             <div className="p-2 border-t border-border/50">
