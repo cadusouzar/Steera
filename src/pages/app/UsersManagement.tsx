@@ -573,7 +573,8 @@ const UsersManagement = () => {
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, scale: 0.95 }}
                           transition={{ duration: 0.2, delay: index * 0.03 }}
-                          className="hover:bg-secondary/40 transition-colors group"
+                          onClick={() => isAdmin && openEditModal(user)}
+                          className={`hover:bg-secondary/40 transition-colors group ${isAdmin ? 'cursor-pointer' : ''}`}
                         >
                           <td className="px-8 py-5">
                             <div className="flex items-center gap-4">
@@ -609,7 +610,7 @@ const UsersManagement = () => {
                                 {user.modules.length > MAX_VISIBLE_MODULE_PILLS && (
                                   <button
                                     type="button"
-                                    onClick={() => setViewingModulesUser(user)}
+                                    onClick={(e) => { e.stopPropagation(); setViewingModulesUser(user); }}
                                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-muted/20 text-muted border border-border/60 hover:bg-muted/30 hover:text-foreground transition-colors cursor-pointer"
                                     title={user.modules.slice(MAX_VISIBLE_MODULE_PILLS).map(moduleLabel).join(', ')}
                                   >
@@ -647,7 +648,7 @@ const UsersManagement = () => {
                               <button
                                 type="button"
                                 data-actions-trigger
-                                onClick={(e) => openActionsMenu(e, user.id)}
+                                onClick={(e) => { e.stopPropagation(); openActionsMenu(e, user.id); }}
                                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
                                   openActionsMenuUserId === user.id
                                     ? 'border-primary/40 bg-primary/10 text-primary'

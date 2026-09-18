@@ -524,7 +524,8 @@ const CustomFieldsSettings = () => {
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2, delay: index * 0.03 }}
-                        className="hover:bg-secondary/40 transition-colors group"
+                        onClick={() => isAdmin && openEditModal(field)}
+                        className={`hover:bg-secondary/40 transition-colors group ${isAdmin ? 'cursor-pointer' : ''}`}
                       >
                         <td className="px-8 py-5">
                           <p className="text-base font-heading font-bold text-foreground">{field.displayName}</p>
@@ -562,7 +563,7 @@ const CustomFieldsSettings = () => {
                             <button
                               type="button"
                               data-actions-trigger
-                              onClick={(e) => openActionsMenu(e, field.id)}
+                              onClick={(e) => { e.stopPropagation(); openActionsMenu(e, field.id); }}
                               disabled={countLoadingId === field.id}
                               className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 ${
                                 openActionsMenuFieldId === field.id
