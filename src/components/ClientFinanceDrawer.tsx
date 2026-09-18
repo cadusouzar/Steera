@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, DollarSign, Calendar, CheckCircle2, Plus, Receipt, FileText, Repeat, Zap, Trash2, Undo2, Loader2, Edit2, Save, RotateCcw } from 'lucide-react';
 import type { Client, Receivable, Subscription } from '../pages/app/ClientsList';
 import CustomFieldsFormSection from './CustomFieldsFormSection';
+import { inputBorderClass, isValidEmail } from '../lib/validation';
 
 // Parses a date-only "YYYY-MM-DD" string as local midnight instead of
 // letting `new Date(str)` parse it as UTC midnight (which displays as the
@@ -65,6 +66,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   const [editForm, setEditForm] = useState<Partial<{ name: string; category: string; contact: string; email: string }>>({});
   const [editCustomFields, setEditCustomFields] = useState<Record<string, unknown>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [editEmailError, setEditEmailError] = useState<string>();
 
   // Client "delete" (inactivate) state — a confirmation modal, not an inline
   // toggle, because the user must pick one of two mutually exclusive options
@@ -82,6 +84,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   const handleEditClick = () => {
     setEditForm({ name: client.name, category: client.category, contact: client.contact, email: client.email ?? '' });
     setEditCustomFields(client.customFields ?? {});
+    setEditEmailError(undefined);
     setIsEditing(true);
   };
 
@@ -91,6 +94,9 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
 
   const handleSaveEdit = async () => {
     if (!editForm.name || !editForm.contact) return;
+    const emailErr = editForm.email && !isValidEmail(editForm.email) ? 'E-mail inválido' : undefined;
+    setEditEmailError(emailErr);
+    if (emailErr) return;
     setIsSaving(true);
     // `null` explícito (nunca string vazia) pra limpar o e-mail — o backend só aceita "sem
     // e-mail" como null/undefined, uma string vazia ainda cai na validação de formato e
@@ -284,8 +290,10 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                     type="email"
                     value={editForm.email ?? ''}
                     onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                    className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    onBlur={() => setEditEmailError(editForm.email && !isValidEmail(editForm.email) ? 'E-mail inválido' : undefined)}
+                    className={`w-full bg-background border ${inputBorderClass(!!editEmailError)} rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 transition-colors`}
                   />
+                  {editEmailError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{editEmailError}</p>}
                 </div>
                 <div className="sm:col-span-2">
                   <CustomFieldsFormSection entity="client" values={editCustomFields} onChange={setEditCustomFields} />

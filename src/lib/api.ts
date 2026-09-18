@@ -1629,7 +1629,7 @@ export async function fetchProtectedFileObjectUrl(downloadUrl: string, isRetry =
 // ---- Custom Fields ----
 export type CustomFieldType =
   | 'TEXT' | 'LONG_TEXT' | 'NUMBER' | 'CURRENCY' | 'DATE' | 'DATETIME'
-  | 'BOOLEAN' | 'SELECT' | 'MULTI_SELECT' | 'EMAIL' | 'PHONE';
+  | 'BOOLEAN' | 'SELECT' | 'MULTI_SELECT' | 'EMAIL' | 'PHONE' | 'CPF' | 'CNPJ';
 
 export type CustomFieldEntity = 'client' | 'role' | 'employee';
 

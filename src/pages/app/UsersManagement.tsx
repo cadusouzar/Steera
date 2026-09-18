@@ -11,6 +11,7 @@ import CustomSelect from '../../components/CustomSelect';
 import { getCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { SystemUser, EmployeeListItem } from '../../lib/api';
+import { inputBorderClass, isValidEmail } from '../../lib/validation';
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Administrador' },
@@ -143,6 +144,7 @@ const UsersManagement = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState<UserFormState>(emptyForm);
+  const [emailError, setEmailError] = useState<string>();
 
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [pontoAccessSaving, setPontoAccessSaving] = useState<string | null>(null);
@@ -298,6 +300,7 @@ const UsersManagement = () => {
   const openNewModal = () => {
     setFormData(emptyForm);
     setActionError(null);
+    setEmailError(undefined);
     setIsModalOpen(true);
   };
 
@@ -308,6 +311,7 @@ const UsersManagement = () => {
 
   const isFormValid =
     formData.email.trim() !== '' &&
+    isValidEmail(formData.email) &&
     (formData.role === 'admin' || formData.employeeId !== '');
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -819,9 +823,11 @@ const UsersManagement = () => {
                       autoFocus
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
+                      onBlur={() => setEmailError(formData.email && !isValidEmail(formData.email) ? 'E-mail inválido' : undefined)}
+                      className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 transition-all shadow-sm`}
                       placeholder="joao@empresa.com"
                     />
+                    {emailError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{emailError}</p>}
                   </div>
 
                   <div>

@@ -4,8 +4,13 @@ import { ArrowLeft, Save, User, Briefcase, DollarSign, AlertTriangle, Loader2 } 
 import { Link, useNavigate } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
+import FormField from '../../components/FormField';
 import * as api from '../../lib/api';
 import type { EmployeeListItem, Role } from '../../lib/api';
+import {
+  formatPhoneInput, formatCpfInput, inputBorderClass, isValidCpf, isValidEmail, isValidPhone,
+  MONEY_MAX_VALUE, NAME_MAX_LENGTH,
+} from '../../lib/validation';
 
 const EmployeeForm = () => {
   const navigate = useNavigate();
@@ -22,6 +27,16 @@ const EmployeeForm = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+
+  // Validação visual por campo (17/09/2026) — espelha as mesmas regras que o backend já aplica
+  // (checksum de CPF, formato de telefone/e-mail, teto de tamanho/valor); mostrado ao sair do
+  // campo (`onBlur`), nunca a cada tecla, pra não incomodar no meio da digitação.
+  const [fullNameError, setFullNameError] = useState<string>();
+  const [cpfError, setCpfError] = useState<string>();
+  const [emailError, setEmailError] = useState<string>();
+  const [phoneError, setPhoneError] = useState<string>();
+  const [departmentError, setDepartmentError] = useState<string>();
+  const [baseValueError, setBaseValueError] = useState<string>();
 
   // Cargo & Vínculo
   const [roleId, setRoleId] = useState('');
@@ -54,6 +69,31 @@ const EmployeeForm = () => {
     { id: 'advertencias', label: 'Advertências', icon: <AlertTriangle size={16} /> },
   ];
 
+  // Roda de novo no submit (não só no blur) — cobre o caso de a pessoa nunca ter saído do campo,
+  // ou ter colado um valor via script/autofill sem disparar `onBlur`. Devolve o primeiro erro de
+  // cada campo (ou undefined) e a aba onde ele mora, pra já trocar pra ela se precisar.
+  const validateAll = () => {
+    const errors = {
+      fullName: fullName && fullName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined,
+      cpf: cpf && !isValidCpf(cpf) ? 'CPF inválido' : undefined,
+      email: email && !isValidEmail(email) ? 'E-mail inválido' : undefined,
+      phone: phone && !isValidPhone(phone) ? 'Telefone deve ter DDD + 8 ou 9 dígitos' : undefined,
+      department: department && department.length > NAME_MAX_LENGTH ? `Departamento deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined,
+      baseValue: baseValue && Number(baseValue) > MONEY_MAX_VALUE ? `Salário deve ser menor ou igual a ${MONEY_MAX_VALUE.toLocaleString('pt-BR')}` : undefined,
+    };
+    setFullNameError(errors.fullName);
+    setCpfError(errors.cpf);
+    setEmailError(errors.email);
+    setPhoneError(errors.phone);
+    setDepartmentError(errors.department);
+    setBaseValueError(errors.baseValue);
+    if (errors.fullName || errors.cpf) return { valid: false, tab: 'pessoal' } as const;
+    if (errors.email || errors.phone) return { valid: false, tab: 'pessoal' } as const;
+    if (errors.department) return { valid: false, tab: 'vinculo' } as const;
+    if (errors.baseValue) return { valid: false, tab: 'financeiro' } as const;
+    return { valid: true } as const;
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
@@ -67,6 +107,13 @@ const EmployeeForm = () => {
     if (!baseValue) missingFields.push('Salário Base');
     if (missingFields.length > 0) {
       setSaveError(`Preencha os campos obrigatórios: ${missingFields.join(', ')}.`);
+      return;
+    }
+
+    const validation = validateAll();
+    if (!validation.valid) {
+      setActiveTab(validation.tab);
+      setSaveError('Corrija os campos destacados antes de salvar.');
       return;
     }
 
@@ -175,21 +222,43 @@ const EmployeeForm = () => {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Nome Completo</label>
-                    <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Nome completo do funcionário" />
+                    <FormField label="Nome Completo" required error={fullNameError}>
+                      <input
+                        type="text" value={fullName} maxLength={NAME_MAX_LENGTH}
+                        onChange={(e) => setFullName(e.target.value)}
+                        onBlur={() => setFullNameError(fullName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                        className={`w-full bg-background border ${inputBorderClass(!!fullNameError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                        placeholder="Nome completo do funcionário"
+                      />
+                    </FormField>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">CPF</label>
-                    <input type="text" value={cpf} onChange={(e) => setCpf(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="000.000.000-00" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">E-mail Pessoal</label>
-                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="email@exemplo.com" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Telefone / WhatsApp</label>
-                    <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="(00) 00000-0000" />
-                  </div>
+                  <FormField label="CPF" required error={cpfError}>
+                    <input
+                      type="text" value={cpf} maxLength={14}
+                      onChange={(e) => setCpf(formatCpfInput(e.target.value))}
+                      onBlur={() => setCpfError(cpf && !isValidCpf(cpf) ? 'CPF inválido' : undefined)}
+                      className={`w-full bg-background border ${inputBorderClass(!!cpfError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                      placeholder="000.000.000-00"
+                    />
+                  </FormField>
+                  <FormField label="E-mail Pessoal" error={emailError}>
+                    <input
+                      type="email" value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      onBlur={() => setEmailError(email && !isValidEmail(email) ? 'E-mail inválido' : undefined)}
+                      className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                      placeholder="email@exemplo.com"
+                    />
+                  </FormField>
+                  <FormField label="Telefone / WhatsApp" error={phoneError}>
+                    <input
+                      type="text" value={phone} maxLength={15}
+                      onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
+                      onBlur={() => setPhoneError(phone && !isValidPhone(phone) ? 'Telefone deve ter DDD + 8 ou 9 dígitos' : undefined)}
+                      className={`w-full bg-background border ${inputBorderClass(!!phoneError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                      placeholder="(00) 00000-0000"
+                    />
+                  </FormField>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Endereço Completo</label>
                     <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Rua, Número, Bairro, Cidade - Estado" />
@@ -237,8 +306,14 @@ const EmployeeForm = () => {
                     </p>
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Departamento</label>
-                    <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" />
+                    <FormField label="Departamento" required error={departmentError}>
+                      <input
+                        type="text" value={department} maxLength={NAME_MAX_LENGTH}
+                        onChange={(e) => setDepartment(e.target.value)}
+                        onBlur={() => setDepartmentError(department.length > NAME_MAX_LENGTH ? `Departamento deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                        className={`w-full bg-background border ${inputBorderClass(!!departmentError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                      />
+                    </FormField>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Data de Admissão</label>
@@ -263,13 +338,18 @@ const EmployeeForm = () => {
             {activeTab === 'financeiro' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Salário Base (R$)</label>
+                  <FormField label="Salário Base (R$)" required error={baseValueError}>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted">R$</span>
-                      <input type="number" step="0.01" value={baseValue} onChange={(e) => setBaseValue(e.target.value)} className="w-full bg-background border border-border rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="0,00" />
+                      <input
+                        type="number" step="0.01" value={baseValue}
+                        onChange={(e) => setBaseValue(e.target.value)}
+                        onBlur={() => setBaseValueError(baseValue && Number(baseValue) > MONEY_MAX_VALUE ? `Salário deve ser menor ou igual a ${MONEY_MAX_VALUE.toLocaleString('pt-BR')}` : undefined)}
+                        className={`w-full bg-background border ${inputBorderClass(!!baseValueError)} rounded-xl pl-10 pr-4 py-3 focus:ring-2 transition-colors`}
+                        placeholder="0,00"
+                      />
                     </div>
-                  </div>
+                  </FormField>
                   <div>
                     <label className="block text-sm font-medium text-foreground/80 mb-2">Dia de Pagamento</label>
                     <CustomSelect

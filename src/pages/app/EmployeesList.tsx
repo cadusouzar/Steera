@@ -9,6 +9,7 @@ import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
 import type { EmployeeDetail, EmployeeListItem, EmployeeWarning, Role } from '../../lib/api';
+import { formatCpfInput, formatPhoneInput, inputBorderClass, isValidCpf, isValidEmail, isValidPhone } from '../../lib/validation';
 
 export interface Employee extends EmployeeDetail {
   warnings: EmployeeWarning[];
@@ -46,6 +47,9 @@ const EmployeesList = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Employee>>({});
+  const [editCpfError, setEditCpfError] = useState<string>();
+  const [editEmailError, setEditEmailError] = useState<string>();
+  const [editPhoneError, setEditPhoneError] = useState<string>();
 
   // Warning modal state
   const [warningModalOpen, setWarningModalOpen] = useState(false);
@@ -135,6 +139,9 @@ const EmployeesList = () => {
 
   const handleEditClick = () => {
     setEditForm(selectedEmployee!);
+    setEditCpfError(undefined);
+    setEditEmailError(undefined);
+    setEditPhoneError(undefined);
     setIsEditing(true);
   };
 
@@ -142,6 +149,18 @@ const EmployeesList = () => {
 
   const handleSaveEdit = async () => {
     if (!selectedEmployee || !editForm.fullName || !editForm.cpf || !editForm.roleId || isSaving) return;
+
+    const cpfErr = !isValidCpf(editForm.cpf) ? 'CPF inválido' : undefined;
+    const emailErr = editForm.email && !isValidEmail(editForm.email) ? 'E-mail inválido' : undefined;
+    const phoneErr = editForm.phone && !isValidPhone(editForm.phone) ? 'Telefone deve ter DDD + 8 ou 9 dígitos' : undefined;
+    setEditCpfError(cpfErr);
+    setEditEmailError(emailErr);
+    setEditPhoneError(phoneErr);
+    if (cpfErr || emailErr || phoneErr) {
+      setActionError('Corrija os campos destacados antes de salvar.');
+      return;
+    }
+
     setIsSaving(true);
     setActionError(null);
     try {
@@ -678,15 +697,33 @@ const EmployeesList = () => {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">CPF</label>
-                                <input type="text" value={editForm.cpf || ''} onChange={(e) => setEditForm({ ...editForm, cpf: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input
+                                  type="text" value={editForm.cpf || ''} maxLength={14}
+                                  onChange={(e) => setEditForm({ ...editForm, cpf: formatCpfInput(e.target.value) })}
+                                  onBlur={() => setEditCpfError(editForm.cpf && !isValidCpf(editForm.cpf) ? 'CPF inválido' : undefined)}
+                                  className={`w-full bg-background border ${inputBorderClass(!!editCpfError)} rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 transition-colors`}
+                                />
+                                {editCpfError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{editCpfError}</p>}
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">E-mail Pessoal</label>
-                                <input type="email" value={editForm.email || ''} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input
+                                  type="email" value={editForm.email || ''}
+                                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                                  onBlur={() => setEditEmailError(editForm.email && !isValidEmail(editForm.email) ? 'E-mail inválido' : undefined)}
+                                  className={`w-full bg-background border ${inputBorderClass(!!editEmailError)} rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 transition-colors`}
+                                />
+                                {editEmailError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{editEmailError}</p>}
                               </div>
                               <div>
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Telefone / WhatsApp</label>
-                                <input type="text" value={editForm.phone || ''} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="w-full bg-background border border-border/80 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                <input
+                                  type="text" value={editForm.phone || ''} maxLength={15}
+                                  onChange={(e) => setEditForm({ ...editForm, phone: formatPhoneInput(e.target.value) })}
+                                  onBlur={() => setEditPhoneError(editForm.phone && !isValidPhone(editForm.phone) ? 'Telefone deve ter DDD + 8 ou 9 dígitos' : undefined)}
+                                  className={`w-full bg-background border ${inputBorderClass(!!editPhoneError)} rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 transition-colors`}
+                                />
+                                {editPhoneError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{editPhoneError}</p>}
                               </div>
                               <div className="sm:col-span-2">
                                 <label className="block text-xs font-medium text-foreground/80 mb-1.5">Endereço Completo</label>

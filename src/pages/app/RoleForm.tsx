@@ -3,7 +3,9 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Save, Loader2, Check } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
+import FormField from '../../components/FormField';
 import * as api from '../../lib/api';
+import { inputBorderClass, NAME_MAX_LENGTH, TEXT_MAX_LENGTH } from '../../lib/validation';
 
 const COLOR_SWATCHES = [
   '#3B82F6', '#A855F7', '#EC4899', '#EF4444',
@@ -21,6 +23,10 @@ const RoleForm = () => {
   const [description, setDescription] = useState('');
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
+  const [nameError, setNameError] = useState<string>();
+  const [departmentError, setDepartmentError] = useState<string>();
+  const [descriptionError, setDescriptionError] = useState<string>();
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
@@ -30,6 +36,17 @@ const RoleForm = () => {
     if (!department.trim()) missingFields.push('Departamento');
     if (missingFields.length > 0) {
       setSaveError(`Preencha os campos obrigatórios: ${missingFields.join(', ')}.`);
+      return;
+    }
+
+    const nameErr = name.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined;
+    const departmentErr = department.length > NAME_MAX_LENGTH ? `Departamento deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined;
+    const descriptionErr = description.length > TEXT_MAX_LENGTH ? `Descrição deve ter no máximo ${TEXT_MAX_LENGTH} caracteres` : undefined;
+    setNameError(nameErr);
+    setDepartmentError(departmentErr);
+    setDescriptionError(descriptionErr);
+    if (nameErr || departmentErr || descriptionErr) {
+      setSaveError('Corrija os campos destacados antes de salvar.');
       return;
     }
 
@@ -104,20 +121,26 @@ const RoleForm = () => {
           <form className="p-6 md:p-8 space-y-6" onSubmit={handleSave}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-foreground/80 mb-2">Nome do Cargo</label>
-                <input
-                  type="text" autoFocus value={name} onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50"
-                  placeholder="Ex: Diretor de Arte"
-                />
+                <FormField label="Nome do Cargo" required error={nameError}>
+                  <input
+                    type="text" autoFocus value={name} maxLength={NAME_MAX_LENGTH}
+                    onChange={(e) => setName(e.target.value)}
+                    onBlur={() => setNameError(name.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                    className={`w-full bg-background border ${inputBorderClass(!!nameError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                    placeholder="Ex: Diretor de Arte"
+                  />
+                </FormField>
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-foreground/80 mb-2">Departamento</label>
-                <input
-                  type="text" value={department} onChange={(e) => setDepartment(e.target.value)}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50"
-                  placeholder="Ex: Criação"
-                />
+                <FormField label="Departamento" required error={departmentError}>
+                  <input
+                    type="text" value={department} maxLength={NAME_MAX_LENGTH}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    onBlur={() => setDepartmentError(department.length > NAME_MAX_LENGTH ? `Departamento deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                    className={`w-full bg-background border ${inputBorderClass(!!departmentError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                    placeholder="Ex: Criação"
+                  />
+                </FormField>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-foreground/80 mb-2">Cor de Identificação</label>
@@ -141,12 +164,15 @@ const RoleForm = () => {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-foreground/80 mb-2">Descrição (opcional)</label>
-                <textarea
-                  rows={3} value={description} onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-background border border-border rounded-xl p-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                  placeholder="Atribuições e responsabilidades..."
-                />
+                <FormField label="Descrição (opcional)" error={descriptionError}>
+                  <textarea
+                    rows={3} value={description} maxLength={TEXT_MAX_LENGTH}
+                    onChange={(e) => setDescription(e.target.value)}
+                    onBlur={() => setDescriptionError(description.length > TEXT_MAX_LENGTH ? `Descrição deve ter no máximo ${TEXT_MAX_LENGTH} caracteres` : undefined)}
+                    className={`w-full bg-background border ${inputBorderClass(!!descriptionError)} rounded-xl p-3 text-sm text-foreground focus:outline-none focus:ring-2 resize-none transition-colors`}
+                    placeholder="Atribuições e responsabilidades..."
+                  />
+                </FormField>
               </div>
             </div>
 

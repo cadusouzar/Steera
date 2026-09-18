@@ -4,7 +4,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import FlowBackground from '../components/FlowBackground';
+import FormField from '../components/FormField';
 import { register } from '../lib/auth';
+import { inputBorderClass, isValidEmail, NAME_MAX_LENGTH } from '../lib/validation';
 
 const Register = () => {
   const [searchParams] = useSearchParams();
@@ -20,6 +22,10 @@ const Register = () => {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [companyNameError, setCompanyNameError] = useState<string>();
+  const [emailError, setEmailError] = useState<string>();
+  const [passwordError, setPasswordError] = useState<string>();
+
   useEffect(() => {
     const plan = searchParams.get('plan');
     if (plan) {
@@ -29,6 +35,14 @@ const Register = () => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    const companyNameErr = companyName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined;
+    const emailErr = email && !isValidEmail(email) ? 'E-mail inválido' : undefined;
+    const passwordErr = password.length > 0 && password.length < 8 ? 'Senha deve ter pelo menos 8 caracteres' : undefined;
+    setCompanyNameError(companyNameErr);
+    setEmailError(emailErr);
+    setPasswordError(passwordErr);
+    if (companyNameErr || emailErr || passwordErr) return;
+
     setError(null);
     setIsSubmitting(true);
     try {
@@ -84,46 +98,47 @@ const Register = () => {
           )}
 
           <form className="space-y-4" onSubmit={handleRegister}>
-            <div>
-              <label className="block text-sm font-medium text-foreground/80 mb-2">Nome da Empresa</label>
+            <FormField label="Nome da Empresa" required error={companyNameError}>
               <input
                 type="text"
                 required
+                maxLength={NAME_MAX_LENGTH}
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                onBlur={() => setCompanyNameError(companyName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                className={`w-full bg-background border ${inputBorderClass(!!companyNameError)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
                 placeholder="Nome da sua empresa"
                 onFocus={() => setIsCovering(false)}
               />
-            </div>
+            </FormField>
 
-            <div>
-              <label className="block text-sm font-medium text-foreground/80 mb-2">E-mail Corporativo</label>
+            <FormField label="E-mail Corporativo" required error={emailError}>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                onBlur={() => setEmailError(email && !isValidEmail(email) ? 'E-mail inválido' : undefined)}
+                className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
                 placeholder="nome@empresa.com"
                 onFocus={() => setIsCovering(false)}
               />
-            </div>
+            </FormField>
 
-            <div>
-              <label className="block text-sm font-medium text-foreground/80 mb-2">Senha</label>
+            <FormField label="Senha" required error={passwordError}>
               <input
                 type="password"
                 required
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                onBlur={() => setPasswordError(password.length > 0 && password.length < 8 ? 'Senha deve ter pelo menos 8 caracteres' : undefined)}
+                className={`w-full bg-background border ${inputBorderClass(!!passwordError)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
                 placeholder="Crie uma senha forte (mín. 8 caracteres)"
                 onFocus={() => setIsCovering(true)}
-                onBlur={() => setIsCovering(false)}
+                onBlurCapture={() => setIsCovering(false)}
               />
-            </div>
+            </FormField>
 
             <button
               type="submit"

@@ -1,4 +1,5 @@
 import { CustomFieldDefinition, CustomFieldType } from './api';
+import { formatCnpjInput, formatCpfInput, formatPhoneInput, isValidCnpj, isValidCpf, isValidPhone } from './validation';
 
 // Compartilhado entre CustomFieldsFormSection (preenche o valor de um campo num registro real) e
 // CustomFieldsSettings (escolhe o valor padrão ao configurar o campo em si) — extraído pra um
@@ -7,7 +8,7 @@ import { CustomFieldDefinition, CustomFieldType } from './api';
 export const TYPE_LABELS: Record<string, string> = {
   TEXT: 'Texto', LONG_TEXT: 'Texto', NUMBER: 'Número', CURRENCY: 'Valor em dinheiro',
   DATE: 'Data', DATETIME: 'Data e hora', BOOLEAN: 'Sim ou não', SELECT: 'Lista de opções',
-  MULTI_SELECT: 'Lista de opções', EMAIL: 'E-mail', PHONE: 'Telefone',
+  MULTI_SELECT: 'Lista de opções', EMAIL: 'E-mail', PHONE: 'Telefone', CPF: 'CPF', CNPJ: 'CNPJ',
 };
 
 // Só entra em jogo quando o campo nunca foi tocado (`value === undefined`) — reaproveita a MESMA
@@ -60,28 +61,31 @@ export function renderTypedInput(
   value: unknown,
   onChange: (v: unknown) => void,
 ) {
-  const baseClass = 'w-full px-3 py-2 rounded-lg border border-border bg-panel text-foreground text-sm';
+  const baseClass = 'w-full px-3 py-2 rounded-lg border bg-panel text-foreground text-sm';
+  // Só entra em jogo pros tipos com formato validável neste arquivo (CPF/CNPJ/PHONE) — o campo
+  // ainda vazio nunca é tratado como inválido, só depois que a pessoa começa a digitar.
+  const borderClass = (invalid: boolean) => (invalid ? 'border-red-500/60' : 'border-border');
 
   switch (type) {
     case 'LONG_TEXT':
       return (
-        <textarea className={baseClass} rows={3} value={(value as string) ?? ''}
+        <textarea className={`${baseClass} ${borderClass(false)}`} rows={3} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
     case 'NUMBER':
     case 'CURRENCY':
       return (
-        <input type="number" step="0.01" className={baseClass} value={(value as number) ?? ''}
+        <input type="number" step="0.01" className={`${baseClass} ${borderClass(false)}`} value={(value as number) ?? ''}
           onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
       );
     case 'DATE':
       return (
-        <input type="date" className={baseClass} value={(value as string) ?? ''}
+        <input type="date" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
     case 'DATETIME':
       return (
-        <input type="datetime-local" className={baseClass} value={(value as string) ?? ''}
+        <input type="datetime-local" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
     case 'BOOLEAN':
@@ -91,7 +95,7 @@ export function renderTypedInput(
       );
     case 'SELECT':
       return (
-        <select className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+        <select className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
           <option value="">Selecione...</option>
           {(options ?? []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
         </select>
@@ -111,10 +115,38 @@ export function renderTypedInput(
       );
     }
     case 'EMAIL':
-      return <input type="email" className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)} />;
-    case 'PHONE':
-      return <input type="tel" className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <input type="email" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
+          onChange={(e) => onChange(e.target.value)} />
+      );
+    case 'PHONE': {
+      const str = (value as string) ?? '';
+      const invalid = str.length > 0 && !isValidPhone(str);
+      return (
+        <input type="tel" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={15}
+          placeholder="(00) 00000-0000" onChange={(e) => onChange(formatPhoneInput(e.target.value))} />
+      );
+    }
+    case 'CPF': {
+      const str = (value as string) ?? '';
+      const invalid = str.length > 0 && !isValidCpf(str);
+      return (
+        <input type="text" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={14}
+          placeholder="000.000.000-00" onChange={(e) => onChange(formatCpfInput(e.target.value))} />
+      );
+    }
+    case 'CNPJ': {
+      const str = (value as string) ?? '';
+      const invalid = str.length > 0 && !isValidCnpj(str);
+      return (
+        <input type="text" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={18}
+          placeholder="00.000.000/0000-00" onChange={(e) => onChange(formatCnpjInput(e.target.value))} />
+      );
+    }
     default:
-      return <input type="text" className={baseClass} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <input type="text" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
+          onChange={(e) => onChange(e.target.value)} />
+      );
   }
 }

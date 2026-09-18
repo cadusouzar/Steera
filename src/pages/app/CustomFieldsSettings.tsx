@@ -10,6 +10,7 @@ import { getCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { CustomFieldDefinition, CustomFieldEntity, CustomFieldType } from '../../lib/api';
 import { TYPE_LABELS, renderTypedInput, parseDefaultForDisplay, serializeDefaultValue } from '../../lib/customFieldRendering';
+import { inputBorderClass, NAME_MAX_LENGTH } from '../../lib/validation';
 
 const ENTITY_OPTIONS: { value: CustomFieldEntity; label: string; icon: typeof User }[] = [
   { value: 'client', label: 'Clientes', icon: HeartHandshake },
@@ -19,7 +20,7 @@ const ENTITY_OPTIONS: { value: CustomFieldEntity; label: string; icon: typeof Us
 
 // Ícone + rótulo exatos combinados com o dono do produto para o seletor de
 // tipo (cartões clicáveis do modal "Novo campo"). A ordem/conjunto de tipos
-// vem de `TYPE_LABELS` (Task 10) — este mapa só refina o texto exibido,
+// vem de `TYPE_LABELS` — este mapa só refina o texto exibido,
 // já que `TYPE_LABELS` tem rótulos mais genéricos (ex.: "Texto" pra TEXT e
 // LONG_TEXT ao mesmo tempo) do que o combinado aqui.
 const TYPE_PICKER: Record<CustomFieldType, { icon: string; label: string; example?: string }> = {
@@ -34,6 +35,8 @@ const TYPE_PICKER: Record<CustomFieldType, { icon: string; label: string; exampl
   MULTI_SELECT: { icon: '☑️', label: 'Lista de opções (múltipla escolha)', example: 'Ex.: Interesses: Financeiro, RH, Vendas' },
   EMAIL: { icon: '📧', label: 'E-mail' },
   PHONE: { icon: '📞', label: 'Telefone' },
+  CPF: { icon: '🪪', label: 'CPF', example: 'Ex.: CPF do cliente pessoa física' },
+  CNPJ: { icon: '🏢', label: 'CNPJ', example: 'Ex.: CNPJ do cliente pessoa jurídica' },
 };
 
 const CUSTOM_FIELD_TYPES = Object.keys(TYPE_LABELS) as CustomFieldType[];
@@ -159,6 +162,7 @@ const CustomFieldsSettings = () => {
   const isCreateFormValid =
     createForm.type !== null &&
     createForm.displayName.trim() !== '' &&
+    createForm.displayName.length <= NAME_MAX_LENGTH &&
     (!hasOptions(createForm.type) || parseOptions(createForm.optionsText).length > 0);
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -208,6 +212,7 @@ const CustomFieldsSettings = () => {
   const isEditFormValid =
     !!editForm &&
     editForm.displayName.trim() !== '' &&
+    editForm.displayName.length <= NAME_MAX_LENGTH &&
     (!editingField || !hasOptions(editingField.type) || parseOptions(editForm.optionsText).length > 0);
 
   const performEditSave = async (field: CustomFieldDefinition, form: EditFormState) => {
@@ -660,11 +665,15 @@ const CustomFieldsSettings = () => {
                   <input
                     type="text"
                     required
+                    maxLength={NAME_MAX_LENGTH}
                     value={createForm.displayName}
                     onChange={(e) => setCreateForm(prev => ({ ...prev, displayName: e.target.value }))}
-                    className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
+                    className={`w-full bg-background border ${inputBorderClass(createForm.displayName.length > NAME_MAX_LENGTH)} rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 transition-all shadow-sm`}
                     placeholder="Ex: Data de aniversário"
                   />
+                  {createForm.displayName.length > NAME_MAX_LENGTH && (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">Nome deve ter no máximo {NAME_MAX_LENGTH} caracteres</p>
+                  )}
                 </div>
 
                 {hasOptions(createForm.type) && (
@@ -807,10 +816,14 @@ const CustomFieldsSettings = () => {
                   <input
                     type="text"
                     required
+                    maxLength={NAME_MAX_LENGTH}
                     value={editForm.displayName}
                     onChange={(e) => setEditForm(prev => prev && { ...prev, displayName: e.target.value })}
-                    className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
+                    className={`w-full bg-background border ${inputBorderClass(editForm.displayName.length > NAME_MAX_LENGTH)} rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 transition-all shadow-sm`}
                   />
+                  {editForm.displayName.length > NAME_MAX_LENGTH && (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">Nome deve ter no máximo {NAME_MAX_LENGTH} caracteres</p>
+                  )}
                 </div>
 
                 <div>

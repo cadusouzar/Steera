@@ -3,7 +3,9 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
+import FormField from '../../components/FormField';
 import * as api from '../../lib/api';
+import { inputBorderClass, isValidEmail, NAME_MAX_LENGTH } from '../../lib/validation';
 
 const ClientForm = () => {
   const navigate = useNavigate();
@@ -16,6 +18,9 @@ const ClientForm = () => {
   const [email, setEmail] = useState('');
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
+  const [nameError, setNameError] = useState<string>();
+  const [emailError, setEmailError] = useState<string>();
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
@@ -25,6 +30,15 @@ const ClientForm = () => {
     if (!contact.trim()) missingFields.push('Telefone/Contato');
     if (missingFields.length > 0) {
       setSaveError(`Preencha os campos obrigatórios: ${missingFields.join(', ')}.`);
+      return;
+    }
+
+    const nameErr = name.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined;
+    const emailErr = email && !isValidEmail(email) ? 'E-mail inválido' : undefined;
+    setNameError(nameErr);
+    setEmailError(emailErr);
+    if (nameErr || emailErr) {
+      setSaveError('Corrija os campos destacados antes de salvar.');
       return;
     }
 
@@ -99,12 +113,15 @@ const ClientForm = () => {
           <form className="p-6 md:p-8 space-y-6" onSubmit={handleSave}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-foreground/80 mb-2">Nome Completo</label>
-                <input
-                  type="text" value={name} onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50"
-                  placeholder="Ex: Ana Laura / Rex"
-                />
+                <FormField label="Nome Completo" required error={nameError}>
+                  <input
+                    type="text" value={name} maxLength={NAME_MAX_LENGTH}
+                    onChange={(e) => setName(e.target.value)}
+                    onBlur={() => setNameError(name.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                    className={`w-full bg-background border ${inputBorderClass(!!nameError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                    placeholder="Ex: Ana Laura / Rex"
+                  />
+                </FormField>
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground/80 mb-2">Categoria / Observação</label>
@@ -123,12 +140,15 @@ const ClientForm = () => {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-foreground/80 mb-2">E-mail (Opcional)</label>
-                <input
-                  type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50"
-                  placeholder="email@exemplo.com"
-                />
+                <FormField label="E-mail (Opcional)" error={emailError}>
+                  <input
+                    type="email" value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onBlur={() => setEmailError(email && !isValidEmail(email) ? 'E-mail inválido' : undefined)}
+                    className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
+                    placeholder="email@exemplo.com"
+                  />
+                </FormField>
               </div>
             </div>
 
