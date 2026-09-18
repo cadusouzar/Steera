@@ -53,6 +53,12 @@ const MODULE_GROUPS: ModuleGroup[] = [
 const ALL_MODULE_OPTIONS: ModuleOption[] = [...STANDALONE_MODULES, ...MODULE_GROUPS.flatMap(g => g.options)];
 const moduleLabel = (id: string) => ALL_MODULE_OPTIONS.find(m => m.id === id)?.label ?? id;
 
+// Cap de pills visíveis na tabela — sem isso, um login com muitos módulos (ex.: um ADMIN com todos
+// os 9) fazia a linha da tabela crescer verticalmente sem limite conforme os badges quebravam linha
+// dentro do `max-w-xs`. O resto vira um único badge "+N", com `title` listando os módulos ocultos —
+// a lista completa (e editável) continua a um clique de distância no modal de "Editar módulos".
+const MAX_VISIBLE_MODULE_PILLS = 3;
+
 interface UserFormState {
   email: string;
   role: 'admin' | 'employee';
@@ -561,7 +567,7 @@ const UsersManagement = () => {
                           <td className="px-8 py-5">
                             {user.modules.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5 max-w-xs">
-                                {user.modules.map(m => (
+                                {user.modules.slice(0, MAX_VISIBLE_MODULE_PILLS).map(m => (
                                   <span
                                     key={m}
                                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-accent/10 text-accent border border-accent/20"
@@ -569,6 +575,14 @@ const UsersManagement = () => {
                                     {moduleLabel(m)}
                                   </span>
                                 ))}
+                                {user.modules.length > MAX_VISIBLE_MODULE_PILLS && (
+                                  <span
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-muted/20 text-muted border border-border/60"
+                                    title={user.modules.slice(MAX_VISIBLE_MODULE_PILLS).map(moduleLabel).join(', ')}
+                                  >
+                                    +{user.modules.length - MAX_VISIBLE_MODULE_PILLS}
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               <span className="text-xs text-muted">Nenhum módulo</span>
