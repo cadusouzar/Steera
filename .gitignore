@@ -11,3 +11,4 @@ backend/.env.test
 backend/pgbouncer/userlist.txt
 backend/*.log
 backend/storage/
+.scratchpad/
