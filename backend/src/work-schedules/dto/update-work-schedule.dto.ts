@@ -1,12 +1,12 @@
 import {
-  ArrayUnique, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Matches, Max, Min, MinLength,
+  ArrayUnique, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength,
 } from 'class-validator';
 import { HHMM_REGEX } from './create-work-schedule.dto';
 
 export class UpdateWorkScheduleDto {
   @IsOptional() @IsString() @MinLength(1) employeeId?: string;
   @IsOptional() @IsString() @MinLength(1) managerId?: string;
-  @IsOptional() @IsString() @MinLength(1) name?: string;
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(255) name?: string;
 
   @IsOptional()
   @IsArray()
@@ -25,8 +25,8 @@ export class UpdateWorkScheduleDto {
   expectedEndTime?: string;
 
   @IsOptional() @IsInt() @Min(0) breakMinutes?: number;
-  @IsOptional() @IsInt() @Min(1) dailyMinutes?: number;
-  @IsOptional() @IsInt() @Min(1) weeklyMinutes?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(1440) dailyMinutes?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(10080) weeklyMinutes?: number;
   @IsOptional() @IsInt() @Min(0) toleranceMinutes?: number;
   @IsOptional() @IsBoolean() allowOvertime?: boolean;
   @IsOptional() @IsInt() @Min(1) maxOvertimeMinutesPerDay?: number;

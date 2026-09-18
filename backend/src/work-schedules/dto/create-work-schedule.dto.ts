@@ -1,5 +1,5 @@
 import {
-  ArrayUnique, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Matches, Max, Min, MinLength,
+  ArrayUnique, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength,
 } from 'class-validator';
 
 // "HH:mm", 00-23:00-59, sempre com zero à esquerda (rejeita "9:00", "25:00").
@@ -8,7 +8,7 @@ export const HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 export class CreateWorkScheduleDto {
   @IsOptional() @IsString() @MinLength(1) employeeId?: string;
   @IsOptional() @IsString() @MinLength(1) managerId?: string;
-  @IsString() @MinLength(1) name!: string;
+  @IsString() @MinLength(1) @MaxLength(255) name!: string;
 
   // 0=domingo..6=sábado (ver comentário do model no schema.prisma). Sem
   // repetição — @ArrayUnique.
@@ -26,8 +26,8 @@ export class CreateWorkScheduleDto {
   expectedEndTime!: string;
 
   @IsOptional() @IsInt() @Min(0) breakMinutes?: number;
-  @IsInt() @Min(1) dailyMinutes!: number;
-  @IsInt() @Min(1) weeklyMinutes!: number;
+  @IsInt() @Min(1) @Max(1440) dailyMinutes!: number;
+  @IsInt() @Min(1) @Max(10080) weeklyMinutes!: number;
   @IsOptional() @IsInt() @Min(0) toleranceMinutes?: number;
   @IsOptional() @IsBoolean() allowOvertime?: boolean;
   @IsOptional() @IsInt() @Min(1) maxOvertimeMinutesPerDay?: number;

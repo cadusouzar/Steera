@@ -1,5 +1,5 @@
 import { JustificationType } from '@prisma/client';
-import { IsEnum, IsISO8601, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEnum, IsISO8601, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 // De propósito SEM employeeId/companyId — sempre resolvidos no servidor via
 // TimeManagementAuthService.resolveOwnEmployee(user). Também de propósito SEM nenhum campo de
@@ -7,7 +7,7 @@ import { IsEnum, IsISO8601, IsOptional, IsString, MinLength } from 'class-valida
 // livre não-estruturado, nunca um campo dedicado a diagnóstico.
 export class CreateJustificationDto {
   @IsEnum(JustificationType) type!: JustificationType;
-  @IsString() @MinLength(1) description!: string;
+  @IsString() @MinLength(1) @MaxLength(2000) description!: string;
   @IsOptional() @IsISO8601() relatedDate?: string;
   @IsOptional() @IsISO8601() periodStart?: string;
   @IsOptional() @IsISO8601() periodEnd?: string;
