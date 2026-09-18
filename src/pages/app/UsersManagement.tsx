@@ -620,45 +620,45 @@ const UsersManagement = () => {
                           </td>
                           {isAdmin && (
                             <td className="px-8 py-5 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
                                 <button
                                   onClick={() => openEditModal(user)}
-                                  className="p-2 rounded-lg transition-colors text-muted hover:text-primary hover:bg-primary/10"
-                                  title="Editar Módulos"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-muted hover:text-primary hover:bg-primary/10"
                                 >
-                                  <Pencil size={16} />
+                                  <Pencil size={14} />
+                                  Editar
                                 </button>
                                 <button
                                   onClick={() => setResettingPasswordUser(user)}
-                                  className="p-2 rounded-lg transition-colors text-muted hover:text-primary hover:bg-primary/10"
-                                  title="Redefinir Senha"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-muted hover:text-primary hover:bg-primary/10"
                                 >
-                                  <KeyRound size={16} />
+                                  <KeyRound size={14} />
+                                  Redefinir Senha
                                 </button>
                                 <button
                                   onClick={() => handleToggleStatus(user)}
                                   disabled={pendingUserId === user.id}
-                                  className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
                                     user.status === 'active'
                                       ? 'text-muted hover:text-orange-500 hover:bg-orange-500/10'
                                       : 'text-muted hover:text-green-600 hover:bg-green-500/10'
                                   }`}
-                                  title={user.status === 'active' ? 'Bloquear Acesso' : 'Desbloquear Acesso'}
                                 >
                                   {pendingUserId === user.id ? (
-                                    <Loader2 size={16} className="animate-spin" />
+                                    <Loader2 size={14} className="animate-spin" />
                                   ) : user.status === 'active' ? (
-                                    <ShieldOff size={16} />
+                                    <ShieldOff size={14} />
                                   ) : (
-                                    <ShieldCheck size={16} />
+                                    <ShieldCheck size={14} />
                                   )}
+                                  {user.status === 'active' ? 'Bloquear' : 'Desbloquear'}
                                 </button>
                                 <button
                                   onClick={() => setDeletingUser(user)}
-                                  className="p-2 rounded-lg transition-colors text-muted hover:text-red-600 hover:bg-red-500/10"
-                                  title="Excluir Login"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-muted hover:text-red-600 hover:bg-red-500/10"
                                 >
-                                  <Trash2 size={16} />
+                                  <Trash2 size={14} />
+                                  Excluir
                                 </button>
                               </div>
                             </td>
