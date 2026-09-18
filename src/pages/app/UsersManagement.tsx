@@ -160,6 +160,12 @@ const UsersManagement = () => {
   const [resettingPasswordUser, setResettingPasswordUser] = useState<SystemUser | null>(null);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
+  // Ver a lista completa de módulos de um login (17/09/2026) — a tabela só mostra os 3 primeiros
+  // badges por linha (ver MAX_VISIBLE_MODULE_PILLS); clicar no badge "+N" abre isso em vez de só
+  // depender do `title` (hover não existe em touch, e o usuário pediu algo clicável). Somente
+  // leitura — quem quiser editar de fato usa "Editar Módulos" (ação de admin, botão separado).
+  const [viewingModulesUser, setViewingModulesUser] = useState<SystemUser | null>(null);
+
   // Senha temporária devolvida pela criação OU por um reset de senha — só existe nessa única
   // resposta, nunca mais recuperável depois. Fica num banner que só some com ação explícita do
   // admin (nunca no backdrop/Escape), pra garantir que ele realmente copiou/anotou antes de perder
@@ -190,10 +196,11 @@ const UsersManagement = () => {
     if (editingUser) setEditingUser(null);
     if (deletingUser) setDeletingUser(null);
     if (resettingPasswordUser) setResettingPasswordUser(null);
+    if (viewingModulesUser) setViewingModulesUser(null);
   });
 
   useEffect(() => {
-    if (isModalOpen || editingUser || deletingUser || resettingPasswordUser || tempPasswordBanner) {
+    if (isModalOpen || editingUser || deletingUser || resettingPasswordUser || tempPasswordBanner || viewingModulesUser) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -201,7 +208,7 @@ const UsersManagement = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isModalOpen, editingUser, deletingUser, resettingPasswordUser, tempPasswordBanner]);
+  }, [isModalOpen, editingUser, deletingUser, resettingPasswordUser, tempPasswordBanner, viewingModulesUser]);
 
   const employeeById = useMemo(() => {
     const map = new Map<string, EmployeeListItem>();
@@ -576,12 +583,14 @@ const UsersManagement = () => {
                                   </span>
                                 ))}
                                 {user.modules.length > MAX_VISIBLE_MODULE_PILLS && (
-                                  <span
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-muted/20 text-muted border border-border/60"
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingModulesUser(user)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-muted/20 text-muted border border-border/60 hover:bg-muted/30 hover:text-foreground transition-colors cursor-pointer"
                                     title={user.modules.slice(MAX_VISIBLE_MODULE_PILLS).map(moduleLabel).join(', ')}
                                   >
                                     +{user.modules.length - MAX_VISIBLE_MODULE_PILLS}
-                                  </span>
+                                  </button>
                                 )}
                               </div>
                             ) : (
@@ -885,6 +894,65 @@ const UsersManagement = () => {
                   </motion.button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* Ver todos os módulos de um login (17/09/2026) — aberto clicando no badge "+N" da tabela.
+          Só leitura (sem onToggle) — quem quiser editar usa "Editar Módulos", ação separada de admin. */}
+      {viewingModulesUser && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setViewingModulesUser(null)}
+            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
+          />
+          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h2 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
+                    <Shield size={20} className="text-primary"/>
+                    Módulos Autorizados
+                  </h2>
+                  <p className="text-sm text-muted mt-1 break-all">{viewingModulesUser.email}</p>
+                </div>
+                <button
+                  onClick={() => setViewingModulesUser(null)}
+                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors shrink-0"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {viewingModulesUser.modules.map(m => (
+                  <span
+                    key={m}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold bg-accent/10 text-accent border border-accent/20"
+                  >
+                    {moduleLabel(m)}
+                  </span>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setViewingModulesUser(null)}
+                className="w-full mt-6 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
+              >
+                Fechar
+              </button>
             </motion.div>
           </div>
         </AnimatePresence>,
