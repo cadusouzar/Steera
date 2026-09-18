@@ -9,7 +9,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { getCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { CustomFieldDefinition, CustomFieldEntity, CustomFieldType } from '../../lib/api';
-import { TYPE_LABELS } from '../../components/CustomFieldsFormSection';
+import { TYPE_LABELS, renderTypedInput, parseDefaultForDisplay, serializeDefaultValue } from '../../lib/customFieldRendering';
 
 const ENTITY_OPTIONS: { value: CustomFieldEntity; label: string; icon: typeof User }[] = [
   { value: 'client', label: 'Clientes', icon: HeartHandshake },
@@ -48,9 +48,10 @@ interface CreateFormState {
   displayName: string;
   optionsText: string;
   required: boolean;
+  defaultValue: string;
 }
 
-const emptyCreateForm: CreateFormState = { type: null, displayName: '', optionsText: '', required: false };
+const emptyCreateForm: CreateFormState = { type: null, displayName: '', optionsText: '', required: false, defaultValue: '' };
 
 interface EditFormState {
   displayName: string;
@@ -58,6 +59,7 @@ interface EditFormState {
   required: boolean;
   optionsText: string;
   displayOrder: number;
+  defaultValue: string;
 }
 
 type ConfirmAction =
@@ -171,6 +173,7 @@ const CustomFieldsSettings = () => {
         type: createForm.type,
         required: createForm.required,
         ...(hasOptions(createForm.type) ? { configuration: { options: parseOptions(createForm.optionsText) } } : {}),
+        ...(createForm.defaultValue ? { defaultValue: createForm.defaultValue } : {}),
       });
       setDefinitions(prev => [...prev, created]);
       setIsCreateModalOpen(false);
@@ -191,6 +194,7 @@ const CustomFieldsSettings = () => {
       required: field.required,
       optionsText: (field.configuration?.options ?? []).join(', '),
       displayOrder: field.displayOrder,
+      defaultValue: field.defaultValue ?? '',
     });
     setActionError(null);
   };
@@ -216,6 +220,10 @@ const CustomFieldsSettings = () => {
         required: form.required,
         displayOrder: form.displayOrder,
         ...(hasOptions(field.type) ? { configuration: { options: parseOptions(form.optionsText) } } : {}),
+        // Só envia quando preenchido — omitido do body, o backend mantém o defaultValue atual sem
+        // mudança (mesma limitação já aceita hoje pra `description`: não dá pra "limpar" um valor
+        // padrão já configurado só esvaziando o campo, precisa de uma ação dedicada no futuro).
+        ...(form.defaultValue ? { defaultValue: form.defaultValue } : {}),
       });
       setDefinitions(prev => prev.map(d => d.id === updated.id ? updated : d));
       setEditingField(null);
@@ -620,7 +628,7 @@ const CustomFieldsSettings = () => {
                           whileTap={{ scale: 0.97 }}
                           type="button"
                           key={type}
-                          onClick={() => setCreateForm(prev => ({ ...prev, type }))}
+                          onClick={() => setCreateForm(prev => prev.type === type ? prev : { ...prev, type, defaultValue: '' })}
                           className={`flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all duration-200 ${
                             isSelected
                               ? 'border-primary bg-primary/5 shadow-sm'
@@ -670,6 +678,26 @@ const CustomFieldsSettings = () => {
                     />
                   </div>
                 )}
+
+                {createForm.type && (() => {
+                  const type = createForm.type as CustomFieldType;
+                  return (
+                    <div>
+                      <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
+                        Valor Padrão
+                      </label>
+                      {renderTypedInput(
+                        type,
+                        hasOptions(type) ? parseOptions(createForm.optionsText) : undefined,
+                        parseDefaultForDisplay({ type, defaultValue: createForm.defaultValue || null }),
+                        (v) => setCreateForm(prev => ({ ...prev, defaultValue: serializeDefaultValue(type, v) })),
+                      )}
+                      <p className="text-xs text-muted mt-1.5">
+                        Pré-preenche este campo ao criar um novo registro — quem estiver criando ainda pode mudar o valor.
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 <label className="flex items-center gap-2.5 text-sm font-medium text-foreground/90 cursor-pointer select-none">
                   <input
@@ -796,6 +824,21 @@ const CustomFieldsSettings = () => {
                     />
                   </div>
                 )}
+
+                <div>
+                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
+                    Valor Padrão
+                  </label>
+                  {renderTypedInput(
+                    editingField.type,
+                    hasOptions(editingField.type) ? parseOptions(editForm.optionsText) : undefined,
+                    parseDefaultForDisplay({ type: editingField.type, defaultValue: editForm.defaultValue || null }),
+                    (v) => setEditForm(prev => prev && { ...prev, defaultValue: serializeDefaultValue(editingField.type, v) }),
+                  )}
+                  <p className="text-xs text-muted mt-1.5">
+                    Pré-preenche este campo ao criar um novo registro — não afeta registros já existentes.
+                  </p>
+                </div>
 
                 <div className="grid grid-cols-2 gap-5">
                   <div>
