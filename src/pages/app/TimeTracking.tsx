@@ -335,11 +335,16 @@ const TimeTracking = () => {
     startCamera();
   };
 
+  // A localização é sempre buscada de forma otimista, mesmo quando não é exigida (o backend
+  // aproveita lat/lng pra classificar geofencing mesmo sem exigir — ver createPunch no backend),
+  // mas só bloqueia o envio quando `requireLocation` for true — antes disso, `isGettingLocation`
+  // sozinho travava "Registrar" até o GPS responder (ou até os 10s de timeout do
+  // getCurrentPosition esgotarem) mesmo com a exigência desligada, fazendo a marcação parecer
+  // travada/exigindo localização quando na verdade não exigia nada.
   const canSubmitPunch =
     !submittingPunch &&
-    !isGettingLocation &&
     (!status?.requirePhoto || !!capturedPhotoBlob) &&
-    (!status?.requireLocation || !!gpsCoords);
+    (!status?.requireLocation || (!isGettingLocation && !!gpsCoords));
 
   const submitPunch = async () => {
     if (!status?.nextAllowedType || !canSubmitPunch) return;

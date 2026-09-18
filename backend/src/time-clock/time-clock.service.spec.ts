@@ -163,6 +163,25 @@ describe('TimeClockService', () => {
       });
     });
 
+    // Achado ao vivo (18/09/2026): um TimeEvent com serverRecordedAt no FUTURO (criado por uma
+    // correção proativa com requestedTime no futuro — bug corrigido em
+    // TimeAdjustmentsService.assertRequestShapeMatchesType) satisfazia `gte: now - 10s` pra
+    // sempre, travando QUALQUER marcação nova do funcionário indefinidamente. Defesa em
+    // profundidade: a query de duplicidade agora também limita por cima (`lte: now`), então esta
+    // asserção confirma que o bound superior está de fato na query, não só confiando no bound de
+    // baixo.
+    it('bounds the duplicate-check query on both sides (gte AND lte "now") — a future-dated event must never count as "recent"', async () => {
+      settingsService.getEffectiveSettingsForEmployee.mockResolvedValue({ ...baseSettings, requirePhoto: false, requireLocation: false });
+      await service.createPunch(user, { type: 'CLOCK_IN' }, undefined);
+
+      const [[firstCallArgs]] = prisma.timeEvent.findFirst.mock.calls;
+      expect(firstCallArgs.where.serverRecordedAt.gte).toBeInstanceOf(Date);
+      expect(firstCallArgs.where.serverRecordedAt.lte).toBeInstanceOf(Date);
+      expect(firstCallArgs.where.serverRecordedAt.lte.getTime()).toBeGreaterThanOrEqual(
+        firstCallArgs.where.serverRecordedAt.gte.getTime(),
+      );
+    });
+
     // Regressão do achado da revisão final de 14/09/2026: a checagem original era
     // findFirst-então-create sem nenhuma trava — duas requisições quase simultâneas do mesmo
     // funcionário podiam passar as duas pela checagem antes de qualquer uma criar seu evento.
@@ -362,7 +381,7 @@ describe('TimeClockService', () => {
       prisma.timeEvent.findMany.mockResolvedValue([]);
       await service.listOwnPunches(user);
       expect(prisma.timeEvent.findMany).toHaveBeenCalledWith({
-        where: { employeeId: 'employee-1' },
+        where: { employeeId: 'employee-1', voidedAt: null },
         orderBy: { serverRecordedAt: 'desc' },
       });
     });

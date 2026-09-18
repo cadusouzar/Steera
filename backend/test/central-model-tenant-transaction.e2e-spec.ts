@@ -158,4 +158,64 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
       .send({ hasFullPontoAccess: false })
       .expect(400);
   });
+
+  // Achado ao vivo (18/09/2026, "Espelho de Ponto demora ~5s pra carregar"):
+  // TimeAttendanceCalculationService.calculateDailySummary passou a agrupar suas leituras de
+  // tabela de TENANT (TimeEvent/WorkSchedule/VacationSchedule/LeaveSchedule) numa única
+  // `runTenantInteractiveTransaction` por dia — uma primeira versão desse fix também colocou
+  // `Company` (tabela CENTRAL) dentro dessa mesma transação, achando (incorretamente) que o
+  // `SET LOCAL search_path` do setup da transação faria uma query ESTRUTURADA (`tx.company...`)
+  // resolver via o fallback pra `public`. Não resolve: só SQL bruto se beneficia do search_path em
+  // runtime — uma query estruturada do Prisma é sempre qualificada pelo schema FIXO da conexão do
+  // client. `GET /employees/:id/time-summary` quebrava com 500 ("a tabela Company não existe") pra
+  // TODA empresa com schema físico assim que o mês pedido tivesse ao menos 1 dia — nenhum teste
+  // unitário (mockado) pegava isso, só um teste e2e contra Postgres real, por isso aqui (mesmo
+  // arquivo/motivo do teste de troca de senha acima).
+  it('GET /employees/:id/time-summary calcula o mês sem quebrar (Employee+Company central, eventos/escala de tenant, tudo lido corretamente)', async () => {
+    const roleRes = await request(app.getHttpServer())
+      .post('/roles')
+      .set('Authorization', adminToken)
+      .send({ name: 'Cargo Summary', department: 'Depto Summary' })
+      .expect(201);
+    const empRes = await request(app.getHttpServer())
+      .post('/employees')
+      .set('Authorization', adminToken)
+      .send({
+        fullName: 'Funcionário Summary',
+        cpf: '52998224725',
+        roleId: roleRes.body.id,
+        contractType: 'CLT',
+        admissionDate: '2026-01-01',
+        department: 'Depto Summary',
+        baseValue: 3000,
+        paymentDueDay: 5,
+      })
+      .expect(201);
+    const employeeId = empRes.body.id;
+
+    const now = new Date();
+    const past = new Date(now.getTime() - 60_000).toISOString();
+    await request(app.getHttpServer())
+      .post(`/employees/${employeeId}/time-events/correct`)
+      .set('Authorization', adminToken)
+      .send({
+        targetDate: now.toISOString().slice(0, 10),
+        type: 'ADD_MISSING_PUNCH',
+        requestedEventType: 'CLOCK_IN',
+        requestedTime: past,
+        reason: 'teste e2e — entrada',
+      })
+      .expect(201);
+
+    const summaryRes = await request(app.getHttpServer())
+      .get(`/employees/${employeeId}/time-summary?year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`)
+      .set('Authorization', adminToken)
+      .expect(200);
+
+    expect(Array.isArray(summaryRes.body.days)).toBe(true);
+    expect(summaryRes.body.days.length).toBeGreaterThan(0);
+    const today = summaryRes.body.days.find((d: { date: string }) => d.date === now.toISOString().slice(0, 10));
+    expect(today).toBeDefined();
+    expect(today.hasOpenJourney).toBe(true); // CLOCK_IN sem CLOCK_OUT ainda
+  });
 });

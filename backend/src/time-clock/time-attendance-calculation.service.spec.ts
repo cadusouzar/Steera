@@ -3,6 +3,14 @@ import { HolidaysService } from '../holidays/holidays.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
 
+// `calculateDailySummary` passou a rodar dentro de uma única `runTenantInteractiveTransaction`
+// (achado ao vivo 18/09/2026, "Espelho de Ponto demora ~5s") — mesmo padrão de mock já usado em
+// time-clock.service.spec.ts/time-adjustments.service.spec.ts: `tx` dentro do callback real é o
+// MESMO objeto mock `prisma` deste arquivo, então nenhum teste individual precisa mudar.
+jest.mock('../prisma/tenant-rls.extension', () => ({
+  runTenantInteractiveTransaction: jest.fn(),
+}));
+
 const TZ = 'America/Sao_Paulo'; // UTC-3, sem horário de verão
 
 // Helper: monta um TimeEvent mínimo com serverRecordedAt em UTC a partir de um horário LOCAL
@@ -45,6 +53,8 @@ describe('TimeAttendanceCalculationService', () => {
       leaveSchedule: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     holidays = { isHoliday: jest.fn().mockResolvedValue(false) };
+    const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
+    (runTenantInteractiveTransaction as jest.Mock).mockImplementation((_p: unknown, fn: (tx: unknown) => unknown) => fn(prisma));
 
     const module = await Test.createTestingModule({
       providers: [
@@ -73,6 +83,27 @@ describe('TimeAttendanceCalculationService', () => {
     expect(summary.hasOpenJourney).toBe(false);
   });
 
+  // Achado ao vivo (18/09/2026, "Espelho de Ponto demora ~5s pra carregar"): cada leitura de tabela
+  // de TENANT (eventos/escala/férias/afastamento) fora de uma transação explícita pagava sua
+  // PRÓPRIA mini-transação — agrupadas agora numa única `runTenantInteractiveTransaction` por dia.
+  // `employee`/`company` ficam de propósito FORA dela: `Employee` é tenant mas `Company` é CENTRAL,
+  // e uma query ESTRUTURADA (`tx.company...`) pra uma tabela central dentro de uma transação de
+  // tenant falha em runtime ("tabela não existe") — o fallback de schema de uma transação de tenant
+  // só vale pra SQL bruto, nunca pra chamadas tipadas do Prisma (achado ao vivo, corrigindo uma
+  // tentativa anterior deste mesmo fix). `isHoliday()` também fica de propósito FORA (usa o client
+  // central do `HolidaysService`, e `Holiday` tem RLS que depende de `app.current_company_id` — rodar
+  // por baixo do `insideExplicitTx` ambiental pularia esse set_config e esconderia feriados
+  // customizados da empresa).
+  it('batches events/schedule/vacation/leave (tenant tables) into a single transaction per day; employee/company (central) and isHoliday() stay outside it', async () => {
+    const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
+    (runTenantInteractiveTransaction as jest.Mock).mockClear();
+
+    await service.calculateDailySummary('emp-1', MONDAY);
+
+    expect(runTenantInteractiveTransaction).toHaveBeenCalledTimes(1);
+    expect(holidays.isHoliday).toHaveBeenCalledWith(MONDAY);
+  });
+
   it('discounts multiple break intervals from worked time', async () => {
     prisma.timeEvent.findMany.mockResolvedValue([
       localEvent('CLOCK_IN', 2026, 1, 5, 8),
@@ -97,6 +128,53 @@ describe('TimeAttendanceCalculationService', () => {
 
     expect(summary.hasOpenJourney).toBe(true);
     expect(summary.workedMinutes).toBe(0);
+  });
+
+  // Achado ao vivo (18/09/2026): CLOCK_IN 00:30, BREAK_START 01:00, BREAK_END 02:00, sem CLOCK_OUT
+  // ainda — antes deste fix, workedMinutes dava -60 (breakMs de 60min descontado de um workedMs
+  // que nunca chegava a ser somado, já que só era creditado no fechamento por CLOCK_OUT). Só se
+  // aplica a uma jornada aberta que pertence a HOJE — por isso o relógio do teste é congelado.
+  describe('an open journey belonging to today', () => {
+    const REAL_NOW = new Date(Date.UTC(2026, 8, 18, 5, 0)); // 2026-09-18 02:00 local (America/Sao_Paulo, UTC-3)
+    const TODAY = new Date(Date.UTC(2026, 8, 18));
+
+    beforeEach(() => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      jest.setSystemTime(REAL_NOW);
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('never goes negative when a completed break sits inside a journey still open today — nets elapsed time since CLOCK_IN minus the completed break', async () => {
+      prisma.timeEvent.findMany.mockResolvedValue([
+        localEvent('CLOCK_IN', 2026, 9, 18, 0, 30),
+        localEvent('BREAK_START', 2026, 9, 18, 1, 0),
+        localEvent('BREAK_END', 2026, 9, 18, 2, 0),
+      ]);
+
+      const summary = await service.calculateDailySummary('emp-1', TODAY);
+
+      // Decorrido desde o CLOCK_IN (00:30) até "agora" (02:00) = 90min; menos 60min de intervalo
+      // completo (01:00-02:00) = 30min líquidos.
+      expect(summary.workedMinutes).toBe(30);
+      expect(summary.breakMinutes).toBe(60);
+      expect(summary.hasOpenJourney).toBe(true);
+    });
+
+    it('freezes the live count at the break-start instant while a break is still in progress (not still ticking during the break itself)', async () => {
+      prisma.timeEvent.findMany.mockResolvedValue([
+        localEvent('CLOCK_IN', 2026, 9, 18, 0, 30),
+        localEvent('BREAK_START', 2026, 9, 18, 1, 0),
+      ]);
+
+      const summary = await service.calculateDailySummary('emp-1', TODAY);
+
+      // Decorrido desde o CLOCK_IN (00:30) até o INÍCIO do intervalo em andamento (01:00) = 30min
+      // — não continua contando durante o intervalo, mesmo com "agora" (02:00) bem depois.
+      expect(summary.workedMinutes).toBe(30);
+      expect(summary.hasOpenJourney).toBe(true);
+    });
   });
 
   it('sums an EXTRA_IN/EXTRA_OUT pair into extraMinutes, never into workedMinutes', async () => {

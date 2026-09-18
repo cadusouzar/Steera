@@ -47,7 +47,10 @@ export class TimeClockService {
     // jornada que atravessa a meia-noite sem confundir com o dia civil seguinte.
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const events = await client.timeEvent.findMany({
-      where: { employeeId, serverRecordedAt: { gte: since } },
+      // `voidedAt: null` — um evento removido/superado por uma correção aprovada
+      // (TimeAdjustmentsService.approve(), achado ao vivo 18/09/2026) nunca deve continuar
+      // participando da máquina de sequência.
+      where: { employeeId, serverRecordedAt: { gte: since }, voidedAt: null },
       orderBy: { serverRecordedAt: 'asc' },
     });
     return { events, state: computeOpenState(events) };
@@ -57,8 +60,17 @@ export class TimeClockService {
     employeeId: string,
     client: { timeEvent: { findFirst: PrismaService['timeEvent']['findFirst'] } } = this.prisma,
   ) {
+    // `lte: now` é defesa em profundidade, não só a janela `gte` de sempre: um TimeEvent com
+    // `serverRecordedAt` no futuro (hoje bloqueado na origem por
+    // TimeAdjustmentsService.assertRequestShapeMatchesType, achado ao vivo 18/09/2026) satisfaria
+    // `gte: now - 10s` pra sempre, travando qualquer marcação nova do funcionário até o relógio
+    // real alcançar aquele horário. Sem custo prático: um evento nunca deveria ter
+    // `serverRecordedAt` no futuro de qualquer forma.
+    const now = new Date();
     return client.timeEvent.findFirst({
-      where: { employeeId, serverRecordedAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) } },
+      // `voidedAt: null` — um evento removido não deve mais bloquear uma marcação nova por
+      // duplicidade.
+      where: { employeeId, serverRecordedAt: { gte: new Date(now.getTime() - DUPLICATE_WINDOW_MS), lte: now }, voidedAt: null },
       orderBy: { serverRecordedAt: 'desc' },
     });
   }
@@ -224,6 +236,9 @@ export class TimeClockService {
     const events = await this.prisma.timeEvent.findMany({
       where: {
         employeeId: employee.id,
+        // Um evento removido (REMOVE_PUNCH aprovado) não aparece mais no próprio histórico do
+        // funcionário — "removido" significa removido da visão de todo mundo, não só da apuração.
+        voidedAt: null,
         ...(from || to
           ? { serverRecordedAt: { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined } }
           : {}),
@@ -245,6 +260,7 @@ export class TimeClockService {
     const where: Prisma.TimeEventWhereInput = {
       companyId: user.companyId,
       employeeId,
+      voidedAt: null,
       ...(query.from || query.to
         ? { serverRecordedAt: { gte: query.from ? new Date(query.from) : undefined, lte: query.to ? new Date(query.to) : undefined } }
         : {}),
@@ -269,6 +285,7 @@ export class TimeClockService {
     const where: Prisma.TimeEventWhereInput = {
       companyId: user.companyId,
       validationStatus: 'PENDING_REVIEW',
+      voidedAt: null,
       ...(manageable === 'ALL' ? {} : { employeeId: { in: manageable } }),
     };
     const events = await this.prisma.timeEvent.findMany({ where, orderBy: { serverRecordedAt: 'desc' } });

@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { FileAssetPurpose, Prisma, TimeAdjustmentRequest } from '@prisma/client';
+import { FileAssetPurpose, Prisma, TimeAdjustmentRequest, TimeEvent } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { buildFileDownloadPath } from '../files/download-token.util';
 import { FilesService } from '../files/files.service';
@@ -51,6 +51,18 @@ export class TimeAdjustmentsService {
     }
     if ((dto.type === 'CORRECT_TIME' || dto.type === 'REMOVE_PUNCH') && !dto.relatedEventId) {
       throw new BadRequestException('relatedEventId é obrigatório para CORRECT_TIME/REMOVE_PUNCH');
+    }
+    // `requestedTime` vira `TimeEvent.serverRecordedAt` direto em approve() — um valor no futuro
+    // quebra o invariante de "hora sempre server-authoritative" (nunca deveria representar algo
+    // que ainda não aconteceu) e, na prática, trava QUALQUER marcação nova do funcionário pra
+    // sempre (até o relógio real alcançar aquele horário): `TimeClockService.findRecentPunch`
+    // considera "recente" (bloqueado pelo aviso de duplicidade) qualquer evento com
+    // `serverRecordedAt >= now - 10s`, e um evento no futuro satisfaz essa condição
+    // indefinidamente. Achado ao vivo (18/09/2026): uma correção proativa com horário no futuro
+    // deixou um funcionário incapaz de bater qualquer ponto por horas, mostrando sempre "Aguarde
+    // alguns segundos antes de registrar outra marcação" mesmo na primeira tentativa.
+    if (dto.requestedTime && new Date(dto.requestedTime).getTime() > Date.now()) {
+      throw new BadRequestException('Não é possível registrar uma marcação com data/hora no futuro');
     }
   }
 
@@ -135,22 +147,50 @@ export class TimeAdjustmentsService {
     }
 
     let originalValue: Prisma.InputJsonValue | typeof Prisma.JsonNull = Prisma.JsonNull;
+    let originalEvent: TimeEvent | null = null;
     if (request.relatedEventId) {
-      const original = await this.prisma.timeEvent.findUnique({ where: { id: request.relatedEventId } });
-      originalValue = original ? { type: original.type, serverRecordedAt: original.serverRecordedAt.toISOString() } : Prisma.JsonNull;
+      originalEvent = await this.prisma.timeEvent.findUnique({ where: { id: request.relatedEventId } });
+      originalValue = originalEvent ? { type: originalEvent.type, serverRecordedAt: originalEvent.serverRecordedAt.toISOString() } : Prisma.JsonNull;
     }
 
     return runTenantInteractiveTransaction(this.prisma, async (tx) => {
-      const correctedEvent = await tx.timeEvent.create({
-        data: {
-          companyId: request.companyId,
-          employeeId: request.employeeId,
-          type: request.requestedEventType ?? 'CLOCK_IN',
-          source: 'ADMIN_MANUAL',
-          serverRecordedAt: request.requestedTime ?? new Date(),
-          validationStatus: 'CORRECTED',
-        },
-      });
+      // CORRECT_TIME e REMOVE_PUNCH sempre têm relatedEventId (exigido por
+      // assertRequestShapeMatchesType) — o evento ORIGINAL precisa sair de qualquer cálculo/
+      // sequência a partir de agora, nunca ficar "fantasma" ainda contando ao lado do novo. Achado
+      // ao vivo (18/09/2026): antes deste fix, approve() nunca checava `request.type` — toda
+      // aprovação (inclusive REMOVE_PUNCH e CORRECT_TIME) caía direto no mesmo caminho de "criar
+      // um TimeEvent novo", deixando o evento original inteiramente intacto e ainda contando ao
+      // lado do novo. REMOVE_PUNCH criava um evento "fantasma" extra com a hora ATUAL (o sintoma
+      // reportado: "adiciona uma marcação de ponto com a hora atual" em vez de remover);
+      // CORRECT_TIME criava um SEGUNDO evento com o horário corrigido sem nunca aposentar o
+      // primeiro — dois eventos abertos/duplicados na sequência, poluindo a apuração do dia
+      // exatamente como o `voidedAt` deste campo agora evita.
+      let correctedEvent: TimeEvent;
+      if (request.type === 'REMOVE_PUNCH') {
+        // Nada substitui o evento removido — o próprio original, agora com voidedAt preenchido, é
+        // o "evento corrigido" desta correção (nunca cria um evento novo pra uma remoção).
+        correctedEvent = await tx.timeEvent.update({
+          where: { id: request.relatedEventId! },
+          data: { voidedAt: new Date() },
+        });
+      } else {
+        if (request.type === 'CORRECT_TIME' && request.relatedEventId) {
+          await tx.timeEvent.update({ where: { id: request.relatedEventId }, data: { voidedAt: new Date() } });
+        }
+        correctedEvent = await tx.timeEvent.create({
+          data: {
+            companyId: request.companyId,
+            employeeId: request.employeeId,
+            // Fallback pro tipo do evento ORIGINAL antes de cair em 'CLOCK_IN' — corrigir o
+            // horário de uma BREAK_START, por exemplo, nunca deveria criar um CLOCK_IN por engano
+            // só porque requestedEventType não foi enviado.
+            type: request.requestedEventType ?? originalEvent?.type ?? 'CLOCK_IN',
+            source: 'ADMIN_MANUAL',
+            serverRecordedAt: request.requestedTime ?? new Date(),
+            validationStatus: 'CORRECTED',
+          },
+        });
+      }
       let correction;
       try {
         correction = await tx.timeCorrection.create({
@@ -160,7 +200,10 @@ export class TimeAdjustmentsService {
             originalEventId: request.relatedEventId,
             originalValue,
             correctedEventId: correctedEvent.id,
-            correctedValue: { type: correctedEvent.type, serverRecordedAt: correctedEvent.serverRecordedAt.toISOString() },
+            correctedValue:
+              request.type === 'REMOVE_PUNCH'
+                ? { voided: true, type: correctedEvent.type, serverRecordedAt: correctedEvent.serverRecordedAt.toISOString() }
+                : { type: correctedEvent.type, serverRecordedAt: correctedEvent.serverRecordedAt.toISOString() },
             requestedByEmployeeId: request.employeeId,
             reviewedByUserId: user.userId,
             reason: reviewNote ?? request.reason,

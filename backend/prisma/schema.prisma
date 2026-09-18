@@ -495,6 +495,12 @@ model TimeEvent {
   validationStatus TimeEventValidationStatus @default(VALID)
   notes            String?
   metadata         Json? // ex.: { isMobileUserAgent: true } — nunca dado sensível
+  // Único campo que TimeEvent já permite mutar depois de criado — preenchido só quando uma
+  // TimeAdjustmentRequest do tipo REMOVE_PUNCH é aprovada (TimeAdjustmentsService.approve()).
+  // Tipo/horário/foto/localização/tudo o mais permanece imutável pra sempre; isto é um carimbo de
+  // "não conta mais", nunca um apagamento — sequência de ponto, apuração e listagens filtram por
+  // `voidedAt: null`. Ver DECISOES-TECNICAS no vault pro achado que motivou este campo (18/09/2026).
+  voidedAt         DateTime?
   createdAt        DateTime                  @default(now())
   updatedAt        DateTime                  @updatedAt
 

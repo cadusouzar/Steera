@@ -111,6 +111,26 @@ describe('TimeAdjustmentsService', () => {
       timeManagementAuth.resolveOwnEmployee.mockRejectedValue(new ForbiddenException('sem vínculo'));
       await expect(service.create(employeeUser, baseDto)).rejects.toBeInstanceOf(ForbiddenException);
     });
+
+    // Achado ao vivo (18/09/2026): requestedTime vira TimeEvent.serverRecordedAt direto em
+    // approve() — um valor no futuro travava QUALQUER marcação nova do funcionário pra sempre,
+    // porque TimeClockService.findRecentPunch considerava esse evento "recente" indefinidamente
+    // (nunca fica velho o suficiente pra sair da janela de duplicidade).
+    it('rejects a requestedTime in the future, before ever touching the database', async () => {
+      const future = new Date(Date.now() + 60_000).toISOString();
+      await expect(
+        service.create(employeeUser, { ...baseDto, type: 'ADD_MISSING_PUNCH', requestedEventType: 'CLOCK_IN', requestedTime: future, relatedEventId: undefined }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.timeAdjustmentRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts a requestedTime in the past (the normal case)', async () => {
+      const past = new Date(Date.now() - 60_000).toISOString();
+      prisma.timeAdjustmentRequest.create.mockResolvedValue({ id: 'req-1' });
+      await expect(
+        service.create(employeeUser, { ...baseDto, type: 'ADD_MISSING_PUNCH', requestedEventType: 'CLOCK_IN', requestedTime: past, relatedEventId: undefined }),
+      ).resolves.toEqual({ id: 'req-1', downloadUrl: null });
+    });
   });
 
   describe('cancel', () => {
@@ -226,6 +246,88 @@ describe('TimeAdjustmentsService', () => {
         data: expect.objectContaining({ originalEventId: null }),
       });
     });
+
+    // Achado ao vivo (18/09/2026): approve() nunca checava request.type — toda aprovação
+    // (inclusive REMOVE_PUNCH) caía no mesmo caminho de "criar um TimeEvent novo", então remover
+    // uma marcação na verdade ADICIONAVA uma marcação fantasma com a hora atual. O sintoma exato
+    // reportado pelo usuário.
+    it('REMOVE_PUNCH never creates a new TimeEvent — voids the original one instead (no phantom "now" punch)', async () => {
+      const removeRequest = { ...pendingRequest, type: 'REMOVE_PUNCH', requestedEventType: undefined, requestedTime: undefined };
+      prisma.timeAdjustmentRequest.findFirst.mockResolvedValue(removeRequest);
+      prisma.timeEvent.findUnique.mockResolvedValue({ id: 'event-1', type: 'BREAK_START', serverRecordedAt: new Date('2026-09-14T10:00:00Z') });
+      const voided = { id: 'event-1', type: 'BREAK_START', serverRecordedAt: new Date('2026-09-14T10:00:00Z'), voidedAt: new Date('2026-09-18T00:00:00Z') };
+      const tx = {
+        timeEvent: { create: jest.fn(), update: jest.fn().mockResolvedValue(voided) },
+        timeCorrection: { create: jest.fn().mockResolvedValue({ id: 'correction-1' }) },
+        timeAdjustmentRequest: { update: jest.fn().mockResolvedValue({ id: 'req-1', status: 'APPROVED' }) },
+      };
+      const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
+      (runTenantInteractiveTransaction as jest.Mock).mockImplementationOnce((_p: unknown, fn: (tx: unknown) => unknown) => fn(tx));
+
+      await service.approve(managerUser, 'req-1', 'marcação duplicada, removendo');
+
+      expect(tx.timeEvent.create).not.toHaveBeenCalled();
+      expect(tx.timeEvent.update).toHaveBeenCalledWith({
+        where: { id: 'event-1' },
+        data: { voidedAt: expect.any(Date) },
+      });
+      expect(tx.timeCorrection.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          originalEventId: 'event-1',
+          correctedEventId: 'event-1', // aponta pro MESMO evento — nunca um novo
+          correctedValue: expect.objectContaining({ voided: true }),
+        }),
+      });
+    });
+
+    // Achado na mesma investigação: CORRECT_TIME tinha o bug irmão — criava um SEGUNDO evento com
+    // o horário corrigido, mas deixava o original (com o horário errado) intacto e ainda contando,
+    // corrompendo a sequência (dois eventos abertos "ao mesmo tempo") e a apuração do dia.
+    it('CORRECT_TIME voids the original event AND creates the corrected one — never both left live', async () => {
+      const correctRequest = { ...pendingRequest, type: 'CORRECT_TIME' };
+      prisma.timeAdjustmentRequest.findFirst.mockResolvedValue(correctRequest);
+      prisma.timeEvent.findUnique.mockResolvedValue({ id: 'event-1', type: 'CLOCK_IN', serverRecordedAt: new Date('2026-09-14T08:00:00Z') });
+      const tx = {
+        timeEvent: {
+          create: jest.fn().mockResolvedValue({ id: 'event-new', type: 'CLOCK_IN', serverRecordedAt: correctRequest.requestedTime }),
+          update: jest.fn().mockResolvedValue({ id: 'event-1', voidedAt: new Date() }),
+        },
+        timeCorrection: { create: jest.fn().mockResolvedValue({ id: 'correction-1' }) },
+        timeAdjustmentRequest: { update: jest.fn().mockResolvedValue({ id: 'req-1', status: 'APPROVED' }) },
+      };
+      const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
+      (runTenantInteractiveTransaction as jest.Mock).mockImplementationOnce((_p: unknown, fn: (tx: unknown) => unknown) => fn(tx));
+
+      await service.approve(managerUser, 'req-1', 'ok');
+
+      expect(tx.timeEvent.update).toHaveBeenCalledWith({ where: { id: 'event-1' }, data: { voidedAt: expect.any(Date) } });
+      expect(tx.timeEvent.create).toHaveBeenCalledTimes(1);
+      expect(tx.timeCorrection.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ originalEventId: 'event-1', correctedEventId: 'event-new' }),
+      });
+    });
+
+    it('CORRECT_TIME falls back to the ORIGINAL event\'s type when requestedEventType is not provided — never silently defaults to CLOCK_IN', async () => {
+      const correctRequest = { ...pendingRequest, type: 'CORRECT_TIME', requestedEventType: undefined };
+      prisma.timeAdjustmentRequest.findFirst.mockResolvedValue(correctRequest);
+      prisma.timeEvent.findUnique.mockResolvedValue({ id: 'event-1', type: 'BREAK_START', serverRecordedAt: new Date('2026-09-14T08:00:00Z') });
+      const tx = {
+        timeEvent: {
+          create: jest.fn().mockResolvedValue({ id: 'event-new', type: 'BREAK_START', serverRecordedAt: correctRequest.requestedTime }),
+          update: jest.fn().mockResolvedValue({ id: 'event-1', voidedAt: new Date() }),
+        },
+        timeCorrection: { create: jest.fn().mockResolvedValue({ id: 'correction-1' }) },
+        timeAdjustmentRequest: { update: jest.fn().mockResolvedValue({}) },
+      };
+      const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
+      (runTenantInteractiveTransaction as jest.Mock).mockImplementationOnce((_p: unknown, fn: (tx: unknown) => unknown) => fn(tx));
+
+      await service.approve(managerUser, 'req-1', undefined);
+
+      expect(tx.timeEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'BREAK_START' }),
+      });
+    });
   });
 
   describe('reject', () => {
@@ -284,6 +386,16 @@ describe('TimeAdjustmentsService', () => {
       await expect(
         service.proactiveCorrect(managerUser, 'employee-2', { targetDate: '2026-09-14', type: 'CORRECT_TIME', relatedEventId: 'event-1', reason: 'x' } as any),
       ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.timeAdjustmentRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a future requestedTime even when the caller can manage the employee (same bug as create(), same guard)', async () => {
+      const future = new Date(Date.now() + 60_000).toISOString();
+      await expect(
+        service.proactiveCorrect(managerUser, 'employee-2', {
+          targetDate: '2026-09-14', type: 'CORRECT_TIME', relatedEventId: 'event-1', requestedEventType: 'CLOCK_IN', requestedTime: future, reason: 'x',
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.timeAdjustmentRequest.create).not.toHaveBeenCalled();
     });
   });

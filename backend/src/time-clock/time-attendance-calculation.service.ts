@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { TimeEvent } from '@prisma/client';
+import { Prisma, TimeEvent } from '@prisma/client';
 import { localMidnightUtc } from '../common/date.util';
 import { HolidaysService } from '../holidays/holidays.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 
 export interface DailySummary {
   date: string;
@@ -83,8 +84,31 @@ export class TimeAttendanceCalculationService {
     // normalmente no dia seguinte (esse caso já foi corretamente pareado e creditado acima).
     const hasOpenJourney = openClockIn !== null && opensThisDay(openClockIn);
 
+    // Achado ao vivo (18/09/2026): uma jornada aberta HOJE com um intervalo já completo (ex.:
+    // entrada 00:30, saída pro almoço 01:00, retorno 02:00, sem saída final ainda) mostrava
+    // `workedMinutes` NEGATIVO — `breakMs` já tinha sido descontado de um `workedMs` que
+    // permanecia zerado (só é somado quando o CLOCK_OUT fecha o par, o que nunca aconteceu). Pra
+    // uma jornada aberta que pertence a HOJE (a única situação em que "tempo decorrido até agora"
+    // faz sentido — um dia PASSADO com jornada esquecida aberta não deve inflar
+    // retroativamente com horas do "agora"), credita o tempo decorrido desde o CLOCK_IN até
+    // agora (ou até o início do intervalo em andamento, se o funcionário estiver NO intervalo
+    // agora — nesse caso ele não está trabalhando neste exato momento, então o relógio não
+    // deve continuar contando).
+    if (hasOpenJourney) {
+      const now = new Date();
+      if (now >= windowStart && now < windowEnd) {
+        const creditUntil = openBreakStart ? openBreakStart.serverRecordedAt : now;
+        if (creditUntil.getTime() > openClockIn!.serverRecordedAt.getTime()) {
+          workedMs += creditUntil.getTime() - openClockIn!.serverRecordedAt.getTime();
+        }
+      }
+    }
+
     return {
-      workedMinutes: Math.round((workedMs - breakMs) / 60000),
+      // Nunca negativo: mesmo fora do caso acima (ex.: uma jornada aberta num dia PASSADO, sem
+      // nenhum tempo decorrido creditado), um intervalo completo dentro de um CLOCK_IN nunca
+      // fechado não pode deixar o total líquido abaixo de zero.
+      workedMinutes: Math.max(0, Math.round((workedMs - breakMs) / 60000)),
       breakMinutes: Math.round(breakMs / 60000),
       extraMinutes: Math.round(extraMs / 60000),
       hasOpenJourney,
@@ -104,20 +128,24 @@ export class TimeAttendanceCalculationService {
   // EMPRESA em especial filtra só por `employeeId: null, managerId: null`, ou seja, o padrão de
   // QUALQUER empresa casaria o `where` se o contexto de tenant do RLS algum dia faltasse — é
   // exatamente a classe de consulta sem filtro de empresa que motivou o backstop de RLS.
-  private async getScheduleForDate(employeeId: string, date: Date, companyId: string | undefined) {
+  // `client` — `this.prisma` (padrão, fora de transação) ou o `tx` de uma transação já aberta
+  // (ver `calculateDailySummary`, que passa o seu). Nunca hardcoded pra `this.prisma`: rodar essas
+  // 1-3 queries FORA da transação do chamador anularia o ganho de agrupar tudo numa única
+  // transação por dia (achado ao vivo 18/09/2026, "Espelho de Ponto demora ~5s").
+  private async getScheduleForDate(employeeId: string, date: Date, companyId: string | undefined, client: Prisma.TransactionClient | PrismaService) {
     const localDayOfWeek = date.getUTCDay(); // `date` já é um "dia calendário" (UTC-midnight-encoded) — getUTCDay() dá o dia da semana pretendido, sem depender do fuso da empresa.
     const companyScope = companyId ? { companyId } : {};
 
-    const individualCandidates = await this.prisma.workSchedule.findMany({
+    const individualCandidates = await client.workSchedule.findMany({
       where: { ...companyScope, employeeId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
       orderBy: { validFrom: 'desc' },
     });
     const individual = individualCandidates.find((s) => s.weekDays.includes(localDayOfWeek));
     if (individual) return individual;
 
-    const employee = await this.prisma.employee.findUnique({ where: { id: employeeId }, select: { managerId: true } });
+    const employee = await client.employee.findUnique({ where: { id: employeeId }, select: { managerId: true } });
     if (employee?.managerId) {
-      const teamCandidates = await this.prisma.workSchedule.findMany({
+      const teamCandidates = await client.workSchedule.findMany({
         where: { ...companyScope, managerId: employee.managerId, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
         orderBy: { validFrom: 'desc' },
       });
@@ -125,7 +153,7 @@ export class TimeAttendanceCalculationService {
       if (teamDefault) return teamDefault;
     }
 
-    const companyCandidates = await this.prisma.workSchedule.findMany({
+    const companyCandidates = await client.workSchedule.findMany({
       where: { ...companyScope, employeeId: null, managerId: null, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] },
       orderBy: { validFrom: 'desc' },
     });
@@ -133,8 +161,31 @@ export class TimeAttendanceCalculationService {
   }
 
   async calculateDailySummary(employeeId: string, date: Date): Promise<DailySummary> {
+    // Achado ao vivo (18/09/2026, "Espelho de Ponto demora ~5s pra carregar"): cada uma das 6-7
+    // leituras abaixo (employee/company/eventos/escala/férias/afastamento), fora de uma transação
+    // explícita, pagava sua PRÓPRIA mini-transação (BEGIN + set_config + query + COMMIT) via
+    // `tenantRlsExtension` — várias vezes o custo real de uma única query. Agrupar tudo numa única
+    // `runTenantInteractiveTransaction` paga esse custo de setup UMA vez por dia (multiplicado por
+    // até 30 dias em `calculateMonthlySummary`), não uma vez por query.
+    //
+    // `isHoliday()` fica de propósito FORA desta transação: usa o client CENTRAL do próprio
+    // `HolidaysService` (nunca o `tx` daqui), e `Holiday` tem RLS (`FORCE ROW LEVEL SECURITY`)
+    // cuja policy depende de `app.current_company_id` estar setado pra enxergar um feriado
+    // CUSTOMIZADO da empresa (`companyId IS NULL OR companyId = current_setting(...)`) — rodar essa
+    // chamada por baixo do `insideExplicitTx` ambiental desta transação faria a extensão pular o
+    // próprio `set_config` de `HolidaysService` (achando que já está "dentro" de uma transação
+    // gerenciada), fazendo QUALQUER feriado customizado da empresa silenciosamente sumir da
+    // apuração (RLS filtraria a linha por baixo do WHERE, mesmo com o companyId certo nele).
+    const isHolidayPromise = this.holidays.isHoliday(date);
+
     // `Employee` não tem relação `company` declarada no schema (só o escalar `companyId`) — busca
-    // em duas etapas.
+    // em duas etapas, e as duas ficam FORA da transação de tenant abaixo de propósito: `Employee` é
+    // tabela de tenant mas `Company` é CENTRAL, e as duas não podem ser lidas com uma query
+    // ESTRUTURADA dentro da MESMA transação de tenant — `tx.company.findUnique()` falha em runtime
+    // com "a tabela não existe" (achado ao vivo, corrigindo uma suposição errada deste mesmo fix: o
+    // `SET LOCAL search_path TO "tenant_x", public` do setup da transação só beneficia SQL BRUTO;
+    // uma query estruturada do Prisma é sempre qualificada pelo schema fixo da conexão do client,
+    // nunca pelo search_path em runtime, então o fallback pra `public` nunca entra em jogo aqui).
     const employee = await this.prisma.employee.findUnique({ where: { id: employeeId }, select: { companyId: true } });
     const company = employee ? await this.prisma.company.findUnique({ where: { id: employee.companyId }, select: { timezone: true } }) : null;
     const timezone = company?.timezone ?? 'America/Sao_Paulo';
@@ -146,21 +197,45 @@ export class TimeAttendanceCalculationService {
     // crédito de cada par continua decidido por windowStart/windowEnd em pairEvents.
     const fetchEnd = new Date(windowStart.getTime() + CLOSING_EVENT_LOOKAHEAD_MS);
 
-    const [fetchedEvents, schedule, isHoliday, vacation, leave] = await Promise.all([
-      this.prisma.timeEvent.findMany({
-        where: { employeeId, serverRecordedAt: { gte: windowStart, lt: fetchEnd } },
-        orderBy: { serverRecordedAt: 'asc' },
-      }),
-      this.getScheduleForDate(employeeId, date, employee?.companyId),
-      this.holidays.isHoliday(date),
-      this.prisma.vacationSchedule.findFirst({
-        where: { employeeId, startDate: { lte: date }, endDate: { gte: date }, status: { not: 'CANCELLED' } },
-      }),
-      this.prisma.leaveSchedule.findFirst({
-        where: { employeeId, startDate: { lte: date }, endDate: { gte: date }, status: { not: 'CANCELLED' } },
-      }),
-    ]);
+    // Achado ao vivo (18/09/2026, "Espelho de Ponto demora ~5s pra carregar"): cada uma das leituras
+    // abaixo (eventos/escala/férias/afastamento — todas tabelas de TENANT), fora de uma transação
+    // explícita, pagava sua PRÓPRIA mini-transação (BEGIN + set_config + query + COMMIT) via
+    // `tenantRlsExtension` — várias vezes o custo real de uma única query. Agrupar as quatro numa
+    // única `runTenantInteractiveTransaction` paga esse custo de setup UMA vez por dia (multiplicado
+    // por até 30 dias em `calculateMonthlySummary`), não uma vez por query.
+    const { fetchedEvents, schedule, vacation, leave } = await runTenantInteractiveTransaction(this.prisma, async (tx) => {
+      const [events, sched, vac, lea] = await Promise.all([
+        tx.timeEvent.findMany({
+          // `voidedAt: null` — um evento removido/superado por uma correção aprovada nunca deve
+          // contar na apuração do dia (achado ao vivo 18/09/2026: antes deste campo existir,
+          // CORRECT_TIME/REMOVE_PUNCH deixavam o evento original intacto, contando em dobro ao
+          // lado do evento novo criado pela correção).
+          where: { employeeId, serverRecordedAt: { gte: windowStart, lt: fetchEnd }, voidedAt: null },
+          orderBy: { serverRecordedAt: 'asc' },
+        }),
+        this.getScheduleForDate(employeeId, date, employee?.companyId, tx),
+        tx.vacationSchedule.findFirst({
+          where: { employeeId, startDate: { lte: date }, endDate: { gte: date }, status: { not: 'CANCELLED' } },
+        }),
+        tx.leaveSchedule.findFirst({
+          where: { employeeId, startDate: { lte: date }, endDate: { gte: date }, status: { not: 'CANCELLED' } },
+        }),
+      ]);
 
+      return { fetchedEvents: events, schedule: sched, vacation: vac, leave: lea };
+    });
+
+    // `isHoliday()` fica de propósito FORA de qualquer transação explícita: usa o client CENTRAL do
+    // próprio `HolidaysService` (nunca `tx`), e `Holiday` tem RLS (`FORCE ROW LEVEL SECURITY`) cuja
+    // policy depende de `app.current_company_id` estar setado pra enxergar um feriado CUSTOMIZADO
+    // da empresa (`companyId IS NULL OR companyId = current_setting(...)`) — se esta chamada
+    // rodasse por baixo do `insideExplicitTx` ambiental de uma transação já aberta por este método,
+    // a extensão pularia o próprio `set_config` de `HolidaysService` (achando que já está "dentro"
+    // de uma transação gerenciada), fazendo QUALQUER feriado customizado da empresa
+    // silenciosamente sumir da apuração (RLS filtraria a linha por baixo do WHERE, mesmo com o
+    // companyId certo nele) — por isso é disparada ANTES da transação acima (`isHolidayPromise`) e
+    // só aguardada aqui.
+    const isHoliday = await isHolidayPromise;
     const paired = this.pairEvents(fetchedEvents, windowStart, windowEnd);
     const expectedMinutes = schedule && !isHoliday && !vacation && !leave ? schedule.dailyMinutes : 0;
     // `events` exibido pro chamador é só o que de fato pertence a este dia civil (para exibição em
@@ -183,13 +258,21 @@ export class TimeAttendanceCalculationService {
   }
 
   async calculateMonthlySummary(employeeId: string, year: number, month: number): Promise<MonthlySummary> {
+    // Achado ao vivo (18/09/2026, "Espelho de Ponto demora ~5s pra carregar"): cada dia era
+    // calculado em SEQUÊNCIA (um `await` por dia dentro do `for`), cada um fazendo vários
+    // round-trips independentes ao banco (evento/escala/feriado/férias/afastamento) — pra um mês
+    // com 18-30 dias, isso empilha 18-30 cadeias de round-trips uma atrás da outra. Nenhum dia
+    // depende do resultado de outro (cada `calculateDailySummary` só olha pro próprio `date`), então
+    // não há razão pra serializar — `Promise.all` preserva a ordem cronológica do array de datas
+    // independente da ordem em que cada promise resolve.
     const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    const days: DailySummary[] = [];
+    const dates: Date[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(Date.UTC(year, month - 1, d));
       if (date.getTime() > Date.now()) break; // não gera dias futuros
-      days.push(await this.calculateDailySummary(employeeId, date));
+      dates.push(date);
     }
+    const days = await Promise.all(dates.map((date) => this.calculateDailySummary(employeeId, date)));
     const totals = days.reduce<MonthlyTotals>(
       (acc, d) => ({
         workedMinutes: acc.workedMinutes + d.workedMinutes,
