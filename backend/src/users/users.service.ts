@@ -101,13 +101,17 @@ export class UsersService {
         select: SAFE_USER_SELECT,
       });
     } catch (err) {
-      // P2002 = unique constraint violation on User.email. User.email é
-      // único GLOBALMENTE (não só por empresa) — sem este catch, criar um
-      // login com um e-mail já usado por QUALQUER empresa (inclusive uma
-      // completamente diferente) vazava como 500 opaco, e o 500-vs-201
-      // funcionava como um oráculo de existência cross-tenant. Mesmo padrão
-      // exato já usado em AuthService.register() (ver esse arquivo).
+      // P2002 = unique constraint violation — User tem DUAS colunas únicas, `email` (global, não só
+      // por empresa — sem esse catch, um e-mail já usado por QUALQUER empresa vazava como 500 opaco,
+      // e o 500-vs-201 funcionava como um oráculo de existência cross-tenant) e `employeeId` (a
+      // checagem `existingLogin` acima é um TOCTOU — uma corrida entre duas requisições ainda cai
+      // aqui). `err.meta.target` diz qual coluna colidiu de verdade, pra nunca reportar "e-mail já
+      // cadastrado" quando o problema real foi outro funcionário roubando a corrida do vínculo.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const target = Array.isArray(err.meta?.target) ? (err.meta.target as string[]) : [];
+        if (target.includes('employeeId')) {
+          throw new ConflictException('Este funcionário já está vinculado a outro login');
+        }
         throw new ConflictException('Este e-mail já está cadastrado');
       }
       throw err;

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { FilesService } from '../files/files.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -183,6 +184,29 @@ describe('TimeAdjustmentsService', () => {
     it('an already-processed request cannot be reprocessed (approve a second time throws)', async () => {
       prisma.timeAdjustmentRequest.findFirst.mockResolvedValue({ ...pendingRequest, status: 'APPROVED' });
       await expect(service.approve(managerUser, 'req-1', undefined)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('maps a lost race on TimeCorrection.adjustmentRequestId (P2002) to a clean 409 instead of an unhandled 500', async () => {
+      prisma.timeAdjustmentRequest.findFirst.mockResolvedValue(pendingRequest);
+      prisma.timeEvent.findUnique.mockResolvedValue({ id: 'event-1', type: 'CLOCK_IN', serverRecordedAt: new Date('2026-09-14T08:00:00Z') });
+      const tx = {
+        timeEvent: { create: jest.fn().mockResolvedValue({ id: 'event-new', type: 'CLOCK_IN', serverRecordedAt: pendingRequest.requestedTime }) },
+        timeCorrection: {
+          create: jest.fn().mockRejectedValue(
+            new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`adjustmentRequestId`)', {
+              code: 'P2002',
+              clientVersion: '5.22.0',
+              meta: { target: ['adjustmentRequestId'] },
+            }),
+          ),
+        },
+        timeAdjustmentRequest: { update: jest.fn() },
+      };
+      const { runTenantInteractiveTransaction } = jest.requireMock('../prisma/tenant-rls.extension');
+      (runTenantInteractiveTransaction as jest.Mock).mockImplementationOnce((_p: unknown, fn: (tx: unknown) => unknown) => fn(tx));
+
+      await expect(service.approve(managerUser, 'req-1', 'ok')).rejects.toThrow('Esta solicitação já foi processada');
+      expect(tx.timeAdjustmentRequest.update).not.toHaveBeenCalled();
     });
 
     it('preserves originalValue as JsonNull when there is no relatedEventId (a pure ADD_MISSING_PUNCH, nothing to snapshot)', async () => {

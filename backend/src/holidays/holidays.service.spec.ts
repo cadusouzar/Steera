@@ -1,5 +1,6 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { HolidaysService } from './holidays.service';
@@ -69,6 +70,19 @@ describe('HolidaysService', () => {
           name: 'Véspera de Natal (ponto facultativo)',
         },
       });
+    });
+
+    it('maps a duplicate custom holiday for the same date (P2002) to a clean 409 instead of an unhandled 500', async () => {
+      prisma.holiday.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`scope`,`state`,`companyId`,`date`)', {
+          code: 'P2002',
+          clientVersion: '5.22.0',
+          meta: { target: ['scope', 'state', 'companyId', 'date'] },
+        }),
+      );
+      await expect(
+        service.createCustom({ date: '2026-12-24', name: 'Véspera de Natal (ponto facultativo)' }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 

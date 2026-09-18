@@ -333,8 +333,7 @@ describe('AuthService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    // Este é o caso central do Passo 4 do brief: um User que JÁ tem
-    // employeeId vinculado não pode trocar de vínculo por esta rota.
+    // Um User que JÁ tem employeeId vinculado não pode trocar de vínculo por esta rota.
     it('rejects when the calling login already has an employeeId linked (no swapping via this route)', async () => {
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
       prisma.user.findUnique.mockResolvedValue(null); // employee-2 has no login yet
@@ -360,6 +359,23 @@ describe('AuthService', () => {
 
       expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'user-1' }, data: { employeeId: 'employee-2' } });
       expect(profile.employeeId).toBe('employee-2');
+    });
+
+    it('maps a lost race on employeeId (P2002) to a clean 409 instead of an unhandled 500', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.user.findUnique.mockResolvedValue(null); // pre-check passes, then loses the real race
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'user-1', employeeId: null });
+      prisma.user.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`employeeId`)', {
+          code: 'P2002',
+          clientVersion: '5.22.0',
+          meta: { target: ['employeeId'] },
+        }),
+      );
+
+      await expect(
+        service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2'),
+      ).rejects.toThrow('Este funcionário já está vinculado a outro login');
     });
   });
 });

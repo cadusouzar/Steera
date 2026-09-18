@@ -377,7 +377,16 @@ export class AuthService {
       throw new BadRequestException('Este login já está vinculado a um funcionário — não é possível trocar por esta rota');
     }
 
-    await this.prisma.user.update({ where: { id: userId }, data: { employeeId } });
+    try {
+      await this.prisma.user.update({ where: { id: userId }, data: { employeeId } });
+    } catch (err) {
+      // P2002 = corrida real perdida contra o pre-check `existingLogin` acima (dois logins
+      // tentando se vincular ao mesmo funcionário ao mesmo tempo) — sem isso, vazava como 500 cru.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Este funcionário já está vinculado a outro login');
+      }
+      throw err;
+    }
     return this.getProfile(userId);
   }
 }

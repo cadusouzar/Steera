@@ -149,6 +149,26 @@ describe('UsersService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('rejects a race on employeeId with the specific message, not the e-mail one, using err.meta.target', async () => {
+    // O pre-check `existingLogin` já cobre o caso comum — este teste cobre a corrida real (duas
+    // requisições passam o pre-check antes de qualquer uma escrever), disambiguada por
+    // err.meta.target em vez de assumir sempre que um P2002 aqui é sobre e-mail.
+    prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ maxEmployeeLogins: 10 });
+    prisma.user.count.mockResolvedValue(0);
+    prisma.user.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`employeeId`)', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+        meta: { target: ['employeeId'] },
+      }),
+    );
+    await expect(
+      service.create('c1', { email: 'novo@test.com', role: 'EMPLOYEE', employeeId: 'e1', modules: [] } as any),
+    ).rejects.toThrow('Este funcionário já está vinculado a outro login');
+  });
+
   it('creates an ADMIN login without checking the employee-linked plan limit', async () => {
     prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin2@a.com', role: 'ADMIN' });
     const result = await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);

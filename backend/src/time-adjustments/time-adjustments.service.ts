@@ -151,19 +151,31 @@ export class TimeAdjustmentsService {
           validationStatus: 'CORRECTED',
         },
       });
-      const correction = await tx.timeCorrection.create({
-        data: {
-          companyId: request.companyId,
-          adjustmentRequestId: request.id,
-          originalEventId: request.relatedEventId,
-          originalValue,
-          correctedEventId: correctedEvent.id,
-          correctedValue: { type: correctedEvent.type, serverRecordedAt: correctedEvent.serverRecordedAt.toISOString() },
-          requestedByEmployeeId: request.employeeId,
-          reviewedByUserId: user.userId,
-          reason: reviewNote ?? request.reason,
-        },
-      });
+      let correction;
+      try {
+        correction = await tx.timeCorrection.create({
+          data: {
+            companyId: request.companyId,
+            adjustmentRequestId: request.id,
+            originalEventId: request.relatedEventId,
+            originalValue,
+            correctedEventId: correctedEvent.id,
+            correctedValue: { type: correctedEvent.type, serverRecordedAt: correctedEvent.serverRecordedAt.toISOString() },
+            requestedByEmployeeId: request.employeeId,
+            reviewedByUserId: user.userId,
+            reason: reviewNote ?? request.reason,
+          },
+        });
+      } catch (err) {
+        // P2002 = TimeCorrection.adjustmentRequestId @unique — defesa em profundidade contra uma
+        // corrida real (duas aprovações concorrentes da MESMA solicitação passando a checagem de
+        // status PENDING acima antes de qualquer uma escrever); a checagem já cobre o caminho
+        // comum (sequencial), isto cobre só o caso de corrida verdadeira.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          throw new ConflictException('Esta solicitação já foi processada');
+        }
+        throw err;
+      }
       await tx.timeAdjustmentRequest.update({
         where: { id },
         data: { status: 'APPROVED', reviewedByUserId: user.userId, reviewNote, reviewedAt: new Date() },
