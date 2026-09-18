@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Employee, EmployeeStatus, Prisma } from '@prisma/client';
 import { normalizeCpf } from '../common/cpf.util';
 import { parseDateOnly } from '../common/date.util';
+import { normalizePhone } from '../common/phone.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -67,7 +68,7 @@ export class EmployeesService {
           fullName: nativeDto.fullName,
           cpf,
           email: nativeDto.email,
-          phone: nativeDto.phone,
+          phone: nativeDto.phone ? normalizePhone(nativeDto.phone) : nativeDto.phone,
           address: nativeDto.address,
           contractType: nativeDto.contractType,
           admissionDate: parseDateOnly(nativeDto.admissionDate),
@@ -156,6 +157,11 @@ export class EmployeesService {
       if (conflict) throw new ConflictException('Já existe um funcionário com este CPF nesta empresa');
     }
 
+    let phone: string | undefined;
+    if (dto.phone !== undefined) {
+      phone = normalizePhone(dto.phone);
+    }
+
     const { customFields, ...nativeDto } = dto;
 
     return runTenantInteractiveTransaction(this.prisma, async (tx) => {
@@ -164,6 +170,7 @@ export class EmployeesService {
         data: {
           ...nativeDto,
           ...(cpf ? { cpf } : {}),
+          ...(phone !== undefined ? { phone } : {}),
           ...(nativeDto.admissionDate ? { admissionDate: parseDateOnly(nativeDto.admissionDate) } : {}),
         },
         include: { manager: { select: { fullName: true } } },

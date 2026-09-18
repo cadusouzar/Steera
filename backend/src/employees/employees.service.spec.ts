@@ -96,6 +96,35 @@ describe('EmployeesService', () => {
     });
   });
 
+  it('rejects an invalid phone number when creating an employee', async () => {
+    prisma.role.findFirst.mockResolvedValue({ id: 'role-1', companyId: 'company-1', active: true });
+    prisma.employee.findFirst.mockResolvedValue(null);
+    await expect(
+      service.create({
+        fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
+        contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
+        baseValue: 5000, paymentDueDay: 5, phone: '123',
+      }),
+    ).rejects.toThrow('phone deve conter 10 ou 11 dígitos (DDD + número)');
+  });
+
+  it('normalizes a formatted phone number when creating an employee', async () => {
+    prisma.role.findFirst.mockResolvedValue({ id: 'role-1', companyId: 'company-1', active: true });
+    prisma.employee.findFirst.mockResolvedValue(null);
+    prisma.employee.create.mockResolvedValue({ id: 'employee-1' });
+
+    await service.create({
+      fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
+      contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
+      baseValue: 5000, paymentDueDay: 5, phone: '(11) 91234-5678',
+    });
+
+    expect(prisma.employee.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ phone: '11912345678' }),
+      include: { manager: { select: { fullName: true } } },
+    });
+  });
+
   it('throws NotFoundException for an employee belonging to another company', async () => {
     prisma.employee.findFirst.mockResolvedValue(null);
     await expect(service.findOne('employee-other-company')).rejects.toBeInstanceOf(NotFoundException);
