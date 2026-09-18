@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, Search, X, UserPlus, FileQuestion, LayoutDashboard, HeartHandshake, Users,
   TrendingUp, Package, BarChart3, Loader2, KeyRound, Copy, Check, ShieldOff, ShieldCheck,
-  Pencil, Trash2, AlertTriangle, Clock,
+  Pencil, Trash2, AlertTriangle, Clock, ChevronDown,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
@@ -166,6 +166,47 @@ const UsersManagement = () => {
   // leitura — quem quiser editar de fato usa "Editar Módulos" (ação de admin, botão separado).
   const [viewingModulesUser, setViewingModulesUser] = useState<SystemUser | null>(null);
 
+  // Menu de ações por linha (17/09/2026) — antes eram 4-5 botões inline (Editar/Senha/Bloquear/
+  // Excluir + o link de acesso ao Ponto na coluna de Login), que com texto visível em cada um
+  // (pedido do usuário: "precisava que fosse algo escrito e não apenas ícones") ficaram largos e
+  // desalinhados entre si ("parecendo uma pirâmide"). Um único botão "Ações" por linha, abrindo um
+  // menu com cada ação por extenso, resolve os dois problemas de uma vez — inclusive o toggle de
+  // acesso total ao Ponto, que o usuário pediu pra mover pra cá em vez de ficar solto na coluna de
+  // Login. Renderizado via portal (posição calculada a partir do botão que abriu) pra nunca ser
+  // cortado pelo `overflow-hidden` do painel da tabela.
+  const [openActionsMenuUserId, setOpenActionsMenuUserId] = useState<string | null>(null);
+  const [actionsMenuAnchor, setActionsMenuAnchor] = useState<DOMRect | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+
+  const closeActionsMenu = useCallback(() => setOpenActionsMenuUserId(null), []);
+
+  const openActionsMenu = (event: React.MouseEvent<HTMLButtonElement>, userId: string) => {
+    if (openActionsMenuUserId === userId) {
+      closeActionsMenu();
+      return;
+    }
+    setActionsMenuAnchor(event.currentTarget.getBoundingClientRect());
+    setOpenActionsMenuUserId(userId);
+  };
+
+  useEffect(() => {
+    if (!openActionsMenuUserId) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (actionsMenuRef.current?.contains(target)) return;
+      if (target.closest('[data-actions-trigger]')) return;
+      closeActionsMenu();
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('scroll', closeActionsMenu, true);
+    window.addEventListener('resize', closeActionsMenu);
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('scroll', closeActionsMenu, true);
+      window.removeEventListener('resize', closeActionsMenu);
+    };
+  }, [openActionsMenuUserId, closeActionsMenu]);
+
   // Senha temporária devolvida pela criação OU por um reset de senha — só existe nessa única
   // resposta, nunca mais recuperável depois. Fica num banner que só some com ação explícita do
   // admin (nunca no backdrop/Escape), pra garantir que ele realmente copiou/anotou antes de perder
@@ -197,6 +238,7 @@ const UsersManagement = () => {
     if (deletingUser) setDeletingUser(null);
     if (resettingPasswordUser) setResettingPasswordUser(null);
     if (viewingModulesUser) setViewingModulesUser(null);
+    if (openActionsMenuUserId) closeActionsMenu();
   });
 
   useEffect(() => {
@@ -541,28 +583,6 @@ const UsersManagement = () => {
                                 <p className="text-sm text-muted">
                                   {user.role === 'admin' ? 'Administrador' : 'Funcionário'}
                                 </p>
-                                {user.role === 'admin' && (
-                                  <div className="mt-1">
-                                    {myHasFullPontoAccess ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => togglePontoAccess(user)}
-                                        disabled={pontoAccessSaving === user.id}
-                                        className="text-xs font-medium text-primary hover:text-primary/80 disabled:opacity-50 transition-colors"
-                                      >
-                                        {pontoAccessSaving === user.id
-                                          ? 'Salvando...'
-                                          : user.hasFullPontoAccess
-                                            ? 'Acesso total ao Ponto — clique para restringir ao próprio time'
-                                            : 'Restrito ao próprio time no Ponto — clique para dar acesso total'}
-                                      </button>
-                                    ) : (
-                                      <span className="text-xs text-muted">
-                                        {user.hasFullPontoAccess ? 'Acesso total ao Ponto' : 'Restrito ao próprio time no Ponto'}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             </div>
                           </td>
@@ -620,47 +640,19 @@ const UsersManagement = () => {
                           </td>
                           {isAdmin && (
                             <td className="px-8 py-5 text-right">
-                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                                <button
-                                  onClick={() => openEditModal(user)}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-muted hover:text-primary hover:bg-primary/10"
-                                >
-                                  <Pencil size={14} />
-                                  Editar
-                                </button>
-                                <button
-                                  onClick={() => setResettingPasswordUser(user)}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-muted hover:text-primary hover:bg-primary/10"
-                                >
-                                  <KeyRound size={14} />
-                                  Redefinir Senha
-                                </button>
-                                <button
-                                  onClick={() => handleToggleStatus(user)}
-                                  disabled={pendingUserId === user.id}
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
-                                    user.status === 'active'
-                                      ? 'text-muted hover:text-orange-500 hover:bg-orange-500/10'
-                                      : 'text-muted hover:text-green-600 hover:bg-green-500/10'
-                                  }`}
-                                >
-                                  {pendingUserId === user.id ? (
-                                    <Loader2 size={14} className="animate-spin" />
-                                  ) : user.status === 'active' ? (
-                                    <ShieldOff size={14} />
-                                  ) : (
-                                    <ShieldCheck size={14} />
-                                  )}
-                                  {user.status === 'active' ? 'Bloquear' : 'Desbloquear'}
-                                </button>
-                                <button
-                                  onClick={() => setDeletingUser(user)}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-muted hover:text-red-600 hover:bg-red-500/10"
-                                >
-                                  <Trash2 size={14} />
-                                  Excluir
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                data-actions-trigger
+                                onClick={(e) => openActionsMenu(e, user.id)}
+                                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
+                                  openActionsMenuUserId === user.id
+                                    ? 'border-primary/40 bg-primary/10 text-primary'
+                                    : 'border-border text-foreground hover:bg-secondary'
+                                }`}
+                              >
+                                Ações
+                                <ChevronDown size={14} />
+                              </button>
                             </td>
                           )}
                         </motion.tr>
@@ -688,6 +680,93 @@ const UsersManagement = () => {
           )}
         </div>
       </motion.div>
+
+      {/* Menu de ações por linha (17/09/2026) — ver o comentário perto de openActionsMenuUserId
+          pra o raciocínio completo. Renderizado uma única vez fora da tabela, reposicionado a cada
+          abertura a partir do botão "Ações" clicado. */}
+      {openActionsMenuUserId && actionsMenuAnchor && (() => {
+        const menuUser = users.find(u => u.id === openActionsMenuUserId);
+        if (!menuUser) return null;
+        return createPortal(
+          <div
+            ref={actionsMenuRef}
+            style={{
+              position: 'fixed',
+              top: actionsMenuAnchor.bottom + 6,
+              right: window.innerWidth - actionsMenuAnchor.right,
+            }}
+            className="z-[150] w-64 bg-background border border-border/60 rounded-xl shadow-2xl overflow-hidden py-1.5"
+          >
+            <button
+              type="button"
+              onClick={() => { closeActionsMenu(); openEditModal(menuUser); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
+            >
+              <Pencil size={15} className="text-muted shrink-0" />
+              Editar Módulos
+            </button>
+            <button
+              type="button"
+              onClick={() => { closeActionsMenu(); setResettingPasswordUser(menuUser); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
+            >
+              <KeyRound size={15} className="text-muted shrink-0" />
+              Redefinir Senha
+            </button>
+            <button
+              type="button"
+              onClick={() => { closeActionsMenu(); handleToggleStatus(menuUser); }}
+              disabled={pendingUserId === menuUser.id}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left disabled:opacity-50"
+            >
+              {pendingUserId === menuUser.id ? (
+                <Loader2 size={15} className="animate-spin shrink-0" />
+              ) : menuUser.status === 'active' ? (
+                <ShieldOff size={15} className="text-muted shrink-0" />
+              ) : (
+                <ShieldCheck size={15} className="text-muted shrink-0" />
+              )}
+              {menuUser.status === 'active' ? 'Bloquear Acesso' : 'Desbloquear Acesso'}
+            </button>
+            {menuUser.role === 'admin' && (
+              myHasFullPontoAccess ? (
+                <button
+                  type="button"
+                  onClick={() => { closeActionsMenu(); togglePontoAccess(menuUser); }}
+                  disabled={pontoAccessSaving === menuUser.id}
+                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left disabled:opacity-50"
+                >
+                  {pontoAccessSaving === menuUser.id ? (
+                    <Loader2 size={15} className="animate-spin shrink-0" />
+                  ) : (
+                    <Clock size={15} className="text-muted shrink-0" />
+                  )}
+                  {pontoAccessSaving === menuUser.id
+                    ? 'Salvando...'
+                    : menuUser.hasFullPontoAccess
+                      ? 'Restringir ao Próprio Time (Ponto)'
+                      : 'Dar Acesso Total ao Ponto'}
+                </button>
+              ) : (
+                <div className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-muted">
+                  <Clock size={15} className="shrink-0" />
+                  {menuUser.hasFullPontoAccess ? 'Acesso total ao Ponto' : 'Restrito ao próprio time no Ponto'}
+                </div>
+              )
+            )}
+            <div className="my-1.5 border-t border-border/40" />
+            <button
+              type="button"
+              onClick={() => { closeActionsMenu(); setDeletingUser(menuUser); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors text-left"
+            >
+              <Trash2 size={15} className="shrink-0" />
+              Excluir Login
+            </button>
+          </div>,
+          document.body,
+        );
+      })()}
 
       {/* Modal de Criação */}
       {isModalOpen && createPortal(
