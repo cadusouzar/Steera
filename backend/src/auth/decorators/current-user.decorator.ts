@@ -7,6 +7,7 @@ export interface AuthenticatedUser {
   modules: string[];
   mustChangePassword: boolean;
   hasFullPontoAccess: boolean;
+  permissions: Record<string, string | null>;
 }
 
 export const CurrentUser = createParamDecorator(

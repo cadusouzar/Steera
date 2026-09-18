@@ -9,6 +9,7 @@ export interface JwtPayload {
   modules: string[];
   mustChangePassword: boolean;
   hasFullPontoAccess: boolean;
+  permissions: Record<string, string | null>;
 }
 
 @Injectable()
@@ -32,6 +33,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       modules: payload.modules,
       mustChangePassword: payload.mustChangePassword,
       hasFullPontoAccess: payload.hasFullPontoAccess,
+      permissions: payload.permissions,
     };
   }
 }

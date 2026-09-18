@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Unauthorize
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
+import { AuthorizationService } from '../authorization/authorization.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import * as passwordUtil from './password.util';
@@ -10,6 +11,7 @@ describe('AuthService', () => {
   let service: AuthService;
   let prisma: any;
   let jwtService: any;
+  let authorization: any;
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
 
   beforeEach(async () => {
@@ -35,11 +37,19 @@ describe('AuthService', () => {
       company: { create: jest.fn() },
       employee: { findFirst: jest.fn() },
     };
+    authorization = { getEffectivePermissions: jest.fn().mockResolvedValue({}) };
     const module = await Test.createTestingModule({
-      providers: [AuthService, { provide: PrismaService, useValue: prisma }, { provide: JwtService, useValue: { sign: jest.fn(() => 'signed.jwt.token') } }],
+      providers: [
+        AuthService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: JwtService, useValue: { sign: jest.fn(() => 'signed.jwt.token') } },
+        { provide: AuthorizationService, useValue: authorization },
+      ],
     }).compile();
     service = module.get(AuthService);
     jwtService = module.get(JwtService);
+    // jest.clearAllMocks() só zera calls/results, não a implementação (mockResolvedValue) —
+    // mesmo comportamento do qual jwtService.sign acima já dependia antes desta task.
     jest.clearAllMocks();
   });
 

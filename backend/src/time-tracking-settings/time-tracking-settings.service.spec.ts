@@ -23,6 +23,7 @@ describe('TimeTrackingSettingsService', () => {
     modules: [],
     mustChangePassword: false,
     hasFullPontoAccess: true,
+    permissions: {},
   };
 
   beforeEach(async () => {
@@ -102,13 +103,13 @@ describe('TimeTrackingSettingsService', () => {
 
   describe('update — authorization by tier', () => {
     it('rejects editing the company default without hasFullPontoAccess', async () => {
-      const limitedAdmin = { userId: 'u1', companyId: 'company-1', role: 'ADMIN' as const, modules: [], mustChangePassword: false, hasFullPontoAccess: false };
+      const limitedAdmin = { userId: 'u1', companyId: 'company-1', role: 'ADMIN' as const, modules: [], mustChangePassword: false, hasFullPontoAccess: false, permissions: {} };
 
       await expect(service.update({ requirePhoto: false }, limitedAdmin)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('allows a manager to edit their OWN team override', async () => {
-      const managerLogin = { userId: 'u2', companyId: 'company-1', role: 'EMPLOYEE' as const, modules: [], mustChangePassword: false, hasFullPontoAccess: true };
+      const managerLogin = { userId: 'u2', companyId: 'company-1', role: 'EMPLOYEE' as const, modules: [], mustChangePassword: false, hasFullPontoAccess: true, permissions: {} };
       prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
       prisma.timeTrackingSettings.findFirst.mockResolvedValue({ id: 'settings-2', companyId: 'company-1', managerId: 'employee-mgr-1' });
       prisma.timeTrackingSettings.update.mockResolvedValue({ id: 'settings-2', requirePhoto: false });
@@ -178,7 +179,7 @@ describe('TimeTrackingSettingsService', () => {
     // Achado C1 (parte 2): a linha nova tem que nascer como CÓPIA do padrão atual da empresa —
     // antes, os 4 campos não tocados voltavam silenciosamente pros defaults do schema.
     it("seeds the new override row from the company's CURRENT values, not from schema defaults", async () => {
-      const managerLogin = { userId: 'u2', companyId: 'company-1', role: 'ADMIN' as const, modules: [], mustChangePassword: false, hasFullPontoAccess: true };
+      const managerLogin = { userId: 'u2', companyId: 'company-1', role: 'ADMIN' as const, modules: [], mustChangePassword: false, hasFullPontoAccess: true, permissions: {} };
       prisma.user.findUnique.mockResolvedValue({ id: 'u2', employeeId: 'employee-mgr-1' });
       prisma.timeTrackingSettings.findFirst
         .mockResolvedValueOnce(companyDefault) // getOrCreateDefault (fonte dos valores-base)

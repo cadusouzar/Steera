@@ -18,13 +18,13 @@ describe('WorkSchedulesService', () => {
   };
 
   const admin: AuthenticatedUser = {
-    userId: 'user-admin', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: true,
+    userId: 'user-admin', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: true, permissions: {},
   };
   const limitedAdmin: AuthenticatedUser = {
-    userId: 'u1', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: false,
+    userId: 'u1', companyId: 'company-1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: false, permissions: {},
   };
   const employeeManagerLogin: AuthenticatedUser = {
-    userId: 'u2', companyId: 'company-1', role: 'EMPLOYEE', modules: [], mustChangePassword: false, hasFullPontoAccess: true,
+    userId: 'u2', companyId: 'company-1', role: 'EMPLOYEE', modules: [], mustChangePassword: false, hasFullPontoAccess: true, permissions: {},
   };
 
   const validDto: CreateWorkScheduleDto = {

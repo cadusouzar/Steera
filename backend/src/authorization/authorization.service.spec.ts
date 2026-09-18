@@ -9,7 +9,7 @@ describe('AuthorizationService', () => {
   let prisma: any;
 
   const employeeLogin: AuthenticatedUser = {
-    userId: 'user-1', companyId: 'company-1', role: 'EMPLOYEE', modules: [], mustChangePassword: false, hasFullPontoAccess: false,
+    userId: 'user-1', companyId: 'company-1', role: 'EMPLOYEE', modules: [], mustChangePassword: false, hasFullPontoAccess: false, permissions: {},
   };
 
   beforeEach(async () => {

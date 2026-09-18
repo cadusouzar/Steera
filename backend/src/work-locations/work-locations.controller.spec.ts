@@ -9,7 +9,7 @@ describe('WorkLocationsController', () => {
   let service: { create: jest.Mock; update: jest.Mock; remove: jest.Mock };
   let timeManagementAuth: { assertHasFullPontoAccess: jest.Mock };
 
-  const fullAccessAdmin: AuthenticatedUser = { userId: 'u1', companyId: 'c1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: true };
+  const fullAccessAdmin: AuthenticatedUser = { userId: 'u1', companyId: 'c1', role: 'ADMIN', modules: [], mustChangePassword: false, hasFullPontoAccess: true, permissions: {} };
   const limitedAdmin: AuthenticatedUser = { ...fullAccessAdmin, hasFullPontoAccess: false };
 
   beforeEach(async () => {

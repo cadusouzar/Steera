@@ -23,6 +23,7 @@ describe('FilesController', () => {
     modules: [],
     mustChangePassword: false,
     hasFullPontoAccess: true,
+    permissions: {},
   };
 
   function fakeResponse() {

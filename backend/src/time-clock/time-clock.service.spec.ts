@@ -25,6 +25,7 @@ const user: AuthenticatedUser = {
   modules: ['RH'],
   mustChangePassword: false,
   hasFullPontoAccess: true,
+  permissions: {},
 };
 
 const employee = { id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' };

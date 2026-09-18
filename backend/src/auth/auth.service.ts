@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AppModule as AppModuleEnum, Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { join } from 'path';
+import { AuthorizationService } from '../authorization/authorization.service';
 import { listMigrationNames } from '../prisma/migration-files.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { getTenantCompanyId, runAsSystem, runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
@@ -41,9 +42,10 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly authorization: AuthorizationService,
   ) {}
 
-  private signAccessToken(user: {
+  private async signAccessToken(user: {
     id: string;
     companyId: string;
     role: string;
@@ -62,6 +64,9 @@ export class AuthService {
         // login()/register()/refresh()/changePassword() de uma vez, já que todos assinam o token
         // por aqui.
         hasFullPontoAccess: effectiveHasFullPontoAccess(user),
+        // Permissões efetivas do perfil atual (Task 5, ver AuthorizationService) — carregadas no
+        // JWT pra PermissionsGuard nunca precisar de uma consulta extra ao banco por requisição.
+        permissions: await this.authorization.getEffectivePermissions(user.id),
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m', algorithm: 'HS256' },
     );
@@ -81,7 +86,7 @@ export class AuthService {
     employeeId: string | null;
     hasFullPontoAccess: boolean;
     company?: { name: string; planTier: string; maxEmployeeLogins: number } | null;
-  }) {
+  }, permissions: Record<string, string | null>) {
     return {
       id: user.id,
       email: user.email,
@@ -90,6 +95,7 @@ export class AuthService {
       mustChangePassword: user.mustChangePassword,
       employeeId: user.employeeId,
       hasFullPontoAccess: effectiveHasFullPontoAccess(user),
+      permissions,
       companyName: user.company?.name ?? null,
       planTier: user.company?.planTier ?? null,
       maxEmployeeLogins: user.company?.maxEmployeeLogins ?? null,
@@ -186,7 +192,7 @@ export class AuthService {
       throw err;
     }
     const { user, company } = result;
-    const accessToken = this.signAccessToken(user);
+    const accessToken = await this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
     // register() é o único lugar onde o próprio usuário escolhe a senha (não
@@ -194,7 +200,8 @@ export class AuthService {
     // aqui, ao contrário de UsersService.create(). `company` já está em
     // escopo (acabou de ser criado nesta mesma transação), sem precisar de
     // include nenhum.
-    return { accessToken, user: this.toPublicUser({ ...user, company }) };
+    const permissions = await this.authorization.getEffectivePermissions(user.id);
+    return { accessToken, user: this.toPublicUser({ ...user, company }, permissions) };
   }
 
   async login(dto: { email: string; password: string }, res: Response) {
@@ -253,10 +260,11 @@ export class AuthService {
       );
     }
 
-    const accessToken = this.signAccessToken(user);
+    const accessToken = await this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
-    return { accessToken, user: this.toPublicUser(user) };
+    const permissions = await this.authorization.getEffectivePermissions(user.id);
+    return { accessToken, user: this.toPublicUser(user, permissions) };
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {
@@ -283,7 +291,7 @@ export class AuthService {
     if (existing.user.status !== 'ACTIVE') {
       throw new UnauthorizedException('Login bloqueado');
     }
-    const accessToken = this.signAccessToken(existing.user);
+    const accessToken = await this.signAccessToken(existing.user);
     const newRefreshValue = await this.issueRefreshToken(existing.userId, existing.id);
     this.setRefreshCookie(res, newRefreshValue);
     return { accessToken };
@@ -356,7 +364,7 @@ export class AuthService {
     // de "acesso imediato ao app logo após a troca forçada, sem precisar
     // logar de novo" quebraria. `user` já foi buscado (com companyId/role/
     // modules) antes da troca — só o valor de mustChangePassword muda.
-    const accessToken = this.signAccessToken({ ...user, mustChangePassword: false });
+    const accessToken = await this.signAccessToken({ ...user, mustChangePassword: false });
     return { accessToken };
   }
 
@@ -371,7 +379,8 @@ export class AuthService {
       where: { id: userId },
       include: { company: { select: { name: true, planTier: true, maxEmployeeLogins: true } } },
     });
-    return this.toPublicUser(user);
+    const permissions = await this.authorization.getEffectivePermissions(userId);
+    return this.toPublicUser(user, permissions);
   }
 
   // Único caminho pelo qual um login se auto-vincula a um Employee já
