@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { CustomFieldDefinition, CustomFieldType, Prisma } from '@prisma/client';
+import { isEmail } from 'class-validator';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
@@ -177,7 +178,7 @@ export class CustomFieldValuesService {
         return value.map(String);
       }
       case CustomFieldType.EMAIL:
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))) {
+        if (!isEmail(String(value))) {
           throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um e-mail válido`);
         }
         return String(value);

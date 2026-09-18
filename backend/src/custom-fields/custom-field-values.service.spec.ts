@@ -125,6 +125,27 @@ describe('CustomFieldValuesService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('rejeita um e-mail inválido pra um campo EMAIL, usando a mesma validação do class-validator', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.EMAIL, columnName: 'custom_email' }),
+      ]);
+      await expect(
+        service.setValues('client', 'rec1', { custom_email: 'not-an-email' }, tx as any),
+      ).rejects.toThrow('precisa ser um e-mail válido');
+    });
+
+    it('aceita um e-mail válido pra um campo EMAIL', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.EMAIL, columnName: 'custom_email' }),
+      ]);
+      await service.setValues('client', 'rec1', { custom_email: 'valid@example.com' }, tx as any);
+      expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'UPDATE "Client" SET "custom_email" = $1 WHERE id = $2',
+        'valid@example.com',
+        'rec1',
+      );
+    });
+
     it('adiciona o cast ::text[] pra um campo MULTI_SELECT', async () => {
       tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({
