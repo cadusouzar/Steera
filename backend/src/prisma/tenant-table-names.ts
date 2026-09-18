@@ -26,4 +26,5 @@ export const TENANT_TABLE_NAMES = [
   'FileAsset',
   'AuditLog',
   'CustomFieldDefinition',
+  'Department',
 ] as const;

@@ -181,6 +181,8 @@ model User {
   // busca manual em duas etapas, ver `TimeManagementAuthService.resolveOwnEmployee`), então remover
   // a relação Prisma não quebra nenhum join existente.
   employeeId          String?        @unique
+  profileId           String?
+  profile             Profile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
   modules             AppModule[]
   status              UserStatus     @default(ACTIVE)
   // Incrementado a cada senha errada (nunca por e-mail inexistente — não há o que incrementar);
@@ -209,6 +211,49 @@ model RefreshToken {
   @@index([userId])
 }
 
+enum Scope {
+  PROPRIO
+  EQUIPE
+  DEPARTAMENTO
+  EMPRESA
+}
+
+model Permission {
+  code               String              @id
+  resource           String
+  action             String
+  labelPt            String
+  validScopes        Scope[]
+  profilePermissions ProfilePermission[]
+}
+
+model Profile {
+  id          String              @id @default(cuid())
+  companyId   String
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  isProtected Boolean             @default(false)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  permissions ProfilePermission[]
+  users       User[]
+
+  @@index([companyId])
+}
+
+model ProfilePermission {
+  id             String     @id @default(cuid())
+  companyId      String
+  profileId      String
+  profile        Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  permissionCode String
+  permission     Permission @relation(fields: [permissionCode], references: [code], onDelete: Restrict)
+  scope          Scope?
+
+  @@unique([profileId, permissionCode])
+  @@index([companyId])
+}
+
 model Company {
   id                     String                  @id @default(cuid())
   name                   String
@@ -217,6 +262,8 @@ model Company {
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   users                  User[]
+  profiles               Profile[]
+  departments            Department[]
   clients                Client[]
   receivables            Receivable[]
   subscriptions          Subscription[]
@@ -250,6 +297,17 @@ model Role {
 
   @@index([companyId])
   @@index([active])
+}
+
+model Department {
+  id        String     @id @default(cuid())
+  companyId String
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  active    Boolean    @default(true)
+  employees Employee[]
+
+  @@index([companyId])
 }
 
 enum ContractType {
@@ -293,6 +351,8 @@ model Employee {
   managerId                     String?
   manager                       Employee?                  @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
   reports                       Employee[]                 @relation("EmployeeManager")
+  departmentId                  String?
+  departmentRef                 Department?                @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   timeEvents                    TimeEvent[]
   workSchedules                 WorkSchedule[]
   workScheduleDefaults          WorkSchedule[]             @relation("WorkScheduleManager")
