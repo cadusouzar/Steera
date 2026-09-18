@@ -15,6 +15,7 @@
     "prisma:migrate": "prisma migrate dev",
     "seed:holidays": "ts-node prisma/seed-holidays.ts",
     "seed:permissions": "ts-node scripts/seed-permissions.ts",
+    "backfill:profiles": "ts-node scripts/backfill-profiles.ts",
     "generate:tenant-migrations": "ts-node scripts/generate-tenant-migrations.ts",
     "check:connections": "ts-node scripts/check-tenant-connection-health.ts"
   },
@@ -64,6 +65,10 @@
   },
   "jest": {
     "rootDir": "src",
+    "roots": [
+      "<rootDir>",
+      "<rootDir>/../scripts"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
