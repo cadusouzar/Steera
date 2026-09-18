@@ -15,6 +15,8 @@ export const POSTGRES_TYPE_BY_FIELD_TYPE: Record<CustomFieldType, string> = {
   MULTI_SELECT: 'TEXT[]',
   EMAIL: 'TEXT',
   PHONE: 'TEXT',
+  CPF: 'TEXT',
+  CNPJ: 'TEXT',
 };
 
 function slugify(displayName: string): string {

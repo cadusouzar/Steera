@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { CustomFieldDefinition, CustomFieldType, Prisma } from '@prisma/client';
 import { isEmail } from 'class-validator';
+import { isValidCnpjChecksum } from '../common/cnpj.util';
+import { isValidCpfChecksum } from '../common/cpf.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
@@ -182,6 +184,30 @@ export class CustomFieldValuesService {
           throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um e-mail válido`);
         }
         return String(value);
+      // PHONE caía no `default` sem validação nenhuma até este fix (mesma lacuna que o campo fixo
+      // `Employee.phone` tinha — ver phone.util.ts) — corrigido junto de CPF/CNPJ, que são tipos
+      // novos (17/09/2026), por serem exatamente a mesma classe de problema no mesmo switch.
+      case CustomFieldType.PHONE: {
+        const digits = String(value).replace(/\D/g, '');
+        if (digits.length !== 10 && digits.length !== 11) {
+          throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um telefone válido`);
+        }
+        return digits;
+      }
+      case CustomFieldType.CPF: {
+        const digits = String(value).replace(/\D/g, '');
+        if (!isValidCpfChecksum(digits)) {
+          throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um CPF válido`);
+        }
+        return digits;
+      }
+      case CustomFieldType.CNPJ: {
+        const digits = String(value).replace(/\D/g, '');
+        if (!isValidCnpjChecksum(digits)) {
+          throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um CNPJ válido`);
+        }
+        return digits;
+      }
       default:
         return String(value);
     }

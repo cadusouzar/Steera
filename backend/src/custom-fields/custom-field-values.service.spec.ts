@@ -146,6 +146,69 @@ describe('CustomFieldValuesService', () => {
       );
     });
 
+    it('rejeita um telefone inválido pra um campo PHONE (antes caía no default sem validação nenhuma)', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.PHONE, columnName: 'custom_telefone' }),
+      ]);
+      await expect(
+        service.setValues('client', 'rec1', { custom_telefone: '123' }, tx as any),
+      ).rejects.toThrow('precisa ser um telefone válido');
+    });
+
+    it('normaliza um telefone formatado pra dígitos puros pra um campo PHONE', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.PHONE, columnName: 'custom_telefone' }),
+      ]);
+      await service.setValues('client', 'rec1', { custom_telefone: '(11) 91234-5678' }, tx as any);
+      expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'UPDATE "Client" SET "custom_telefone" = $1 WHERE id = $2',
+        '11912345678',
+        'rec1',
+      );
+    });
+
+    it('rejeita um CPF inválido pra um campo CPF (novo tipo, 17/09/2026)', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.CPF, columnName: 'custom_cpf' }),
+      ]);
+      await expect(
+        service.setValues('client', 'rec1', { custom_cpf: '111.222.333-44' }, tx as any),
+      ).rejects.toThrow('precisa ser um CPF válido');
+    });
+
+    it('aceita e normaliza um CPF válido pra um campo CPF', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.CPF, columnName: 'custom_cpf' }),
+      ]);
+      await service.setValues('client', 'rec1', { custom_cpf: '111.444.777-35' }, tx as any);
+      expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'UPDATE "Client" SET "custom_cpf" = $1 WHERE id = $2',
+        '11144477735',
+        'rec1',
+      );
+    });
+
+    it('rejeita um CNPJ inválido pra um campo CNPJ (novo tipo, 17/09/2026)', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.CNPJ, columnName: 'custom_cnpj' }),
+      ]);
+      await expect(
+        service.setValues('client', 'rec1', { custom_cnpj: '11.222.333/0001-82' }, tx as any),
+      ).rejects.toThrow('precisa ser um CNPJ válido');
+    });
+
+    it('aceita e normaliza um CNPJ válido pra um campo CNPJ', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.CNPJ, columnName: 'custom_cnpj' }),
+      ]);
+      await service.setValues('client', 'rec1', { custom_cnpj: '11.222.333/0001-81' }, tx as any);
+      expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'UPDATE "Client" SET "custom_cnpj" = $1 WHERE id = $2',
+        '11222333000181',
+        'rec1',
+      );
+    });
+
     it('adiciona o cast ::text[] pra um campo MULTI_SELECT', async () => {
       tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({
