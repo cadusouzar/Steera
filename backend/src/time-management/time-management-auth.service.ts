@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { Employee } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { findDirectReportIds } from './hierarchy.util';
 
 // Único lugar do projeto que resolve "posso gerenciar o ponto deste
 // funcionário" e "qual é o Employee do login atual" — toda task
@@ -80,11 +81,7 @@ export class TimeManagementAuthService {
     const currentUserRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
     if (!currentUserRecord?.employeeId) return [];
 
-    const reports = await this.prisma.employee.findMany({
-      where: { managerId: currentUserRecord.employeeId, companyId: currentUser.companyId },
-      select: { id: true },
-    });
-    return reports.map((r) => r.id);
+    return findDirectReportIds(this.prisma, currentUser.companyId, currentUserRecord.employeeId);
   }
 
   // Achado na revisão final de 14/09/2026: a aba de Correção Proativa da tela administrativa
