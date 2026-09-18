@@ -36,8 +36,12 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
     if (res.status >= 500) {
       throw new Error('Não foi possível concluir a ação. Tente novamente em instantes.');
     }
-    const body = await res.json().catch(() => ({}) as { message?: string });
-    throw new Error(body.message || `Erro ${res.status} ao chamar ${path}`);
+    const body = await res.json().catch(() => ({}) as { message?: string | string[] });
+    // O backend hoje sempre devolve `message` como uma string única já traduzida — isto é uma
+    // segunda camada de segurança, não a correção principal, pra nunca mostrar vírgulas cruas se
+    // algo no futuro voltar a devolver uma lista.
+    const message = Array.isArray(body.message) ? body.message.join('; ') : body.message;
+    throw new Error(message || `Erro ${res.status} ao chamar ${path}`);
   }
 
   if (res.status === 204) return undefined as T;
