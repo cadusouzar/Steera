@@ -1666,7 +1666,7 @@ export async function createCustomFieldDefinition(dto: {
 export async function updateCustomFieldDefinition(
   id: string,
   dto: Partial<{
-    displayName: string; required: boolean; defaultValue: string; description: string;
+    displayName: string; required: boolean; defaultValue: string | null; description: string;
     configuration: { options?: string[] }; displayOrder: number;
   }>,
 ): Promise<CustomFieldDefinition> {

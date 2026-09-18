@@ -220,10 +220,13 @@ const CustomFieldsSettings = () => {
         required: form.required,
         displayOrder: form.displayOrder,
         ...(hasOptions(field.type) ? { configuration: { options: parseOptions(form.optionsText) } } : {}),
-        // Só envia quando preenchido — omitido do body, o backend mantém o defaultValue atual sem
-        // mudança (mesma limitação já aceita hoje pra `description`: não dá pra "limpar" um valor
-        // padrão já configurado só esvaziando o campo, precisa de uma ação dedicada no futuro).
-        ...(form.defaultValue ? { defaultValue: form.defaultValue } : {}),
+        // Sempre enviado (nunca omitido) — string vazia vira `null` explícito, que o backend agora
+        // aceita pra limpar o valor padrão de volta pra "nenhum" (17/09/2026, a pedido do usuário:
+        // "acho justo poder adicionar o valor padrão, editar e removê-lo"). Ver o botão "Remover"
+        // ao lado do widget, que zera `form.defaultValue` direto pros tipos sem um jeito óbvio de
+        // esvaziar o próprio widget (ex.: BOOLEAN — desmarcar o checkbox é um padrão "não" válido,
+        // não "sem padrão").
+        defaultValue: form.defaultValue || null,
       });
       setDefinitions(prev => prev.map(d => d.id === updated.id ? updated : d));
       setEditingField(null);
@@ -683,9 +686,21 @@ const CustomFieldsSettings = () => {
                   const type = createForm.type as CustomFieldType;
                   return (
                     <div>
-                      <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                        Valor Padrão
-                      </label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-bold text-foreground/80 uppercase tracking-wider">
+                          Valor Padrão
+                        </label>
+                        {createForm.defaultValue && (
+                          <button
+                            type="button"
+                            onClick={() => setCreateForm(prev => ({ ...prev, defaultValue: '' }))}
+                            className="flex items-center gap-1 text-xs font-semibold text-muted hover:text-red-500 transition-colors"
+                          >
+                            <X size={12} />
+                            Remover
+                          </button>
+                        )}
+                      </div>
                       {renderTypedInput(
                         type,
                         hasOptions(type) ? parseOptions(createForm.optionsText) : undefined,
@@ -826,9 +841,21 @@ const CustomFieldsSettings = () => {
                 )}
 
                 <div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                    Valor Padrão
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-foreground/80 uppercase tracking-wider">
+                      Valor Padrão
+                    </label>
+                    {editForm.defaultValue && (
+                      <button
+                        type="button"
+                        onClick={() => setEditForm(prev => prev && { ...prev, defaultValue: '' })}
+                        className="flex items-center gap-1 text-xs font-semibold text-muted hover:text-red-500 transition-colors"
+                      >
+                        <X size={12} />
+                        Remover
+                      </button>
+                    )}
+                  </div>
                   {renderTypedInput(
                     editingField.type,
                     hasOptions(editingField.type) ? parseOptions(editForm.optionsText) : undefined,

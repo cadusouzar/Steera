@@ -82,6 +82,36 @@ describe('CustomFieldDefinitionsService', () => {
       await service.update('def1', { displayName: 'Novo nome' } as any);
       expect(prisma.customFieldDefinition.update).toHaveBeenCalled();
     });
+
+    // `defaultValue: null` explícito precisa limpar o valor padrão de volta pra "nenhum" — o DTO
+    // (`UpdateCustomFieldDefinitionDto`) passa `null` pela validação com `@ValidateIf`, e o Prisma
+    // trata `null` no `data` como "define a coluna como NULL" (diferente de `undefined`, que ele
+    // ignora por completo) — sem chamada nenhuma extra além do `update()` de sempre.
+    it('limpa o defaultValue quando recebe null explícito', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(
+        makeDefinition({ type: CustomFieldType.TEXT, defaultValue: 'Pequeno' }),
+      );
+      prisma.customFieldDefinition.update.mockResolvedValue(
+        makeDefinition({ type: CustomFieldType.TEXT, defaultValue: null }),
+      );
+      const result = await service.update('def1', { defaultValue: null } as any);
+      expect(prisma.customFieldDefinition.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ defaultValue: null }) }),
+      );
+      expect(result.defaultValue).toBeNull();
+    });
+
+    it('mantém o defaultValue atual quando o campo é omitido do body', async () => {
+      prisma.customFieldDefinition.findFirst.mockResolvedValue(
+        makeDefinition({ type: CustomFieldType.TEXT, defaultValue: 'Pequeno' }),
+      );
+      prisma.customFieldDefinition.update.mockResolvedValue(
+        makeDefinition({ type: CustomFieldType.TEXT, defaultValue: 'Pequeno' }),
+      );
+      await service.update('def1', { displayName: 'Segmento (renomeado)' } as any);
+      const call = prisma.customFieldDefinition.update.mock.calls[0][0];
+      expect(call.data).not.toHaveProperty('defaultValue');
+    });
   });
 
   describe('deactivate/reactivate', () => {
