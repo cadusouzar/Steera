@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings, Plus, X, FileQuestion, Loader2, Pencil, Ban, RotateCcw, Trash2, AlertTriangle,
-  HeartHandshake, Briefcase, User,
+  HeartHandshake, Briefcase, User, ChevronDown,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { getCurrentUser } from '../../lib/auth';
@@ -102,6 +102,43 @@ const CustomFieldsSettings = () => {
   const [countLoadingId, setCountLoadingId] = useState<string | null>(null);
   const [isCheckingOptionUsage, setIsCheckingOptionUsage] = useState(false);
 
+  // Menu de ações por linha (18/09/2026) — mesmo padrão de [[UsersManagement]]: um único botão
+  // "Ações" (sempre a mesma largura) abrindo um menu com cada ação por extenso, em vez de vários
+  // botões só de ícone lado a lado. Renderizado via portal, posicionado a partir do botão clicado,
+  // pra nunca ser cortado pelo `overflow-hidden` do painel da tabela.
+  const [openActionsMenuFieldId, setOpenActionsMenuFieldId] = useState<string | null>(null);
+  const [actionsMenuAnchor, setActionsMenuAnchor] = useState<DOMRect | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+
+  const closeActionsMenu = useCallback(() => setOpenActionsMenuFieldId(null), []);
+
+  const openActionsMenu = (event: React.MouseEvent<HTMLButtonElement>, fieldId: string) => {
+    if (openActionsMenuFieldId === fieldId) {
+      closeActionsMenu();
+      return;
+    }
+    setActionsMenuAnchor(event.currentTarget.getBoundingClientRect());
+    setOpenActionsMenuFieldId(fieldId);
+  };
+
+  useEffect(() => {
+    if (!openActionsMenuFieldId) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (actionsMenuRef.current?.contains(target)) return;
+      if (target.closest('[data-actions-trigger]')) return;
+      closeActionsMenu();
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('scroll', closeActionsMenu, true);
+    window.addEventListener('resize', closeActionsMenu);
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('scroll', closeActionsMenu, true);
+      window.removeEventListener('resize', closeActionsMenu);
+    };
+  }, [openActionsMenuFieldId, closeActionsMenu]);
+
   const loadDefinitions = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
@@ -121,6 +158,7 @@ const CustomFieldsSettings = () => {
   useEscapeKey(() => {
     if (confirmAction) { setConfirmAction(null); return; }
     if (editingField) { setEditingField(null); return; }
+    if (openActionsMenuFieldId) { closeActionsMenu(); return; }
     if (isCreateModalOpen) setIsCreateModalOpen(false);
   });
 
@@ -521,40 +559,20 @@ const CustomFieldsSettings = () => {
                         </td>
                         {isAdmin && (
                           <td className="px-8 py-5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => openEditModal(field)}
-                                className="p-2 rounded-lg transition-colors text-muted hover:text-primary hover:bg-primary/10"
-                                title="Editar"
-                              >
-                                <Pencil size={16} />
-                              </button>
-                              {field.active ? (
-                                <button
-                                  onClick={() => handleDeactivateClick(field)}
-                                  className="p-2 rounded-lg transition-colors text-muted hover:text-orange-500 hover:bg-orange-500/10"
-                                  title="Desativar"
-                                >
-                                  <Ban size={16} />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => handleReactivateClick(field)}
-                                  className="p-2 rounded-lg transition-colors text-muted hover:text-green-600 hover:bg-green-500/10"
-                                  title="Reativar"
-                                >
-                                  <RotateCcw size={16} />
-                                </button>
-                              )}
-                              <button
-                                onClick={() => handleDeleteClick(field)}
-                                disabled={countLoadingId === field.id}
-                                className="p-2 rounded-lg transition-colors text-muted hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50"
-                                title="Excluir"
-                              >
-                                {countLoadingId === field.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              data-actions-trigger
+                              onClick={(e) => openActionsMenu(e, field.id)}
+                              disabled={countLoadingId === field.id}
+                              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 ${
+                                openActionsMenuFieldId === field.id
+                                  ? 'border-primary/40 bg-primary/10 text-primary'
+                                  : 'border-border text-foreground hover:bg-secondary'
+                              }`}
+                            >
+                              {countLoadingId === field.id ? <Loader2 size={14} className="animate-spin" /> : 'Ações'}
+                              {countLoadingId !== field.id && <ChevronDown size={14} />}
+                            </button>
                           </td>
                         )}
                       </motion.tr>
@@ -584,6 +602,62 @@ const CustomFieldsSettings = () => {
           )}
         </div>
       </motion.div>
+
+      {/* Menu de ações por linha (18/09/2026) — mesmo padrão de [[UsersManagement]], ver o
+          comentário perto de openActionsMenuFieldId pro raciocínio completo. */}
+      {openActionsMenuFieldId && actionsMenuAnchor && (() => {
+        const menuField = definitions.find(d => d.id === openActionsMenuFieldId);
+        if (!menuField) return null;
+        return createPortal(
+          <div
+            ref={actionsMenuRef}
+            style={{
+              position: 'fixed',
+              top: actionsMenuAnchor.bottom + 6,
+              right: window.innerWidth - actionsMenuAnchor.right,
+            }}
+            className="z-[150] w-56 bg-background border border-border/60 rounded-xl shadow-2xl overflow-hidden py-1.5"
+          >
+            <button
+              type="button"
+              onClick={() => { closeActionsMenu(); openEditModal(menuField); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
+            >
+              <Pencil size={15} className="text-muted shrink-0" />
+              Editar
+            </button>
+            {menuField.active ? (
+              <button
+                type="button"
+                onClick={() => { closeActionsMenu(); handleDeactivateClick(menuField); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
+              >
+                <Ban size={15} className="text-muted shrink-0" />
+                Desativar
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { closeActionsMenu(); handleReactivateClick(menuField); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
+              >
+                <RotateCcw size={15} className="text-muted shrink-0" />
+                Reativar
+              </button>
+            )}
+            <div className="my-1.5 border-t border-border/40" />
+            <button
+              type="button"
+              onClick={() => { closeActionsMenu(); handleDeleteClick(menuField); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors text-left"
+            >
+              <Trash2 size={15} className="shrink-0" />
+              Excluir
+            </button>
+          </div>,
+          document.body,
+        );
+      })()}
 
       {/* Modal: Novo Campo */}
       {isCreateModalOpen && createPortal(
