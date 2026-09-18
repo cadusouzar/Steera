@@ -97,7 +97,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
       .set('Authorization', adminToken)
       .send({
         fullName: 'Funcionário Teste',
-        cpf: '99999999999',
+        cpf: '11144477735',
         roleId: roleRes.body.id,
         contractType: 'CLT',
         admissionDate: '2026-01-01',

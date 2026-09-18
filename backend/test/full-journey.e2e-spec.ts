@@ -103,7 +103,7 @@ describe('Percurso completo — login, criar, listar, editar, desativar (e2e, se
       .set('Authorization', token)
       .send({
         fullName: 'Funcionário Percurso',
-        cpf: '11122233344',
+        cpf: '11144477735',
         roleId,
         contractType: 'CLT',
         admissionDate: '2026-01-01',

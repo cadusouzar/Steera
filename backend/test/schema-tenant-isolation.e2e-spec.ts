@@ -130,7 +130,7 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
       .set('Authorization', tokenA)
       .send({
         fullName: 'Funcionário Físico',
-        cpf: '00000000000',
+        cpf: '11144477735',
         roleId: roleRes.body.id,
         contractType: 'CLT',
         admissionDate: '2026-01-01',

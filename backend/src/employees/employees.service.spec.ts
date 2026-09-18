@@ -49,7 +49,7 @@ describe('EmployeesService', () => {
     prisma.role.findFirst.mockResolvedValue(null);
     await expect(
       service.create({
-        fullName: 'João Silva', cpf: '111.222.333-44', roleId: 'role-other-company',
+        fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-other-company',
         contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
         baseValue: 5000, paymentDueDay: 5,
       }),
@@ -60,7 +60,7 @@ describe('EmployeesService', () => {
     prisma.role.findFirst.mockResolvedValue({ id: 'role-1', companyId: 'company-1', active: false });
     await expect(
       service.create({
-        fullName: 'João Silva', cpf: '111.222.333-44', roleId: 'role-1',
+        fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
         contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
         baseValue: 5000, paymentDueDay: 5,
       }),
@@ -72,7 +72,7 @@ describe('EmployeesService', () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'employee-existing' });
     await expect(
       service.create({
-        fullName: 'João Silva', cpf: '111.222.333-44', roleId: 'role-1',
+        fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
         contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
         baseValue: 5000, paymentDueDay: 5,
       }),
@@ -82,16 +82,16 @@ describe('EmployeesService', () => {
   it('normalizes the CPF and scopes creation to the current company', async () => {
     prisma.role.findFirst.mockResolvedValue({ id: 'role-1', companyId: 'company-1', active: true });
     prisma.employee.findFirst.mockResolvedValue(null);
-    prisma.employee.create.mockResolvedValue({ id: 'employee-1', cpf: '11122233344' });
+    prisma.employee.create.mockResolvedValue({ id: 'employee-1', cpf: '11144477735' });
 
     await service.create({
-      fullName: 'João Silva', cpf: '111.222.333-44', roleId: 'role-1',
+      fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
       contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
       baseValue: 5000, paymentDueDay: 5,
     });
 
     expect(prisma.employee.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ companyId: 'company-1', cpf: '11122233344' }),
+      data: expect.objectContaining({ companyId: 'company-1', cpf: '11144477735' }),
       include: { manager: { select: { fullName: true } } },
     });
   });
@@ -109,7 +109,7 @@ describe('EmployeesService', () => {
     prisma.employee.create.mockResolvedValue({ id: 'employee-1', managerId: 'manager-1' });
 
     await service.create({
-      fullName: 'João Silva', cpf: '111.222.333-44', roleId: 'role-1',
+      fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
       contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
       baseValue: 5000, paymentDueDay: 5, managerId: 'manager-1',
     });
@@ -128,7 +128,7 @@ describe('EmployeesService', () => {
 
     await expect(
       service.create({
-        fullName: 'João Silva', cpf: '111.222.333-44', roleId: 'role-1',
+        fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
         contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
         baseValue: 5000, paymentDueDay: 5, managerId: 'manager-other-company',
       }),

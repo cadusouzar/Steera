@@ -196,7 +196,7 @@ describe('Campos personalizados: isolamento entre empresas em Clientes (e2e)', (
       .set('Authorization', tokenA)
       .send({
         fullName: 'Funcionário Custom Fields',
-        cpf: '11111111111',
+        cpf: '11144477735',
         roleId: roleRes.body.id,
         contractType: 'CLT',
         admissionDate: '2026-01-01',

@@ -10,6 +10,21 @@ function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
 }
 
+// Gera um CPF aleatório mas matematicamente válido (mesmo algoritmo de checksum de
+// backend/src/common/cpf.util.ts) — desde a validação real de checksum, um número puramente
+// aleatório de 11 dígitos quase sempre falha.
+function generateValidCpf(): string {
+  const base = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));
+  const checkDigit = (digits: number[], firstWeight: number) => {
+    const sum = digits.reduce((acc, d, i) => acc + d * (firstWeight - i), 0);
+    const rest = sum % 11;
+    return rest < 2 ? 0 : 11 - rest;
+  };
+  const d1 = checkDigit(base, 10);
+  const d2 = checkDigit([...base, d1], 11);
+  return [...base, d1, d2].join('');
+}
+
 interface Fixture {
   app: INestApplication;
   prisma: PrismaService;
@@ -48,7 +63,7 @@ async function setupFixture(companyName: string, adminEmail: string): Promise<Fi
     .post('/employees')
     .set('Authorization', adminToken)
     .send({
-      fullName: 'Funcionário Base', cpf: String(Math.floor(10000000000 + Math.random() * 89999999999)),
+      fullName: 'Funcionário Base', cpf: generateValidCpf(),
       roleId, contractType: 'CLT', admissionDate: '2026-01-01', department: 'Depto Teste',
       baseValue: 3000, paymentDueDay: 5,
     })
@@ -74,7 +89,7 @@ async function createLoginAndLogin(f: Fixture, modules: string[]) {
     .post('/employees')
     .set('Authorization', f.adminToken)
     .send({
-      fullName: 'Func Teste Modulo', cpf: String(Math.floor(10000000000 + Math.random() * 89999999999)),
+      fullName: 'Func Teste Modulo', cpf: generateValidCpf(),
       roleId: f.roleId, contractType: 'CLT', admissionDate: '2026-01-01', department: 'Depto Teste',
       baseValue: 3000, paymentDueDay: 5,
     })

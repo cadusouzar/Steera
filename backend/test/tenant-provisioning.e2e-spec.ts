@@ -154,7 +154,7 @@ describe('Provisionamento de tenant novo (e2e)', () => {
         .set('Authorization', tokenA)
         .send({
           fullName: 'Funcionário Ponto Físico',
-          cpf: '22233344455',
+          cpf: '11144477735',
           roleId: roleRes.body.id,
           contractType: 'CLT',
           admissionDate: '2026-01-01',
