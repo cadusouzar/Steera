@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsISO8601, IsNumber, IsOptional } from 'class-validator';
+import { IsBoolean, IsEnum, IsISO8601, IsLatitude, IsLongitude, IsNumber, IsOptional } from 'class-validator';
 import { TimeEventType } from '@prisma/client';
 
 // De propósito SEM campo employeeId/companyId — quem está batendo o próprio ponto é sempre
@@ -9,8 +9,8 @@ import { TimeEventType } from '@prisma/client';
 export class CreatePunchDto {
   @IsEnum(TimeEventType) type!: TimeEventType;
   @IsOptional() @IsISO8601() deviceReportedAt?: string;
-  @IsOptional() @Type(() => Number) @IsNumber() latitude?: number;
-  @IsOptional() @Type(() => Number) @IsNumber() longitude?: number;
+  @IsOptional() @Type(() => Number) @IsLatitude() latitude?: number;
+  @IsOptional() @Type(() => Number) @IsLongitude() longitude?: number;
   @IsOptional() @Type(() => Number) @IsNumber() accuracyMeters?: number;
   @IsOptional() @Transform(({ value }) => value === 'true' || value === true) @IsBoolean() isMobile?: boolean;
 }
