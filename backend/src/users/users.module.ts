@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { TimeManagementAuthModule } from '../time-management/time-management-auth.module';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
@@ -18,7 +17,7 @@ import { UsersService } from './users.service';
 // manual/operador — não é dead code por descuido, é um ponto de extensão
 // deliberadamente sem rota HTTP por enquanto.
 @Module({
-  imports: [PrismaModule, TimeManagementAuthModule],
+  imports: [PrismaModule],
   controllers: [UsersController],
   providers: [UsersService],
 })

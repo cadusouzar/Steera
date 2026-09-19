@@ -134,30 +134,16 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
     expect(res.body.message).toMatch(/bloqueado/i);
   });
 
-  it('PATCH .../ponto-access desliga hasFullPontoAccess de um segundo admin (User.count + User.update atômicos, sob advisory lock)', async () => {
-    const admin2Email = `central-tx-admin2-${runId}@test.com`;
-    const login2Res = await request(app.getHttpServer())
-      .post('/companies/me/users')
-      .set('Authorization', adminToken)
-      .send({ email: admin2Email, role: 'ADMIN', modules: ['DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS', 'PONTO_REGISTRO', 'PONTO_ADMINISTRACAO', 'COMERCIAL', 'OPERACOES', 'FINANCAS'] })
-      .expect(201);
-    const admin2UserId = login2Res.body.user.id;
-
-    await request(app.getHttpServer())
-      .patch(`/companies/me/users/${admin2UserId}/ponto-access`)
-      .set('Authorization', adminToken)
-      .send({ hasFullPontoAccess: false })
-      .expect(204);
-
-    // O invariante ("pelo menos um full-access admin") continua protegido: desligar o próprio
-    // fundador agora (o único que restou com acesso total) deve seguir rejeitado com 400.
-    const founder = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
-    await request(app.getHttpServer())
-      .patch(`/companies/me/users/${founder.id}/ponto-access`)
-      .set('Authorization', adminToken)
-      .send({ hasFullPontoAccess: false })
-      .expect(400);
-  });
+  // O teste que existia aqui ("PATCH .../ponto-access desliga hasFullPontoAccess de um segundo
+  // admin") cobria UsersService.updatePontoAccess(), removido na Fase 2a (19/09/2026,
+  // authorization-profiles-screen/Task 8) — `hasFullPontoAccess` deixou de ser editável em
+  // separado, agora é sempre DERIVADO do Perfil do login (ver
+  // UsersService.assignProfile/reassignUserProfile). A regressão de transação central que este
+  // arquivo documenta (query estruturada contra `User` central quebrando dentro de um client de
+  // TENANT) segue coberta pelos outros dois testes deste describe (troca de senha, bloqueio de
+  // login) — `assignProfile()` usa exatamente o mesmo padrão seguro (transação montada à mão no
+  // client central, `set_config` manual) desde a sua implementação, então não introduz uma
+  // variante nova desse bug pra testar aqui.
 
   // Achado ao vivo (18/09/2026, "Espelho de Ponto demora ~5s pra carregar"):
   // TimeAttendanceCalculationService.calculateDailySummary passou a agrupar suas leituras de

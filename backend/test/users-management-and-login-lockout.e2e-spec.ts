@@ -77,28 +77,11 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
     return app.getHttpServer();
   }
 
-  it('PATCH /companies/me/users/:id edita os módulos de um login sem recriá-lo', async () => {
-    const createRes = await request(apps[0].getHttpServer())
-      .post('/companies/me/users')
-      .set('Authorization', adminToken)
-      .send({ email: `edit-modules-${Date.now()}@test.com`, role: 'ADMIN', modules: ['DASHBOARD'] })
-      .expect(201);
-    const userId = createRes.body.user.id;
-
-    const editRes = await request(apps[0].getHttpServer())
-      .patch(`/companies/me/users/${userId}`)
-      .set('Authorization', adminToken)
-      .send({ modules: ['DASHBOARD', 'PONTO_REGISTRO'] })
-      .expect(200);
-    expect(editRes.body.modules.sort()).toEqual(['DASHBOARD', 'PONTO_REGISTRO'].sort());
-
-    const listRes = await request(apps[0].getHttpServer())
-      .get('/companies/me/users')
-      .set('Authorization', adminToken)
-      .expect(200);
-    const persisted = listRes.body.find((u: { id: string }) => u.id === userId);
-    expect(persisted.modules.sort()).toEqual(['DASHBOARD', 'PONTO_REGISTRO'].sort());
-  });
+  // O teste que existia aqui ("PATCH /companies/me/users/:id edita os módulos de um login sem
+  // recriá-lo") cobria UsersService.update(), removido na Fase 2a (19/09/2026,
+  // authorization-profiles-screen/Task 8) — `modules` deixou de ser editável em separado, agora é
+  // sempre DERIVADO do Perfil do login via o novo `PATCH /companies/me/users/:id/profile`
+  // (ver UsersService.assignProfile), coberto em test/profiles.e2e-spec.ts.
 
   it('DELETE /companies/me/users/:id exclui um login de verdade (não aparece mais na listagem)', async () => {
     const createRes = await request(apps[0].getHttpServer())

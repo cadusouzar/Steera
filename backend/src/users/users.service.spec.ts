@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, NotFoundExc
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import * as profileAssignmentUtil from '../permissions/profile-assignment.util';
+import * as lastPermissionHolderUtil from './last-permission-holder.util';
 import { UsersService } from './users.service';
 
 describe('UsersService', () => {
@@ -296,25 +298,6 @@ describe('UsersService', () => {
     });
   });
 
-  describe('update', () => {
-    it('404s for a login from another company', async () => {
-      prisma.user.findFirst.mockResolvedValue(null);
-      await expect(service.update('c1', 'u-outra-empresa', { modules: [] })).rejects.toBeInstanceOf(NotFoundException);
-    });
-
-    it('updates the modules of an existing login without recreating it', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
-      prisma.user.update.mockResolvedValue({ id: 'u1', role: 'EMPLOYEE', modules: ['PONTO_REGISTRO'], hasFullPontoAccess: true });
-      const result = await service.update('c1', 'u1', { modules: ['PONTO_REGISTRO'] } as any);
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'u1' },
-        data: { modules: ['PONTO_REGISTRO'] },
-        select: expect.any(Object),
-      });
-      expect(result.modules).toEqual(['PONTO_REGISTRO']);
-    });
-  });
-
   describe('remove', () => {
     it('404s for a login from another company', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
@@ -385,82 +368,93 @@ describe('UsersService', () => {
     });
   });
 
-  describe('updatePontoAccess', () => {
-    it('turns hasFullPontoAccess on for a target ADMIN login in the same company', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: false });
-      prisma.user.count.mockResolvedValue(2); // irrelevant when turning ON, only checked when turning OFF
-      prisma.user.update.mockResolvedValue({ id: 'target-1' });
-
-      await service.updatePontoAccess('company-1', 'target-1', true);
-
-      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: { hasFullPontoAccess: true } });
+  // Task 8 (Fase 2a, 19/09/2026): `assertNotLastHolderOfPermission` é espionado (não
+  // auto-mockado no topo do arquivo) — os testes de block()/remove() acima dependem do
+  // comportamento REAL dessa função (via `$queryRawUnsafe`), e um `jest.mock` de módulo inteiro
+  // quebraria esses testes já existentes. `jest.spyOn` escopado a este describe (com
+  // `mockRestore()` no `afterEach`) dá aos testes novos a asserção de chamada que precisam
+  // (`toHaveBeenCalledWith`) sem afetar block()/remove().
+  describe('assignProfile', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
     });
 
-    it('rejects turning it off when the target is the last ADMIN with hasFullPontoAccess: true in the company', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: true });
-      prisma.user.count.mockResolvedValue(1); // only this one left
+    function makeTxPrisma(currentProfileId: string | null) {
+      const tx = {
+        $executeRaw: jest.fn(),
+        profilePermission: { findMany: jest.fn() },
+      };
+      const txPrisma = {
+        user: { findFirst: jest.fn().mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: currentProfileId }) },
+        profile: { findFirst: jest.fn().mockResolvedValue({ id: 'new-profile', companyId: 'company-1' }) },
+        $transaction: jest.fn((cb: any) => cb(tx)),
+      };
+      return { prisma: txPrisma, tx };
+    }
 
-      await expect(service.updatePontoAccess('company-1', 'target-1', false)).rejects.toBeInstanceOf(BadRequestException);
-      expect(prisma.user.update).not.toHaveBeenCalled();
+    it('lança NotFoundException se o login não existir na empresa', async () => {
+      const localPrisma = { user: { findFirst: jest.fn().mockResolvedValue(null) }, profile: { findFirst: jest.fn() } };
+      const localService = new UsersService(localPrisma as any);
+
+      await expect(localService.assignProfile('company-1', 'missing', 'p2')).rejects.toThrow(NotFoundException);
     });
 
-    it('allows turning it off when at least one other full-access ADMIN remains', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: true });
-      prisma.user.count.mockResolvedValue(2);
-      prisma.user.update.mockResolvedValue({ id: 'target-1' });
+    it('lança BadRequestException se o novo profileId não existir na empresa', async () => {
+      const localPrisma = {
+        user: { findFirst: jest.fn().mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: 'p1' }) },
+        profile: { findFirst: jest.fn().mockResolvedValue(null) },
+      };
+      const localService = new UsersService(localPrisma as any);
 
-      await service.updatePontoAccess('company-1', 'target-1', false);
-
-      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: { hasFullPontoAccess: false } });
+      await expect(localService.assignProfile('company-1', 'u1', 'missing')).rejects.toThrow(BadRequestException);
     });
 
-    it('throws NotFoundException when the target does not exist in this company', async () => {
-      prisma.user.findFirst.mockResolvedValue(null);
-      await expect(service.updatePontoAccess('company-1', 'target-1', true)).rejects.toBeInstanceOf(NotFoundException);
+    it('não chama a trava se o usuário nunca teve perfil (profileId null)', async () => {
+      const assertNotLastHolderOfPermissionSpy = jest
+        .spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission')
+        .mockResolvedValue(undefined);
+      const reassignUserProfileSpy = jest
+        .spyOn(profileAssignmentUtil, 'reassignUserProfile')
+        .mockResolvedValue(undefined);
+      const { prisma: localPrisma, tx } = makeTxPrisma(null);
+      const localService = new UsersService(localPrisma as any);
+
+      await localService.assignProfile('company-1', 'u1', 'new-profile');
+
+      expect(assertNotLastHolderOfPermissionSpy).not.toHaveBeenCalled();
+      expect(reassignUserProfileSpy).toHaveBeenCalledWith(tx, 'u1', 'new-profile');
     });
 
-    it('throws BadRequestException when the target is not an ADMIN login', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'target-1', companyId: 'company-1', role: 'EMPLOYEE', hasFullPontoAccess: true });
-      await expect(service.updatePontoAccess('company-1', 'target-1', false)).rejects.toBeInstanceOf(BadRequestException);
+    it('chama a trava se o perfil atual concedia usuarios.gerenciar e o novo não', async () => {
+      const assertNotLastHolderOfPermissionSpy = jest
+        .spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission')
+        .mockResolvedValue(undefined);
+      jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
+      const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
+      (tx.profilePermission.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }]) // perfil atual
+        .mockResolvedValueOnce([]); // perfil novo
+      const localService = new UsersService(localPrisma as any);
+
+      await localService.assignProfile('company-1', 'u1', 'new-profile');
+
+      expect(assertNotLastHolderOfPermissionSpy).toHaveBeenCalledWith(tx, 'company-1', 'usuarios.gerenciar', 'u1');
     });
 
-    // Regressão do achado de revisão (15/09/2026): a versão original fazia count() e update() como
-    // duas queries separadas, SEM nenhuma trava — duas requisições concorrentes desligando dois
-    // admins DIFERENTES, com exatamente 2 full-access admins restantes, podiam ambas ler
-    // count === 2, ambas passar o guard, e ambas escrever false, zerando os admins de acesso total
-    // da empresa (estado irrecuperável sem acesso direto ao banco). Simula a corrida real via
-    // mockResolvedValueOnce sequencial (mesmo padrão da regressão equivalente em
-    // time-clock.service.spec.ts para a corrida de marcação duplicada): a PRIMEIRA tentativa a
-    // recontar (dentro do lock) ainda vê os 2 admins originais e escreve; a SEGUNDA só recontra
-    // DEPOIS (a mesma trava — pg_advisory_xact_lock escopado por companyId — serializa as duas) e
-    // já vê 1, refletindo o commit da primeira, sendo corretamente rejeitada.
-    it('serializes two concurrent attempts to turn off two different admins when exactly 2 remain — exactly one succeeds, one is rejected', async () => {
-      prisma.user.findFirst.mockImplementation(({ where }: { where: { id: string } }) =>
-        Promise.resolve({ id: where.id, companyId: 'company-1', role: 'ADMIN', hasFullPontoAccess: true }),
-      );
-      prisma.user.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
-      prisma.user.update.mockResolvedValue({ id: 'updated' });
+    it('não chama a trava se o novo perfil TAMBÉM concede usuarios.gerenciar', async () => {
+      const assertNotLastHolderOfPermissionSpy = jest
+        .spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission')
+        .mockResolvedValue(undefined);
+      jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
+      const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
+      (tx.profilePermission.findMany as jest.Mock)
+        .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }])
+        .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }]);
+      const localService = new UsersService(localPrisma as any);
 
-      const results = await Promise.allSettled([
-        service.updatePontoAccess('company-1', 'target-1', false),
-        service.updatePontoAccess('company-1', 'target-2', false),
-      ]);
+      await localService.assignProfile('company-1', 'u1', 'new-profile');
 
-      const fulfilled = results.filter((r) => r.status === 'fulfilled');
-      const rejected = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
-      expect(fulfilled).toHaveLength(1);
-      expect(rejected).toHaveLength(1);
-      expect(rejected[0].reason).toBeInstanceOf(BadRequestException);
-      // Só a vencedora chega a escrever — a perdedora é barrada pela recontagem, dentro do lock,
-      // antes de qualquer update.
-      expect(prisma.user.update).toHaveBeenCalledTimes(1);
-      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: { hasFullPontoAccess: false } });
-      // As duas tentativas de fato disputaram o lock (não só a vencedora) e as duas recontaram —
-      // é essa recontagem-dentro-do-lock, e não uma checagem antiga em cache, que barra a segunda.
-      // 4, não 2: cada tentativa agora emite 2 chamadas a $executeRaw (o set_config manual de RLS
-      // — ver o achado da auditoria de segurança de 17/09/2026 — e o pg_advisory_xact_lock em si).
-      expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
-      expect(prisma.user.count).toHaveBeenCalledTimes(2);
+      expect(assertNotLastHolderOfPermissionSpy).not.toHaveBeenCalled();
     });
   });
 });

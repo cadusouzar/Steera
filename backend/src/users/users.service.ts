@@ -5,10 +5,10 @@ import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
 import { deriveHasFullPontoAccessFromGrants, deriveModulesFromGrants } from '../permissions/profile-signature.util';
+import { reassignUserProfile } from '../permissions/profile-assignment.util';
 import { assertNotLastHolderOfPermission } from './last-permission-holder.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
 
 const PLAN_LIMITS: Record<string, number> = { BASICO: 10, PRO: 50, EMPRESARIAL: 999_999 };
 
@@ -185,18 +185,32 @@ export class UsersService {
     await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE', failedLoginAttempts: 0 } });
   }
 
-  // Edição de um login já existente (17/09/2026) — hoje só `modules`. Único op simples, sem
-  // necessidade de transação especial: não mexe em `RefreshToken`, não tem invariante de
-  // concorrência (diferente de block/remove/updatePontoAccess, que protegem "pelo menos um admin
-  // ativo").
-  async update(companyId: string, userId: string, dto: UpdateUserDto) {
+  // Troca o Perfil de um login já existente (Fase 2a, 19/09/2026) — substitui tanto a antiga
+  // edição direta de `modules` (`PATCH /companies/me/users/:id`, removida) quanto o toggle de
+  // `hasFullPontoAccess` (`PATCH .../ponto-access`, removido): os dois agora são SEMPRE derivados
+  // do Perfil escolhido, nunca editados em separado (ver spec da Fase 2a).
+  async assignProfile(companyId: string, userId: string, profileId: string): Promise<void> {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
-    return this.toPublicUser(
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { modules: dto.modules },
-        select: SAFE_USER_SELECT,
+    const newProfile = await this.prisma.profile.findFirst({ where: { id: profileId, companyId } });
+    if (!newProfile) throw new BadRequestException(`Perfil ${profileId} não encontrado nesta empresa`);
+
+    await runInsideExplicitTenantTransaction(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
+
+        if (user.profileId) {
+          const currentGrants = await tx.profilePermission.findMany({ where: { profileId: user.profileId } });
+          const newGrants = await tx.profilePermission.findMany({ where: { profileId } });
+          const hadIt = currentGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
+          const willHaveIt = newGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
+          if (hadIt && !willHaveIt) {
+            await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
+          }
+        }
+
+        await reassignUserProfile(tx, userId, profileId);
       }),
     );
   }
@@ -276,62 +290,5 @@ export class UsersService {
       where: { id: companyId },
       data: { planTier: dto.planTier, maxEmployeeLogins: PLAN_LIMITS[dto.planTier] },
     });
-  }
-
-  // Achado + corrigido na revisão de escopo de 15/09/2026: um login ADMIN de uma empresa pequena/
-  // média muitas vezes é só um gerente de confiança, não o dono — este campo deixa a empresa
-  // restringir logins ADMIN específicos a "administrar só quem eu comando" dentro do Controle de
-  // Ponto (ver TimeManagementAuthService.assertHasFullPontoAccess/canManage). Trava contra deixar a
-  // empresa sem NENHUM admin de acesso total, o que só seria recuperável por edição direta no banco.
-  async updatePontoAccess(companyId: string, targetUserId: string, hasFullPontoAccess: boolean): Promise<void> {
-    const target = await this.prisma.user.findFirst({ where: { id: targetUserId, companyId } });
-    if (!target) throw new NotFoundException(`Login ${targetUserId} não encontrado nesta empresa`);
-    if (target.role !== 'ADMIN') {
-      throw new BadRequestException('hasFullPontoAccess só tem efeito em logins ADMIN');
-    }
-
-    if (hasFullPontoAccess) {
-      await this.prisma.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess: true } });
-      return;
-    }
-
-    // Achado em revisão (15/09/2026): a versão original fazia count() e update() como duas
-    // queries separadas, sem nenhuma trava — duas requisições concorrentes desligando DOIS admins
-    // diferentes, com exatamente 2 full-access admins restantes, podiam ambas ler count === 2,
-    // ambas passar o guard, e ambas escrever false, deixando a empresa com ZERO admins de acesso
-    // total (estado irrecuperável sem acesso direto ao banco). Mesmo padrão já usado em
-    // TimeClockService.createPunch para a corrida de marcação duplicada:
-    // pg_advisory_xact_lock dentro de uma transação travada, recontando a condição DENTRO dela.
-    // Trava escopada por EMPRESA (hashtext(companyId)), não por usuário — o invariante protegido
-    // ("pelo menos um full-access admin") é por empresa, não por login, então duas requisições da
-    // MESMA empresa (mesmo mexendo em admins diferentes) precisam serializar entre si; duas
-    // requisições de empresas DIFERENTES nunca se bloqueiam.
-    //
-    // NUNCA runTenantInteractiveTransaction aqui — achado durante a auditoria de segurança
-    // (17/09/2026, mesmo bug do AuthService.changePassword/UsersService.block, ver o comentário
-    // completo em changePassword): `User` é tabela CENTRAL, e nenhum client de TENANT (o que
-    // `runTenantInteractiveTransaction` sempre usa quando um registry+companyId estão ativos)
-    // consegue alcançá-la via `.model.op()` — reproduzia ao vivo "table tenant_x.User does not
-    // exist" pra toda empresa com schema físico, ou seja, `hasFullPontoAccess` nunca conseguia ser
-    // desligado pra NENHUM admin de NENHUMA empresa nova. A transação é montada à mão: `tx` vem
-    // direto do client central, com o `set_config` de RLS emitido manualmente como primeira
-    // instrução.
-    await runInsideExplicitTenantTransaction(() =>
-      this.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
-
-        const fullAccessCount = await tx.user.count({
-          where: { companyId, role: 'ADMIN', hasFullPontoAccess: true },
-        });
-        if (fullAccessCount <= 1) {
-          throw new BadRequestException(
-            'A empresa precisa manter pelo menos um login ADMIN com acesso total ao Controle de Ponto',
-          );
-        }
-
-        await tx.user.update({ where: { id: targetUserId }, data: { hasFullPontoAccess: false } });
-      }),
-    );
   }
 }

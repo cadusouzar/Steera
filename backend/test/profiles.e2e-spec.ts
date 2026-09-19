@@ -85,6 +85,17 @@ describe('Profiles (e2e)', () => {
       .expect(200);
     expect(listRes.body.find((p: { id: string }) => p.id === profileId)?.name).toBe('Financeiro Ampliado');
 
+    // Segundo ADMIN mantém "Administrador Geral" (com usuarios.gerenciar) — sem isso, reatribuir o
+    // FUNDADOR (único login da empresa até aqui) pra um perfil sem essa permissão dispararia
+    // corretamente a trava de "último detentor" que PATCH .../profile aplica (Task 8), o que
+    // quebraria o propósito deste teste (validar a reatribuição em si, não a trava).
+    const adminProfile = listRes.body.find((p: { name: string }) => p.name === 'Administrador Geral');
+    await request(app.getHttpServer())
+      .post('/companies/me/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ email: `profiles-e2e-admin2-${runId}@test.com`, role: 'ADMIN', profileId: adminProfile.id })
+      .expect(201);
+
     // Fundador tenta atribuir-se a este perfil pra testar o bloqueio de exclusão em uso.
     const founder = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
     await request(app.getHttpServer())

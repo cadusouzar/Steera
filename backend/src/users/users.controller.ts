@@ -3,19 +3,14 @@ import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
+import { AssignProfileDto } from './dto/assign-profile.dto';
 import { CreateUserDto } from './dto/create-user.dto';
-import { UpdatePontoAccessDto } from './dto/update-ponto-access.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('companies/me/users')
 export class UsersController {
-  constructor(
-    private readonly users: UsersService,
-    private readonly timeManagementAuth: TimeManagementAuthService,
-  ) {}
+  constructor(private readonly users: UsersService) {}
 
   @Get()
   findAll(@CurrentUser() user: AuthenticatedUser) {
@@ -48,12 +43,6 @@ export class UsersController {
   }
 
   @Roles('ADMIN')
-  @Patch(':id')
-  update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.users.update(user.companyId, id, dto);
-  }
-
-  @Roles('ADMIN')
   @Delete(':id')
   @HttpCode(204)
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
@@ -66,17 +55,10 @@ export class UsersController {
     return this.users.resetPassword(user.companyId, id);
   }
 
-  // Sem @Roles('ADMIN') de propósito — assertHasFullPontoAccess já exige role
-  // === 'ADMIN' (e mais: hasFullPontoAccess === true), uma checagem mais
-  // estrita que subsome a do decorator.
-  @Patch(':id/ponto-access')
+  @Roles('ADMIN')
+  @Patch(':id/profile')
   @HttpCode(204)
-  updatePontoAccess(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-    @Body() dto: UpdatePontoAccessDto,
-  ) {
-    this.timeManagementAuth.assertHasFullPontoAccess(user);
-    return this.users.updatePontoAccess(user.companyId, id, dto.hasFullPontoAccess);
+  assignProfile(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: AssignProfileDto) {
+    return this.users.assignProfile(user.companyId, id, dto.profileId);
   }
 }
