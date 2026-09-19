@@ -18,11 +18,13 @@ export async function assertNotLastHolderOfPermission(
      JOIN "ProfilePermission" pp ON pp."profileId" = u."profileId"
      WHERE u."companyId" = $1
        AND u.status = 'ACTIVE'
+       AND u.id != $2
        AND pp."permissionCode" = $3`,
     companyId,
+    excludingUserId,
     permissionCode,
   );
-  if (Number(rows[0]?.count ?? 0) <= 1) {
+  if (Number(rows[0]?.count ?? 0) === 0) {
     throw new BadRequestException(
       'A empresa precisa ter pelo menos um login ativo com permissão para gerenciar usuários',
     );

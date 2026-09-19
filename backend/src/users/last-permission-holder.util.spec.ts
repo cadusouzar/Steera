@@ -8,7 +8,7 @@ describe('assertNotLastHolderOfPermission', () => {
   });
 
   it('throws when excluding this user would leave zero holders', async () => {
-    const tx = { $queryRawUnsafe: jest.fn().mockResolvedValue([{ count: 1n }]) };
+    const tx = { $queryRawUnsafe: jest.fn().mockResolvedValue([{ count: 0n }]) };
     await expect(assertNotLastHolderOfPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'user-1'))
       .rejects.toThrow(BadRequestException);
   });

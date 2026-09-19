@@ -213,6 +213,18 @@ describe('UsersService', () => {
     expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'admin1' }, data: { status: 'BLOCKED' } });
   });
 
+  // Task 8: Trava genérica de "último usuarios.gerenciar" — verifica que block() rejeita se o alvo
+  // seria o último holder da permissão. Mock $queryRawUnsafe para retornar 0 (nenhum outro usuário
+  // ativo da empresa tem a permissão após excluir esse).
+  it('block rejects blocking the last holder of usuarios.gerenciar permission', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
+    prisma.user.count.mockResolvedValue(2); // pelo menos 2 ADMINs ATIVOS (passa assertNotLastActiveAdmin)
+    prisma.$queryRawUnsafe.mockResolvedValue([{ count: 0n }]); // mas nenhum outro tem usuarios.gerenciar
+    await expect(service.block('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
   it('unblock 404s for a user from another company', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
     await expect(service.unblock('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
@@ -265,6 +277,17 @@ describe('UsersService', () => {
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', role: 'EMPLOYEE', status: 'ACTIVE' });
       await service.remove('c1', 'u1');
       expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
+    });
+
+    // Task 8: Trava genérica de "último usuarios.gerenciar" — verifica que remove() rejeita se o
+    // alvo seria o último holder da permissão.
+    it('remove rejects deleting the last holder of usuarios.gerenciar permission', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
+      prisma.user.count.mockResolvedValue(2); // pelo menos 2 ADMINs ATIVOS (passa assertNotLastActiveAdmin)
+      prisma.$queryRawUnsafe.mockResolvedValue([{ count: 0n }]); // mas nenhum outro tem usuarios.gerenciar
+      await expect(service.remove('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.delete).not.toHaveBeenCalled();
     });
   });
 
