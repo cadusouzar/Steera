@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
+import { assertNotLastHolderOfPermission } from './last-permission-holder.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -142,6 +143,7 @@ export class UsersService {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
         await this.assertNotLastActiveAdmin(tx, companyId, userId);
+        await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
         await tx.user.update({ where: { id: userId }, data: { status: 'BLOCKED' } });
         await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
       }),
@@ -187,6 +189,7 @@ export class UsersService {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
         await this.assertNotLastActiveAdmin(tx, companyId, userId);
+        await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
         await tx.user.delete({ where: { id: userId } });
       }),
     );

@@ -28,6 +28,9 @@ describe('UsersService', () => {
       // na maioria dos testes, só precisa existir pra `tx.$executeRaw` não quebrar como
       // `undefined()`.
       $executeRaw: jest.fn().mockResolvedValue(undefined),
+      // Chamado por assertNotLastHolderOfPermission (Task 8) — mock default retorna count >= 2
+      // (seguro para block/remove), permitindo que testes genéricos passem sem mockagem adicional.
+      $queryRawUnsafe: jest.fn().mockResolvedValue([{ count: 2n }]),
     };
     const module = await Test.createTestingModule({
       providers: [UsersService, { provide: PrismaService, useValue: prisma }],
