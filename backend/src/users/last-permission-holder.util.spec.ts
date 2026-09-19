@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { assertNotLastHolderOfPermission } from './last-permission-holder.util';
+import { assertNotLastHolderOfPermission, assertOtherProfileGrantsPermission } from './last-permission-holder.util';
 
 // Estes testes inspecionam o TEXTO do SQL e a ORDEM dos parâmetros de propósito. A versão anterior
 // só mockava `$queryRawUnsafe` devolvendo um valor e afirmava sobre ele — foi exatamente por isso
@@ -82,6 +82,73 @@ describe('assertNotLastHolderOfPermission', () => {
         expect(sql).not.toMatch(/FROM\s+"User"/);
         expect(sql).not.toMatch(/JOIN\s+"ProfilePermission"/);
       }
+    });
+  });
+});
+
+// Adicionada na rodada de correção de segurança da Task 4 (authorization-profiles-screen): a
+// versão original de ProfilesService.update() chamava `assertNotLastHolderOfPermission` uma vez
+// POR USUÁRIO afetado ANTES de reescrever as ProfilePermission do perfil editado — cada chamada
+// via os OUTROS usuários do MESMO perfil ainda "detentores" (a reescrita em lote ainda não tinha
+// acontecido), deixando passar um lote que zerava por completo os detentores ativos da empresa
+// assim que a reescrita de fato rodava. Reordenar (reescrever primeiro, checar depois) também não
+// resolve — o pré-check `targetHoldsIt` de `assertNotLastHolderOfPermission` passaria a ver o
+// próprio alvo como não-detentor e virar um no-op silencioso pra todos. Esta função pergunta a
+// coisa certa pro caso de "todos os usuários de UM perfil perdem a permissão ao mesmo tempo":
+// existe algum usuário ativo, em QUALQUER OUTRO perfil, que ainda concede a permissão? — por isso
+// funciona corretamente rodando antes OU depois da reescrita.
+describe('assertOtherProfileGrantsPermission', () => {
+  function makeTx(...results: unknown[]) {
+    const fn = jest.fn();
+    for (const r of results) fn.mockResolvedValueOnce(r);
+    return { $queryRawUnsafe: fn };
+  }
+
+  it('não lança quando outro perfil ainda concede a permissão a um login ativo', async () => {
+    const tx = makeTx([{ count: 1n }]);
+    await expect(
+      assertOtherProfileGrantsPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'profile-1'),
+    ).resolves.toBeUndefined();
+    expect(tx.$queryRawUnsafe).toHaveBeenCalledTimes(1);
+  });
+
+  it('lança BadRequestException quando nenhum outro perfil concede a permissão', async () => {
+    const tx = makeTx([{ count: 0n }]);
+    await expect(
+      assertOtherProfileGrantsPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'profile-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('trata a consulta vazia (defesa contra linha ausente) como zero detentores — lança', async () => {
+    const tx = makeTx([]);
+    await expect(
+      assertOtherProfileGrantsPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'profile-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  describe('SQL emitido', () => {
+    it('qualifica o schema, filtra por profileId (não por usuário) e recebe os binds na ordem certa', async () => {
+      const tx = makeTx([{ count: 5n }]);
+      await assertOtherProfileGrantsPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'profile-1');
+
+      const [sql, ...params] = tx.$queryRawUnsafe.mock.calls[0];
+      expect(sql).toContain('"public"."User"');
+      expect(sql).toContain('"public"."ProfilePermission"');
+      // Binds: $1 = companyId, $2 = profileId excluído, $3 = permissionCode.
+      expect(params).toEqual(['company-1', 'profile-1', 'usuarios.gerenciar']);
+      expect(sql).toContain('u."companyId" = $1');
+      expect(sql).toContain('u."profileId" != $2');
+      expect(sql).toContain('pp."permissionCode" = $3');
+      // Só conta logins ATIVOS — um login bloqueado não segura o invariante.
+      expect(sql).toContain("u.status = 'ACTIVE'");
+    });
+
+    it('não usa tabela sem qualificação de schema (regressão de PgBouncer, mesma classe de bug já corrigida em assertNotLastHolderOfPermission)', async () => {
+      const tx = makeTx([{ count: 5n }]);
+      await assertOtherProfileGrantsPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'profile-1');
+      const sql = tx.$queryRawUnsafe.mock.calls[0][0] as string;
+      expect(sql).not.toMatch(/FROM\s+"User"/);
+      expect(sql).not.toMatch(/JOIN\s+"ProfilePermission"/);
     });
   });
 });

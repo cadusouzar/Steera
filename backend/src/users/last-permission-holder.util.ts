@@ -66,3 +66,50 @@ export async function assertNotLastHolderOfPermission(
     );
   }
 }
+
+/**
+ * Variante de `assertNotLastHolderOfPermission` para quando MÚLTIPLOS usuários perdem a permissão
+ * SIMULTANEAMENTE por causa da edição de um Perfil compartilhado (não de uma ação individual sobre
+ * UM usuário) — ver ProfilesService.update()/reassignAndDelete(). A pergunta certa aqui não é
+ * "excluindo este usuário, sobra alguém?" (não faz sentido quando TODOS os usuários daquele
+ * perfil perdem a permissão ao mesmo tempo) — é "existe algum usuário ativo, em QUALQUER OUTRO
+ * perfil, que ainda concede esta permissão?". Filtra por `profileId`, não pela existência atual de
+ * uma linha — por isso funciona corretamente rodando ANTES ou DEPOIS da reescrita das
+ * `ProfilePermission` do perfil sendo editado (ao contrário de `assertNotLastHolderOfPermission`,
+ * que depende de rodar ANTES por causa do seu próprio pré-check `targetHoldsIt`).
+ *
+ * Achado real (revisão de segurança pós-Task 4, ver task-4-report.md "Rodada de correção"):
+ * `assertNotLastHolderOfPermission`, chamada uma vez por usuário afetado ANTES da reescrita em
+ * lote das `ProfilePermission` do perfil, sempre enxergava os OUTROS usuários do mesmo perfil como
+ * "ainda detentores" (a reescrita ainda não tinha rodado), deixando passar um lote que zerava por
+ * completo os detentores da empresa assim que a reescrita de fato acontecia. Reordenar a chamada
+ * pra DEPOIS da reescrita também não resolve — o pré-check `targetHoldsIt` daquela função passaria
+ * a ver o próprio alvo como não-detentor (o perfil dele já não concede mais nada) e virar um no-op
+ * silencioso pra todos, pior que o bug original. Esta função não sofre de nenhum dos dois problemas
+ * porque nunca olha pra uma linha específica de um usuário — sempre pergunta pelo `profileId` sendo
+ * editado como um todo, contra todos os OUTROS perfis da empresa.
+ */
+export async function assertOtherProfileGrantsPermission(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+  permissionCode: string,
+  excludingProfileId: string,
+): Promise<void> {
+  const rows = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+    `SELECT COUNT(*)::bigint as count
+     FROM "public"."User" u
+     JOIN "public"."ProfilePermission" pp ON pp."profileId" = u."profileId"
+     WHERE u."companyId" = $1
+       AND u.status = 'ACTIVE'
+       AND u."profileId" != $2
+       AND pp."permissionCode" = $3`,
+    companyId,
+    excludingProfileId,
+    permissionCode,
+  );
+  if (Number(rows[0]?.count ?? 0) === 0) {
+    throw new BadRequestException(
+      'A empresa precisa ter pelo menos um login ativo com permissão para gerenciar usuários',
+    );
+  }
+}

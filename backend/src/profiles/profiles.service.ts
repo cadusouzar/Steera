@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { recomputeAndSaveUserAccess } from '../permissions/profile-assignment.util';
-import { assertNotLastHolderOfPermission } from '../users/last-permission-holder.util';
+import { assertOtherProfileGrantsPermission } from '../users/last-permission-holder.util';
 import { CreateProfileDto, ProfileGrantDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -76,13 +76,18 @@ export class ProfilesService {
 
         const affectedUsers = await tx.user.findMany({ where: { profileId: id, status: 'ACTIVE' } });
 
+        // Corrigido numa rodada de revisão de segurança pós-implementação (ver task-4-report.md):
+        // a versão original chamava `assertNotLastHolderOfPermission` uma vez POR USUÁRIO afetado,
+        // ANTES da reescrita em lote das ProfilePermission abaixo — cada chamada individual via os
+        // OUTROS usuários do MESMO perfil ainda "detentores" (a reescrita ainda não tinha
+        // acontecido), deixando passar um lote que, ao ser aplicado de uma vez, zerava por completo
+        // os detentores ativos de `usuarios.gerenciar` da empresa. `assertOtherProfileGrantsPermission`
+        // pergunta a coisa certa pra este caso — "existe algum usuário ativo, em QUALQUER OUTRO
+        // perfil, que ainda concede esta permissão?" — e por isso dá a resposta correta rodando
+        // antes OU depois da reescrita (mantido antes, por fail-fast, consistente com o resto do
+        // método: validar tudo antes de escrever).
         if (!willGrantUsuariosGerenciar) {
-          // Sequencial de propósito (nunca Promise.all) — cada checagem precisa enxergar o estado
-          // já gravado pelos usuários anteriores desta mesma leva, senão um lote que zera os
-          // detentores da empresa passaria sem ser detectado (ver Global Constraints do plano).
-          for (const user of affectedUsers) {
-            await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', user.id);
-          }
+          await assertOtherProfileGrantsPermission(tx, companyId, 'usuarios.gerenciar', id);
         }
 
         await tx.profilePermission.deleteMany({ where: { profileId: id } });

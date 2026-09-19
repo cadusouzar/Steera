@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Scope } from '@prisma/client';
 import { ProfilesService } from './profiles.service';
-import { assertNotLastHolderOfPermission } from '../users/last-permission-holder.util';
+import { assertOtherProfileGrantsPermission } from '../users/last-permission-holder.util';
 
 jest.mock('../users/last-permission-holder.util');
 jest.mock('../prisma/tenant-context', () => ({
@@ -123,12 +123,12 @@ describe('ProfilesService', () => {
   });
 
   describe('update', () => {
-    // `assertNotLastHolderOfPermission` é mockado no nível do MÓDULO (`jest.mock(...)` no topo do
-    // arquivo) — sem limpar entre os testes deste bloco, a contagem de chamadas se acumula de um
-    // teste pro outro (a brief original não previa isso, e não havia nenhum `clearMocks`/
-    // `resetMocks` configurado em `package.json`'s `jest` pra fazer isso implicitamente). Sem este
-    // `beforeEach`, "NÃO chama a trava..." falha por causa das 2 chamadas acumuladas do teste
-    // anterior, não por um bug real do código.
+    // `assertOtherProfileGrantsPermission` é mockada no nível do MÓDULO (`jest.mock(...)` no topo
+    // do arquivo) — sem limpar entre os testes deste bloco, a contagem de chamadas se acumula de
+    // um teste pro outro (não havia nenhum `clearMocks`/`resetMocks` configurado em
+    // `package.json`'s `jest` pra fazer isso implicitamente). Sem este `beforeEach`, "NÃO chama a
+    // trava..." falharia por causa de chamadas acumuladas do teste anterior, não por um bug real
+    // do código.
     beforeEach(() => {
       jest.clearAllMocks();
     });
@@ -179,15 +179,21 @@ describe('ProfilesService', () => {
       await expect(service.update('company-1', 'p1', { name: 'X', grants: [] })).rejects.toThrow(NotFoundException);
     });
 
-    it('chama a trava de último detentor uma vez por usuário afetado ao remover usuarios.gerenciar', async () => {
+    // Corrigido na rodada de revisão de segurança pós-implementação: a versão original chamava
+    // `assertNotLastHolderOfPermission` uma vez POR USUÁRIO afetado, ANTES da reescrita em lote
+    // das ProfilePermission — o que deixava passar um lote que zerava por completo os detentores
+    // de `usuarios.gerenciar` da empresa quando TODOS os usuários de um perfil compartilhado
+    // perdiam a permissão ao mesmo tempo (ver task-4-report.md, seção "Rodada de correção", pro
+    // passo a passo completo). `assertOtherProfileGrantsPermission` substitui essa checagem por
+    // UMA chamada só, por PERFIL sendo editado, não por usuário.
+    it('chama assertOtherProfileGrantsPermission uma única vez, pelo PERFIL sendo editado, ao remover usuarios.gerenciar', async () => {
       const { prisma, tx } = makeTxPrisma('p1', ['u1', 'u2']);
       const service = new ProfilesService(prisma as any);
 
       await service.update('company-1', 'p1', { name: 'Financeiro', grants: [{ permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }] });
 
-      expect(assertNotLastHolderOfPermission).toHaveBeenCalledTimes(2);
-      expect(assertNotLastHolderOfPermission).toHaveBeenNthCalledWith(1, tx, 'company-1', 'usuarios.gerenciar', 'u1');
-      expect(assertNotLastHolderOfPermission).toHaveBeenNthCalledWith(2, tx, 'company-1', 'usuarios.gerenciar', 'u2');
+      expect(assertOtherProfileGrantsPermission).toHaveBeenCalledTimes(1);
+      expect(assertOtherProfileGrantsPermission).toHaveBeenCalledWith(tx, 'company-1', 'usuarios.gerenciar', 'p1');
     });
 
     it('NÃO chama a trava se a nova lista ainda concede usuarios.gerenciar', async () => {
@@ -196,7 +202,7 @@ describe('ProfilesService', () => {
 
       await service.update('company-1', 'p1', { name: 'Admin', grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }] });
 
-      expect(assertNotLastHolderOfPermission).not.toHaveBeenCalled();
+      expect(assertOtherProfileGrantsPermission).not.toHaveBeenCalled();
     });
 
     it('regrava as ProfilePermission e recalcula cada usuário afetado', async () => {
