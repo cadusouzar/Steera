@@ -94,11 +94,14 @@ describe('ProfilesService.update() — trava de último detentor entre perfis co
     await app.close();
   });
 
+  // profileId aqui é só pra passar na validação de create() — todo chamador desta função move o
+  // login criado pra um profileId de teste específico logo em seguida (via prisma.user.update
+  // direto), então qual perfil ele nasce com não importa pras asserções do teste.
   async function createAdmin(label: string): Promise<string> {
     const res = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
-      .send({ email: `${label}-${runId}@test.com`, role: 'ADMIN', modules: ['DASHBOARD'] })
+      .send({ email: `${label}-${runId}@test.com`, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
     return res.body.user.id as string;
   }
