@@ -2,8 +2,13 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { Scope } from '@prisma/client';
 import { ProfilesService } from './profiles.service';
 import { assertOtherProfileGrantsPermission } from '../users/last-permission-holder.util';
+import { reassignUserProfile } from '../permissions/profile-assignment.util';
 
 jest.mock('../users/last-permission-holder.util');
+jest.mock('../permissions/profile-assignment.util', () => ({
+  ...jest.requireActual('../permissions/profile-assignment.util'),
+  reassignUserProfile: jest.fn(),
+}));
 jest.mock('../prisma/tenant-context', () => ({
   runInsideExplicitTenantTransaction: (fn: () => unknown) => fn(),
 }));
@@ -218,5 +223,180 @@ describe('ProfilesService', () => {
       expect(tx.profile.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { name: 'Financeiro' } });
       expect(tx.user.findMany).toHaveBeenCalledWith({ where: { profileId: 'p1', status: 'ACTIVE' } });
     });
+  });
+});
+
+describe('remove', () => {
+  it('lança ForbiddenException se o perfil for protegido', async () => {
+    const prisma = {
+      profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: true, _count: { users: 0 } }) },
+    };
+    const service = new ProfilesService(prisma as any);
+
+    await expect(service.remove('company-1', 'p1')).rejects.toThrow(ForbiddenException);
+  });
+
+  it('lança NotFoundException se o perfil não existir na empresa', async () => {
+    const prisma = { profile: { findFirst: jest.fn().mockResolvedValue(null) } };
+    const service = new ProfilesService(prisma as any);
+
+    await expect(service.remove('company-1', 'missing')).rejects.toThrow(NotFoundException);
+  });
+
+  it('lança BadRequestException se o perfil ainda estiver em uso', async () => {
+    const prisma = {
+      profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: false, _count: { users: 3 } }) },
+    };
+    const service = new ProfilesService(prisma as any);
+
+    await expect(service.remove('company-1', 'p1')).rejects.toThrow(BadRequestException);
+  });
+
+  it('exclui um perfil não-protegido sem usuários', async () => {
+    const prisma = {
+      profile: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: false, _count: { users: 0 } }),
+        delete: jest.fn(),
+      },
+    };
+    const service = new ProfilesService(prisma as any);
+
+    await service.remove('company-1', 'p1');
+
+    expect(prisma.profile.delete).toHaveBeenCalledWith({ where: { id: 'p1' } });
+  });
+});
+
+describe('reassignAndDelete', () => {
+  // `assertOtherProfileGrantsPermission`/`reassignUserProfile` são mockadas no nível do MÓDULO —
+  // sem limpar entre os testes deste bloco, a contagem de chamadas se acumula de um teste pro
+  // outro (mesmo motivo já documentado no `beforeEach` do describe('update') acima).
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function makeTxPrisma() {
+    const tx = {
+      $executeRaw: jest.fn(),
+      profilePermission: { findMany: jest.fn() },
+      user: { findMany: jest.fn() },
+      profile: { delete: jest.fn() },
+    };
+    const prisma = {
+      profile: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce({ id: 'source', isProtected: false })
+          .mockResolvedValueOnce({ id: 'target' }),
+      },
+      $transaction: jest.fn((cb: any) => cb(tx)),
+    };
+    return { prisma, tx };
+  }
+
+  it('lança BadRequestException se destino for igual à origem', async () => {
+    const prisma = { profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: false }) } };
+    const service = new ProfilesService(prisma as any);
+
+    await expect(
+      service.reassignAndDelete('company-1', 'p1', { targetProfileId: 'p1' }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('lança NotFoundException se a origem não existir na empresa', async () => {
+    const prisma = {
+      profile: { findFirst: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'target' }) },
+    };
+    const service = new ProfilesService(prisma as any);
+
+    await expect(
+      service.reassignAndDelete('company-1', 'missing', { targetProfileId: 'target' }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('lança ForbiddenException se a origem for protegida', async () => {
+    const prisma = {
+      profile: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce({ id: 'source', isProtected: true })
+          .mockResolvedValueOnce({ id: 'target' }),
+      },
+    };
+    const service = new ProfilesService(prisma as any);
+
+    await expect(
+      service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('lança NotFoundException se o destino não existir na empresa', async () => {
+    const prisma = {
+      profile: {
+        findFirst: jest.fn().mockResolvedValueOnce({ id: 'source', isProtected: false }).mockResolvedValueOnce(null),
+      },
+    };
+    const service = new ProfilesService(prisma as any);
+
+    await expect(
+      service.reassignAndDelete('company-1', 'source', { targetProfileId: 'missing' }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('reatribui cada usuário sequencialmente e exclui o perfil de origem', async () => {
+    const { prisma, tx } = makeTxPrisma();
+    tx.profilePermission.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    tx.user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
+    const service = new ProfilesService(prisma as any);
+
+    await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' });
+
+    expect(assertOtherProfileGrantsPermission).not.toHaveBeenCalled();
+    expect(reassignUserProfile).toHaveBeenNthCalledWith(1, tx, 'u1', 'target');
+    expect(reassignUserProfile).toHaveBeenNthCalledWith(2, tx, 'u2', 'target');
+    expect(tx.profile.delete).toHaveBeenCalledWith({ where: { id: 'source' } });
+  });
+
+  // Correção deliberada em relação à brief original desta task (ver task-5-report.md): a checagem
+  // de último detentor não é mais uma vez POR USUÁRIO afetado — é uma única chamada de
+  // `assertOtherProfileGrantsPermission`, pelo PERFIL de origem sendo esvaziado, exatamente o
+  // mesmo padrão já corrigido em `update()` (ver `describe('update')` acima e
+  // `last-permission-holder.util.ts`).
+  it('chama assertOtherProfileGrantsPermission uma única vez, pelo perfil de ORIGEM, se a origem concede usuarios.gerenciar e o destino não', async () => {
+    const { prisma, tx } = makeTxPrisma();
+    tx.profilePermission.findMany
+      .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }])
+      .mockResolvedValueOnce([]);
+    tx.user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
+    const service = new ProfilesService(prisma as any);
+
+    await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' });
+
+    expect(assertOtherProfileGrantsPermission).toHaveBeenCalledTimes(1);
+    expect(assertOtherProfileGrantsPermission).toHaveBeenCalledWith(tx, 'company-1', 'usuarios.gerenciar', 'source');
+  });
+
+  it('NÃO chama a trava se o destino também concede usuarios.gerenciar', async () => {
+    const { prisma, tx } = makeTxPrisma();
+    tx.profilePermission.findMany
+      .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }])
+      .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }]);
+    tx.user.findMany.mockResolvedValue([{ id: 'u1' }]);
+    const service = new ProfilesService(prisma as any);
+
+    await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' });
+
+    expect(assertOtherProfileGrantsPermission).not.toHaveBeenCalled();
+  });
+
+  it('NÃO chama a trava se o destino não concede a permissão mas a origem também não concedia', async () => {
+    const { prisma, tx } = makeTxPrisma();
+    tx.profilePermission.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    tx.user.findMany.mockResolvedValue([{ id: 'u1' }]);
+    const service = new ProfilesService(prisma as any);
+
+    await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' });
+
+    expect(assertOtherProfileGrantsPermission).not.toHaveBeenCalled();
   });
 });
