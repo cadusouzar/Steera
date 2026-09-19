@@ -314,6 +314,16 @@ const AppLayout = () => {
               </Link>
 
               <Link
+                to="/app/perfis"
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
+                  isActive('/app/perfis') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                <Shield size={18} />
+                Perfis de Acesso
+              </Link>
+
+              <Link
                 to="/app/campos-personalizados"
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
                   isActive('/app/campos-personalizados') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'

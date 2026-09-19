@@ -19,6 +19,7 @@ import TimeTracking from './pages/app/TimeTracking';
 import TimeTrackingAdmin from './pages/app/TimeTrackingAdmin';
 import FinancesSaaS from './pages/app/FinancesSaaS';
 import UsersManagement from './pages/app/UsersManagement';
+import Profiles from './pages/app/Profiles';
 import CustomFieldsSettings from './pages/app/CustomFieldsSettings';
 import DashboardHub from './pages/analytics/DashboardHub';
 import DashboardBuilder from './pages/analytics/DashboardBuilder';
@@ -48,6 +49,7 @@ function App() {
               <Route path="orcamentos" element={<QuotesList />} />
               <Route path="financas" element={<FinancesSaaS />} />
               <Route path="usuarios" element={<UsersManagement />} />
+              <Route path="perfis" element={<Profiles />} />
               <Route path="campos-personalizados" element={<CustomFieldsSettings />} />
               <Route path="analytics" element={<DashboardHub />} />
               <Route path="analytics/:id" element={<DashboardBuilder />} />
