@@ -1,7 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
-import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
 
@@ -18,28 +17,17 @@ describe('UsersService', () => {
       },
       company: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },
-      // create() agora deriva e atribui um Profile ao login novo (achado I2 da revisão final) —
-      // por padrão o perfil homônimo já existe na empresa E concede exatamente os mesmos grants que
-      // a assinatura computada (ver profilePermission.findMany abaixo), então é reaproveitado.
-      // `findFirst` é sensível ao NOME (como o banco real): só o nome exato semeado existe, qualquer
-      // sufixo de desambiguação (`... (2)`) volta null. Sem isso o laço de desambiguação de
-      // getOrCreateProfileForSignature nunca terminaria neste mock.
+      // Fase 2a (19/09/2026): create() não deriva/cria mais um Profile — o admin escolhe um
+      // profileId já existente na tela, e o service só valida que ele pertence à empresa
+      // (`profile.findFirst({ where: { id, companyId } })`). Por padrão, qualquer id "existe".
       profile: {
-        findFirst: jest.fn(({ where }: any) =>
-          Promise.resolve(where.name === 'Administrador Geral' ? { id: 'profile-existente' } : null),
-        ),
-        create: jest.fn().mockResolvedValue({ id: 'profile-novo' }),
+        findFirst: jest.fn().mockResolvedValue({ id: 'profile-1', companyId: 'c1' }),
       },
-      // Grants do perfil homônimo existente — a checagem de igualdade de conjunto (2ª rodada de
-      // fixes) precisa bater com o que computeProfileSignature produz pro DTO usado na maioria dos
-      // testes (`role: 'ADMIN', modules: ['DASHBOARD']` → dashboard.ver + os dois códigos gated só
-      // por papel), senão o perfil existente não é reaproveitado.
+      // Grants do profileId escolhido — create() lê isso pra DERIVAR `modules`/`hasFullPontoAccess`
+      // (direção oposta da assinatura antiga). Default: só dashboard.ver, suficiente pros testes que
+      // não afirmam nada sobre modules/hasFullPontoAccess.
       profilePermission: {
-        findMany: jest.fn().mockResolvedValue([
-          { permissionCode: 'dashboard.ver', scope: null },
-          { permissionCode: 'campos-personalizados.gerenciar', scope: 'EMPRESA' },
-          { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
-        ]),
+        findMany: jest.fn().mockResolvedValue([{ permissionCode: 'dashboard.ver', scope: null }]),
       },
       // Suporta os dois estilos de $transaction usados neste service: array (block(), via
       // runTenantTransaction) e callback (updatePontoAccess() desligando acesso, via
@@ -99,81 +87,74 @@ describe('UsersService', () => {
     prisma.user.count.mockResolvedValue(0);
     prisma.user.create.mockResolvedValue({ id: 'u9', role: 'EMPLOYEE', hasFullPontoAccess: true });
 
-    const { user } = await service.create('c1', { email: 'f@a.com', role: 'EMPLOYEE', employeeId: 'emp-1', modules: ['RH'] } as any);
+    const { user } = await service.create('c1', { email: 'f@a.com', role: 'EMPLOYEE', employeeId: 'emp-1', profileId: 'profile-1' } as any);
 
     expect(user.hasFullPontoAccess).toBe(false);
   });
 
   it('create never selects passwordHash back for the created user', async () => {
     prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin3@a.com', role: 'ADMIN' });
-    await service.create('c1', { email: 'admin3@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+    await service.create('c1', { email: 'admin3@a.com', role: 'ADMIN', profileId: 'profile-1' } as any);
     const call = prisma.user.create.mock.calls[0][0];
     expect(call.select).toBeDefined();
     expect(call.select.passwordHash).toBeUndefined();
   });
 
-  // Achado I2 da revisão final: create() nunca atribuía profileId — todo login criado por um admin
-  // ficava com `permissions: {}` pra sempre E invisível pra assertNotLastHolderOfPermission.
-  it('create atribui um profileId derivado de role/modules, reaproveitando um perfil homônimo existente', async () => {
+  // Fase 2a (19/09/2026): create() não deriva/cria mais um Profile — o profileId vem pronto do DTO
+  // (escolhido pelo admin na tela) e é usado tal como está, sem nenhuma lógica de assinatura/
+  // desambiguação por nome (isso agora só existe no backfill legado).
+  it('create usa o profileId do DTO diretamente, sem derivar/reaproveitar um perfil por assinatura', async () => {
     prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin2@a.com', role: 'ADMIN' });
-    await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+    await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', profileId: 'profile-1' } as any);
 
-    expect(prisma.profile.findFirst).toHaveBeenCalledWith({
-      where: { companyId: 'c1', name: 'Administrador Geral' },
-    });
-    expect(prisma.profile.create).not.toHaveBeenCalled();
-    expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-existente');
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith({ where: { id: 'profile-1', companyId: 'c1' } });
+    expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-1');
   });
 
-  // Regressão-alvo da 2ª rodada de fixes: o perfil homônimo do FUNDADOR (catálogo inteiro) não pode
-  // ser herdado por um admin novo de módulos restritos só porque a assinatura gera o mesmo nome.
-  it('create NÃO anexa um ADMIN restrito ao perfil homônimo do fundador quando os grants diferem', async () => {
-    prisma.profilePermission.findMany.mockResolvedValue(
-      PERMISSION_CATALOG.map((p) => ({ permissionCode: p.code, scope: p.validScopes.length === 0 ? null : 'EMPRESA' })),
-    );
-    prisma.user.create.mockResolvedValue({ id: 'u4', email: 'restrito@a.com', role: 'ADMIN' });
-
-    await service.create('c1', { email: 'restrito@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
-
-    expect(prisma.profile.create).toHaveBeenCalledTimes(1);
-    const created = prisma.profile.create.mock.calls[0][0];
-    expect(created.data.name).toBe('Administrador Geral (2)');
-    expect(created.data.permissions.create.map((g: any) => g.permissionCode).sort()).toEqual([
-      'campos-personalizados.gerenciar',
-      'dashboard.ver',
-      'usuarios.gerenciar',
-    ]);
-    expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-novo');
-  });
-
-  it('create cria o perfil quando ainda não existe um homônimo, com os grants da assinatura', async () => {
+  it('rejeita profileId que não pertence à empresa', async () => {
     prisma.profile.findFirst.mockResolvedValue(null);
-    prisma.user.create.mockResolvedValue({ id: 'u3', email: 'emp@a.com', role: 'ADMIN' });
-    await service.create('c1', { email: 'emp@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+    await expect(
+      service.create('c1', { email: 'x@a.com', role: 'ADMIN', profileId: 'profile-de-outra-empresa' } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create('c1', { email: 'x@a.com', role: 'ADMIN', profileId: 'profile-de-outra-empresa' } as any),
+    ).rejects.toThrow('profile-de-outra-empresa');
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
 
-    const createArgs = prisma.profile.create.mock.calls[0][0];
-    expect(createArgs.data.name).toBe('Administrador Geral');
-    const codes = createArgs.data.permissions.create.map((g: any) => g.permissionCode).sort();
-    // ADMIN de módulos restritos: só o que DASHBOARD concede + os códigos gated só por papel.
-    expect(codes).toEqual(['campos-personalizados.gerenciar', 'dashboard.ver', 'usuarios.gerenciar']);
-    expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-novo');
+  // Direção OPOSTA da assinatura antiga: `modules`/`hasFullPontoAccess` agora são DERIVADOS dos
+  // grants do profileId escolhido, via deriveModulesFromGrants/deriveHasFullPontoAccessFromGrants
+  // (Task 1), lidos de tx.profilePermission.findMany({ where: { profileId } }).
+  it('deriva modules e hasFullPontoAccess a partir dos grants do profileId escolhido', async () => {
+    prisma.profilePermission.findMany.mockResolvedValue([
+      { permissionCode: 'dashboard.ver', scope: null },
+      { permissionCode: 'ponto.administrar', scope: 'EMPRESA' },
+    ]);
+    prisma.user.create.mockResolvedValue({ id: 'u5', email: 'admin5@a.com', role: 'ADMIN' });
+
+    await service.create('c1', { email: 'admin5@a.com', role: 'ADMIN', profileId: 'profile-1' } as any);
+
+    expect(prisma.profilePermission.findMany).toHaveBeenCalledWith({ where: { profileId: 'profile-1' } });
+    const data = prisma.user.create.mock.calls[0][0].data;
+    expect(data.modules).toEqual(['DASHBOARD', 'PONTO_ADMINISTRACAO']);
+    expect(data.hasFullPontoAccess).toBe(true);
   });
 
   it('rejects creating an EMPLOYEE login without employeeId', async () => {
-    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', modules: [] } as any))
+    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', profileId: 'profile-1' } as any))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects creating an EMPLOYEE login for an employee from another company', async () => {
     prisma.employee.findFirst.mockResolvedValue(null);
-    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', modules: [] } as any))
+    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects creating a second login for an employee that already has one', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
     prisma.user.findUnique.mockResolvedValue({ id: 'existing' });
-    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', modules: [] } as any))
+    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -182,7 +163,7 @@ describe('UsersService', () => {
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.company.findUniqueOrThrow.mockResolvedValue({ maxEmployeeLogins: 10 });
     prisma.user.count.mockResolvedValue(10);
-    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', modules: [] } as any))
+    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any))
       .rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -192,7 +173,7 @@ describe('UsersService', () => {
     prisma.company.findUniqueOrThrow.mockResolvedValue({ maxEmployeeLogins: 10 });
     prisma.user.count.mockResolvedValue(9);
     prisma.user.create.mockResolvedValue({ id: 'u1', email: 'a@a.com', role: 'EMPLOYEE' });
-    const result = await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', modules: ['RH'] } as any);
+    const result = await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any);
     // Decisão de produto: senha temporária FIXA e conhecida ('Mudar@123'),
     // não mais aleatória — o bloqueio de acesso até a troca fica a cargo de
     // mustChangePassword (ver JwtAuthGuard), não da imprevisibilidade da
@@ -203,7 +184,7 @@ describe('UsersService', () => {
 
   it('hashes the fixed temporary password instead of persisting it in plaintext', async () => {
     prisma.user.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'u9', email: data.email, role: data.role }));
-    const result = await service.create('c1', { email: 'admin9@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+    const result = await service.create('c1', { email: 'admin9@a.com', role: 'ADMIN', profileId: 'profile-1' } as any);
     const createCall = prisma.user.create.mock.calls[0][0];
     expect(createCall.data.passwordHash).not.toBe('Mudar@123');
     expect(createCall.data.mustChangePassword).toBe(true);
@@ -221,7 +202,7 @@ describe('UsersService', () => {
       }),
     );
     await expect(
-      service.create('c1', { email: 'ja-existe-em-outra-empresa@test.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any),
+      service.create('c1', { email: 'ja-existe-em-outra-empresa@test.com', role: 'ADMIN', profileId: 'profile-1' } as any),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -241,13 +222,13 @@ describe('UsersService', () => {
       }),
     );
     await expect(
-      service.create('c1', { email: 'novo@test.com', role: 'EMPLOYEE', employeeId: 'e1', modules: [] } as any),
+      service.create('c1', { email: 'novo@test.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any),
     ).rejects.toThrow('Este funcionário já está vinculado a outro login');
   });
 
   it('creates an ADMIN login without checking the employee-linked plan limit', async () => {
     prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin2@a.com', role: 'ADMIN' });
-    const result = await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+    const result = await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', profileId: 'profile-1' } as any);
     expect(result.user.id).toBe('u2');
     expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
   });

@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
-import { computeProfileSignature, getOrCreateProfileForSignature } from '../permissions/profile-signature.util';
+import { deriveHasFullPontoAccessFromGrants, deriveModulesFromGrants } from '../permissions/profile-signature.util';
 import { assertNotLastHolderOfPermission } from './last-permission-holder.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -24,6 +24,7 @@ const SAFE_USER_SELECT = {
   role: true,
   employeeId: true,
   modules: true,
+  profileId: true,
   status: true,
   mustChangePassword: true,
   hasFullPontoAccess: true,
@@ -71,6 +72,9 @@ export class UsersService {
       }
     }
 
+    const profile = await this.prisma.profile.findFirst({ where: { id: dto.profileId, companyId } });
+    if (!profile) throw new BadRequestException(`Perfil ${dto.profileId} não encontrado nesta empresa`);
+
     // Senha temporária FIXA (decisão explícita do produto, não mais gerada
     // aleatoriamente) — devolvida uma única vez na resposta; o hash é o que
     // persiste. Todo login novo criado por um admin nasce com esta mesma
@@ -86,13 +90,9 @@ export class UsersService {
 
     let user;
     try {
-      // Achado crítico (I2) na revisão final da branch de authorization-architecture: create()
-      // nunca atribuía um `profileId`, então TODO login criado por um admin nascia com
-      // `permissions: {}` no JWT pra sempre — e, pior, invisível pra
-      // `assertNotLastHolderOfPermission` (o segundo ADMIN de uma empresa não "contava" como
-      // detentor de `usuarios.gerenciar`). O perfil é derivado de `role`/`modules` pela MESMA
-      // função do backfill (profile-signature.util.ts), e reaproveita um perfil homônimo já
-      // existente na empresa em vez de criar um duplicado.
+      // Fase 2a (19/09/2026): create() deixou de derivar um Perfil de `modules` (isso agora só
+      // acontece no script de backfill legado) — o admin escolhe o Perfil na tela, e `modules`/
+      // `hasFullPontoAccess` são DERIVADOS dele, na direção oposta (ver profile-signature.util.ts).
       //
       // Transação montada à mão no client CENTRAL (nunca runTenantTransaction/
       // runTenantInteractiveTransaction) — mesmo padrão e mesmo motivo de block()/remove() logo
@@ -102,16 +102,9 @@ export class UsersService {
       user = await runInsideExplicitTenantTransaction(() =>
         this.prisma.$transaction(async (tx) => {
           await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
-          // `hasFullPontoAccess: true` sempre: é o `@default(true)` da coluna e CreateUserDto não
-          // tem campo pra sobrescrever isso na criação (só o toggle posterior,
-          // PATCH .../ponto-access, muda). `effectiveHasFullPontoAccess` já neutraliza o flag pra
-          // um login EMPLOYEE dentro de computeProfileSignature.
-          const signature = computeProfileSignature({
-            role: dto.role,
-            modules: dto.modules,
-            hasFullPontoAccess: true,
-          });
-          const profileId = await getOrCreateProfileForSignature(tx, companyId, signature);
+          const grants = await tx.profilePermission.findMany({ where: { profileId: dto.profileId } });
+          const modules = deriveModulesFromGrants(grants);
+          const hasFullPontoAccess = deriveHasFullPontoAccessFromGrants(grants);
 
           return tx.user.create({
             data: {
@@ -120,8 +113,9 @@ export class UsersService {
               passwordHash,
               role: dto.role,
               employeeId: dto.role === 'EMPLOYEE' ? dto.employeeId : null,
-              modules: dto.modules,
-              profileId,
+              modules,
+              profileId: dto.profileId,
+              hasFullPontoAccess,
               // Sempre true aqui: quem recebe uma senha gerada pelo sistema (em
               // vez de escolher a própria, como em POST /auth/register) é
               // obrigado a trocá-la no primeiro acesso. Mesmo bug/mesmo fix de
