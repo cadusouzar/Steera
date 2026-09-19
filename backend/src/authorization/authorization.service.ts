@@ -46,7 +46,14 @@ export class AuthorizationService implements OnApplicationBootstrap {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user?.profileId) return {};
 
-    const grants = await this.prisma.profilePermission.findMany({ where: { profileId: user.profileId } });
+    // `companyId` explícito além do `profileId` (defesa em profundidade, mesma postura já usada em
+    // praticamente toda query deste projeto): não existe FK composta garantindo que o `Profile`
+    // apontado por `User.profileId` pertença à MESMA empresa do usuário, então hoje isso só é
+    // seguro porque nenhum caminho de código escreve um `profileId` cross-company. Filtrar aqui
+    // fecha estruturalmente a possibilidade de um perfil de outra empresa virar permissão no JWT.
+    const grants = await this.prisma.profilePermission.findMany({
+      where: { profileId: user.profileId, companyId: user.companyId },
+    });
     const result: Record<string, Scope | null> = {};
     for (const grant of grants) {
       result[grant.permissionCode] = grant.scope;

@@ -55,13 +55,18 @@ describe('AuthorizationService', () => {
 
   describe('getEffectivePermissions', () => {
     it('returns a map of permissionCode to scope for the user\'s profile', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user-1', profileId: 'profile-1' });
+      prisma.user.findUnique.mockResolvedValue({ id: 'user-1', companyId: 'company-1', profileId: 'profile-1' });
       prisma.profilePermission.findMany.mockResolvedValue([
         { permissionCode: 'funcionarios.ver', scope: 'EQUIPE' },
         { permissionCode: 'dashboard.ver', scope: null },
       ]);
       const result = await service.getEffectivePermissions('user-1');
       expect(result).toEqual({ 'funcionarios.ver': 'EQUIPE', 'dashboard.ver': null });
+      // A consulta precisa escopar por empresa também, não só pelo profileId (defesa em
+      // profundidade — não há FK composta garantindo que o Profile seja da mesma empresa).
+      expect(prisma.profilePermission.findMany).toHaveBeenCalledWith({
+        where: { profileId: 'profile-1', companyId: 'company-1' },
+      });
     });
 
     it('returns an empty map when the user has no profile assigned', async () => {
