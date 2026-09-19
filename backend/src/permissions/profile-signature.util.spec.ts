@@ -2,6 +2,8 @@ import { Scope } from '@prisma/client';
 import { PERMISSION_CATALOG } from './permission-catalog';
 import {
   computeProfileSignature,
+  deriveHasFullPontoAccessFromGrants,
+  deriveModulesFromGrants,
   getOrCreateProfileForSignature,
   getRoleOnlyGatedPermissionCodes,
   MODULE_TO_PERMISSIONS,
@@ -241,5 +243,49 @@ describe('getOrCreateProfileForSignature', () => {
       'Administrador Geral (2)',
       'Administrador Geral (3)',
     ]);
+  });
+});
+
+describe('deriveModulesFromGrants', () => {
+  it('inclui um módulo se o perfil concede QUALQUER permissão daquele módulo', () => {
+    const result = deriveModulesFromGrants([{ permissionCode: 'funcionarios.ver' }]);
+    expect(result).toEqual(['RH_FUNCIONARIOS']);
+  });
+
+  it('combina módulos de várias permissões sem duplicar', () => {
+    const result = deriveModulesFromGrants([
+      { permissionCode: 'funcionarios.ver' },
+      { permissionCode: 'funcionarios.gerenciar' },
+      { permissionCode: 'ponto.administrar' },
+    ]);
+    expect(result.sort()).toEqual(['PONTO_ADMINISTRACAO', 'RH_FUNCIONARIOS'].sort());
+  });
+
+  it('nunca inclui RH (lista vazia no mapa)', () => {
+    const result = deriveModulesFromGrants([{ permissionCode: 'usuarios.gerenciar' }]);
+    expect(result).not.toContain('RH');
+  });
+
+  it('devolve lista vazia sem nenhum grant', () => {
+    expect(deriveModulesFromGrants([])).toEqual([]);
+  });
+
+  it('ignora um permissionCode que não corresponde a nenhum módulo', () => {
+    const result = deriveModulesFromGrants([{ permissionCode: 'usuarios.gerenciar' }]);
+    expect(result).toEqual([]);
+  });
+});
+
+describe('deriveHasFullPontoAccessFromGrants', () => {
+  it('true quando ponto.administrar tem scope EMPRESA', () => {
+    expect(deriveHasFullPontoAccessFromGrants([{ permissionCode: 'ponto.administrar', scope: Scope.EMPRESA }])).toBe(true);
+  });
+
+  it('false quando ponto.administrar tem scope EQUIPE', () => {
+    expect(deriveHasFullPontoAccessFromGrants([{ permissionCode: 'ponto.administrar', scope: Scope.EQUIPE }])).toBe(false);
+  });
+
+  it('false quando não há grant de ponto.administrar', () => {
+    expect(deriveHasFullPontoAccessFromGrants([])).toBe(false);
   });
 });

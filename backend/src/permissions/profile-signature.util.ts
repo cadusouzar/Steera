@@ -1,4 +1,4 @@
-import { Prisma, Scope } from '@prisma/client';
+import { AppModule as AppModuleEnum, Prisma, Scope } from '@prisma/client';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
 import { PERMISSION_CATALOG } from './permission-catalog';
 
@@ -23,6 +23,33 @@ export const MODULE_TO_PERMISSIONS: Record<string, string[]> = {
   FINANCAS: ['financas.lancamentos.ver', 'financas.lancamentos.gerenciar'],
   RH: [], // legado morto, nunca atribuído a login novo, nunca concede nada
 };
+
+// Direção OPOSTA de computeProfileSignature: dado o que um Perfil concede, deriva quais Módulos
+// legados precisam continuar marcados pra `ModulesGuard` (ainda a trava real até a Fase 2b) não
+// barrar quem tem a permissão de verdade. Um módulo entra na lista se o perfil concede QUALQUER
+// uma das permissões daquele módulo — não é possível ser mais preciso enquanto o `ModulesGuard`
+// não distinguir "ver" de "gerenciar" dentro do mesmo módulo (ver spec da Fase 2a, "Limitação
+// temporária conhecida"). `RH` nunca é retornado (`MODULE_TO_PERMISSIONS.RH` é uma lista vazia).
+export function deriveModulesFromGrants(grants: { permissionCode: string }[]): AppModuleEnum[] {
+  const grantedCodes = new Set(grants.map((g) => g.permissionCode));
+  const modules: AppModuleEnum[] = [];
+  for (const [moduleId, codes] of Object.entries(MODULE_TO_PERMISSIONS)) {
+    if (codes.length > 0 && codes.some((code) => grantedCodes.has(code))) {
+      modules.push(moduleId as AppModuleEnum);
+    }
+  }
+  return modules;
+}
+
+// `hasFullPontoAccess` deriva do scope concedido a `ponto.administrar`: EMPRESA = acesso total,
+// EQUIPE (ou ausente) = restrito ao próprio time. Só é relevante pra ADMIN — `effectiveHasFullPontoAccess`
+// já trata o lado de LEITURA desse valor pra EMPLOYEE (sempre `false`, por definição).
+export function deriveHasFullPontoAccessFromGrants(
+  grants: { permissionCode: string; scope: Scope | null }[],
+): boolean {
+  const pontoAdmin = grants.find((g) => g.permissionCode === 'ponto.administrar');
+  return pontoAdmin?.scope === Scope.EMPRESA;
+}
 
 // Códigos do catálogo que NENHUM módulo concede — sob o sistema antigo eles eram gated só por
 // `@Roles('ADMIN')`, sem nenhum `@RequireModule(...)` por trás (verificado controller a controller:
