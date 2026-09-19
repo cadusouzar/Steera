@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
+import { computeProfileSignature, getOrCreateProfileForSignature } from '../permissions/profile-signature.util';
 import { assertNotLastHolderOfPermission } from './last-permission-holder.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -85,22 +86,52 @@ export class UsersService {
 
     let user;
     try {
-      user = await this.prisma.user.create({
-        data: {
-          companyId,
-          email: dto.email,
-          passwordHash,
-          role: dto.role,
-          employeeId: dto.role === 'EMPLOYEE' ? dto.employeeId : null,
-          modules: dto.modules,
-          // Sempre true aqui: quem recebe uma senha gerada pelo sistema (em
-          // vez de escolher a própria, como em POST /auth/register) é
-          // obrigado a trocá-la no primeiro acesso. Mesmo bug/mesmo fix de
-          // AuthService.register() para P2002 abaixo — ver esse catch.
-          mustChangePassword: true,
-        },
-        select: SAFE_USER_SELECT,
-      });
+      // Achado crítico (I2) na revisão final da branch de authorization-architecture: create()
+      // nunca atribuía um `profileId`, então TODO login criado por um admin nascia com
+      // `permissions: {}` no JWT pra sempre — e, pior, invisível pra
+      // `assertNotLastHolderOfPermission` (o segundo ADMIN de uma empresa não "contava" como
+      // detentor de `usuarios.gerenciar`). O perfil é derivado de `role`/`modules` pela MESMA
+      // função do backfill (profile-signature.util.ts), e reaproveita um perfil homônimo já
+      // existente na empresa em vez de criar um duplicado.
+      //
+      // Transação montada à mão no client CENTRAL (nunca runTenantTransaction/
+      // runTenantInteractiveTransaction) — mesmo padrão e mesmo motivo de block()/remove() logo
+      // abaixo: `User`/`Profile`/`ProfilePermission` são tabelas CENTRAIS, inalcançáveis por um
+      // client de TENANT. O `set_config` de RLS é emitido manualmente como primeira instrução
+      // (Profile/ProfilePermission têm política de RLS por `companyId`).
+      user = await runInsideExplicitTenantTransaction(() =>
+        this.prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
+          // `hasFullPontoAccess: true` sempre: é o `@default(true)` da coluna e CreateUserDto não
+          // tem campo pra sobrescrever isso na criação (só o toggle posterior,
+          // PATCH .../ponto-access, muda). `effectiveHasFullPontoAccess` já neutraliza o flag pra
+          // um login EMPLOYEE dentro de computeProfileSignature.
+          const signature = computeProfileSignature({
+            role: dto.role,
+            modules: dto.modules,
+            hasFullPontoAccess: true,
+          });
+          const profileId = await getOrCreateProfileForSignature(tx, companyId, signature);
+
+          return tx.user.create({
+            data: {
+              companyId,
+              email: dto.email,
+              passwordHash,
+              role: dto.role,
+              employeeId: dto.role === 'EMPLOYEE' ? dto.employeeId : null,
+              modules: dto.modules,
+              profileId,
+              // Sempre true aqui: quem recebe uma senha gerada pelo sistema (em
+              // vez de escolher a própria, como em POST /auth/register) é
+              // obrigado a trocá-la no primeiro acesso. Mesmo bug/mesmo fix de
+              // AuthService.register() para P2002 abaixo — ver esse catch.
+              mustChangePassword: true,
+            },
+            select: SAFE_USER_SELECT,
+          });
+        }),
+      );
     } catch (err) {
       // P2002 = unique constraint violation — User tem DUAS colunas únicas, `email` (global, não só
       // por empresa — sem esse catch, um e-mail já usado por QUALQUER empresa vazava como 500 opaco,

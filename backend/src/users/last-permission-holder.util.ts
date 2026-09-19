@@ -29,6 +29,25 @@ export async function assertNotLastHolderOfPermission(
   // conexão cujo search_path apontava pra um schema de tenant. `User`/`ProfilePermission` são
   // tabelas CENTRAIS (só existem em `public`) — qualificar o schema aqui explicitamente resolve
   // na raiz, sem depender de nenhum chamador lembrar de reemitir `SET LOCAL search_path`.
+  // Achado crítico (C2) na revisão final da branch: a contagem abaixo rodava INCONDICIONALMENTE,
+  // mesmo quando o alvo não detinha a permissão protegida. Duas consequências reais (não latentes):
+  // (1) antes de `UsersService.create()` passar a atribuir perfil e do backfill rodar, NINGUÉM
+  // detém permissão nenhuma por este join — a contagem dava sempre 0 e block()/remove() rejeitavam
+  // TODA ação de TODA empresa; (2) mesmo depois, bloquear um login EMPLOYEE (que nunca detém
+  // `usuarios.gerenciar`) batia neste guard sem motivo. Remover quem nunca deteve a permissão não
+  // pode reduzir o conjunto de detentores — então a checagem é um no-op nesse caso, e a contagem
+  // (mais cara) nem chega a rodar.
+  const targetHoldsIt = await tx.$queryRawUnsafe<{ exists: boolean }[]>(
+    `SELECT EXISTS (
+       SELECT 1 FROM "public"."User" u
+       JOIN "public"."ProfilePermission" pp ON pp."profileId" = u."profileId"
+       WHERE u.id = $1 AND pp."permissionCode" = $2
+     ) as exists`,
+    excludingUserId,
+    permissionCode,
+  );
+  if (!targetHoldsIt[0]?.exists) return;
+
   const rows = await tx.$queryRawUnsafe<{ count: bigint }[]>(
     `SELECT COUNT(*)::bigint as count
      FROM "public"."User" u

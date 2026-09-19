@@ -17,6 +17,12 @@ describe('UsersService', () => {
       },
       company: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },
+      // create() agora deriva e atribui um Profile ao login novo (achado I2 da revisão final) —
+      // por padrão o perfil homônimo já existe na empresa e é reaproveitado.
+      profile: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'profile-existente' }),
+        create: jest.fn().mockResolvedValue({ id: 'profile-novo' }),
+      },
       // Suporta os dois estilos de $transaction usados neste service: array (block(), via
       // runTenantTransaction) e callback (updatePontoAccess() desligando acesso, via
       // runTenantInteractiveTransaction) — mesmo padrão já usado em auth.service.spec.ts. Sem
@@ -28,9 +34,11 @@ describe('UsersService', () => {
       // na maioria dos testes, só precisa existir pra `tx.$executeRaw` não quebrar como
       // `undefined()`.
       $executeRaw: jest.fn().mockResolvedValue(undefined),
-      // Chamado por assertNotLastHolderOfPermission (Task 8) — mock default retorna count >= 2
-      // (seguro para block/remove), permitindo que testes genéricos passem sem mockagem adicional.
-      $queryRawUnsafe: jest.fn().mockResolvedValue([{ count: 2n }]),
+      // Chamado por assertNotLastHolderOfPermission — a PRIMEIRA chamada é sempre a consulta de
+      // existência ("o alvo detém a permissão?"). O default abaixo (`exists: false`) é o caso
+      // seguro/no-op para block/remove, permitindo que testes genéricos passem sem mockagem
+      // adicional; os testes específicos da trava sobrescrevem as duas chamadas em sequência.
+      $queryRawUnsafe: jest.fn().mockResolvedValue([{ exists: false }]),
     };
     const module = await Test.createTestingModule({
       providers: [UsersService, { provide: PrismaService, useValue: prisma }],
@@ -84,6 +92,32 @@ describe('UsersService', () => {
     const call = prisma.user.create.mock.calls[0][0];
     expect(call.select).toBeDefined();
     expect(call.select.passwordHash).toBeUndefined();
+  });
+
+  // Achado I2 da revisão final: create() nunca atribuía profileId — todo login criado por um admin
+  // ficava com `permissions: {}` pra sempre E invisível pra assertNotLastHolderOfPermission.
+  it('create atribui um profileId derivado de role/modules, reaproveitando um perfil homônimo existente', async () => {
+    prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin2@a.com', role: 'ADMIN' });
+    await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith({
+      where: { companyId: 'c1', name: 'Administrador Geral' },
+    });
+    expect(prisma.profile.create).not.toHaveBeenCalled();
+    expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-existente');
+  });
+
+  it('create cria o perfil quando ainda não existe um homônimo, com os grants da assinatura', async () => {
+    prisma.profile.findFirst.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'u3', email: 'emp@a.com', role: 'ADMIN' });
+    await service.create('c1', { email: 'emp@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+
+    const createArgs = prisma.profile.create.mock.calls[0][0];
+    expect(createArgs.data.name).toBe('Administrador Geral');
+    const codes = createArgs.data.permissions.create.map((g: any) => g.permissionCode).sort();
+    // ADMIN de módulos restritos: só o que DASHBOARD concede + os códigos gated só por papel.
+    expect(codes).toEqual(['campos-personalizados.gerenciar', 'dashboard.ver', 'usuarios.gerenciar']);
+    expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-novo');
   });
 
   it('rejects creating an EMPLOYEE login without employeeId', async () => {
@@ -220,7 +254,10 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
     prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
     prisma.user.count.mockResolvedValue(2); // pelo menos 2 ADMINs ATIVOS (passa assertNotLastActiveAdmin)
-    prisma.$queryRawUnsafe.mockResolvedValue([{ count: 0n }]); // mas nenhum outro tem usuarios.gerenciar
+    // 1ª chamada: o alvo DETÉM a permissão; 2ª: nenhum OUTRO login ativo detém.
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([{ exists: true }])
+      .mockResolvedValueOnce([{ count: 0n }]);
     await expect(service.block('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
@@ -285,9 +322,21 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
       prisma.user.count.mockResolvedValue(2); // pelo menos 2 ADMINs ATIVOS (passa assertNotLastActiveAdmin)
-      prisma.$queryRawUnsafe.mockResolvedValue([{ count: 0n }]); // mas nenhum outro tem usuarios.gerenciar
+      prisma.$queryRawUnsafe
+        .mockResolvedValueOnce([{ exists: true }])
+        .mockResolvedValueOnce([{ count: 0n }]);
       await expect(service.remove('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    // Regressão-alvo do achado C2: antes do fix, a contagem rodava INCONDICIONALMENTE — excluir um
+    // login EMPLOYEE (que nunca detém `usuarios.gerenciar`) batia na trava sem motivo.
+    it('remove permite excluir um login que NÃO detém usuarios.gerenciar, mesmo sem outros detentores', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'emp1', companyId: 'c1' });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'emp1', role: 'EMPLOYEE', status: 'ACTIVE' });
+      prisma.$queryRawUnsafe.mockResolvedValueOnce([{ exists: false }]);
+      await service.remove('c1', 'emp1');
+      expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'emp1' } });
     });
   });
 
