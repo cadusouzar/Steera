@@ -30,6 +30,7 @@ import { TimeClockModule } from './time-clock/time-clock.module';
 import { TimeAdjustmentsModule } from './time-adjustments/time-adjustments.module';
 import { TimeJustificationsModule } from './time-justifications/time-justifications.module';
 import { TenantMigrationModule } from './tenant-migration/tenant-migration.module';
+import { ProfilesModule } from './profiles/profiles.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { TenantMigrationModule } from './tenant-migration/tenant-migration.modul
     SubscriptionsModule,
     ReportsModule,
     UsersModule,
+    ProfilesModule,
     WorkSchedulesModule,
     WorkLocationsModule,
     TimeTrackingSettingsModule,
