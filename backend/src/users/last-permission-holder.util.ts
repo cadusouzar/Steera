@@ -12,10 +12,27 @@ export async function assertNotLastHolderOfPermission(
   permissionCode: string,
   excludingUserId: string,
 ): Promise<void> {
+  // Achado na validação final da task-9 (authorization-architecture): esta query rodava sem
+  // qualificar o schema (`"User"`/`"ProfilePermission"` soltos, confiando no `search_path` da
+  // conexão). SQL bruto (`$queryRawUnsafe`) nunca passa pela extensão de roteamento por tenant
+  // deste projeto (mesma limitação já documentada em Custom Fields/schema-per-tenant) e, ao
+  // contrário de uma chamada `.model.op()` — que o engine do Prisma sempre qualifica pelo schema
+  // do PRÓPRIO client, nunca pelo `search_path` de runtime —, SQL bruto solto fica à mercê do
+  // `search_path` que a conexão física tiver NO MOMENTO, o que sob PgBouncer em `pool_mode =
+  // transaction` (ver backend/pgbouncer/pgbouncer.ini) não é garantido ser `public`: a mesma
+  // entrada de banco do PgBouncer é compartilhada por TODOS os clients Prisma desta empresa
+  // (central + todos os de tenant), então uma conexão física pode ter sido devolvida ao pool por
+  // um client de TENANT com `search_path=tenant_x` ainda ativo. Reproduzido ao vivo rodando a
+  // suíte e2e completa (nunca isolado — só aparece sob o volume de conexões/schemas trocando de
+  // mão da suíte inteira): `PATCH .../block` e `DELETE .../users/:id` falhavam com 500
+  // ("relação User não existe") sempre que a transação central deste arquivo acabava herdando uma
+  // conexão cujo search_path apontava pra um schema de tenant. `User`/`ProfilePermission` são
+  // tabelas CENTRAIS (só existem em `public`) — qualificar o schema aqui explicitamente resolve
+  // na raiz, sem depender de nenhum chamador lembrar de reemitir `SET LOCAL search_path`.
   const rows = await tx.$queryRawUnsafe<{ count: bigint }[]>(
     `SELECT COUNT(*)::bigint as count
-     FROM "User" u
-     JOIN "ProfilePermission" pp ON pp."profileId" = u."profileId"
+     FROM "public"."User" u
+     JOIN "public"."ProfilePermission" pp ON pp."profileId" = u."profileId"
      WHERE u."companyId" = $1
        AND u.status = 'ACTIVE'
        AND u.id != $2
