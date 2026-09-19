@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { Scope } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { findDirectReportIds } from '../time-management/hierarchy.util';
+import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Central: calcula as permissões efetivas de um usuário (login/refresh — vai pro JWT) e resolve
@@ -9,8 +10,37 @@ import { PrismaService } from '../prisma/prisma.service';
 // `'ALL'` (mesmo sentinela já usado em TimeManagementAuthService.getManageableEmployeeIds) sinaliza
 // "sem filtro necessário", nunca materializa a lista inteira de funcionários da empresa.
 @Injectable()
-export class AuthorizationService {
+export class AuthorizationService implements OnApplicationBootstrap {
   constructor(private readonly prisma: PrismaService) {}
+
+  // Auto-semeadura do catálogo de permissões (achado crítico na revisão final da branch de
+  // authorization-architecture): `ProfilePermission.permissionCode` tem uma FK `ON DELETE RESTRICT`
+  // pra `Permission.code`, e `POST /auth/register` insere uma linha de ProfilePermission por
+  // entrada do catálogo. Com a tabela `Permission` vazia (nenhum ambiente rodava
+  // `npm run seed:permissions`, um script manual que nunca foi chamado por migration nem por boot),
+  // TODO register() falhava com um P2003 cru virando 500 — ou seja, nenhuma empresa nova conseguia
+  // ser criada num banco recém-migrado. Semear aqui, no boot, torna o catálogo auto-suficiente:
+  // `Permission` é um catálogo COMPARTILHADO por todo o sistema (sem `companyId`, sem RLS — ver a
+  // seção RLS da migration 20260918194622_add_authorization_core, que habilita RLS só em
+  // `Profile`/`ProfilePermission`), então não precisa de `runAsSystem`/contexto de tenant nenhum.
+  // `scripts/seed-permissions.ts` continua existindo como ferramenta manual/de CI, só deixou de ser
+  // o único caminho pra correção.
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      for (const p of PERMISSION_CATALOG) {
+        await this.prisma.permission.upsert({
+          where: { code: p.code },
+          create: { code: p.code, resource: p.resource, action: p.action, labelPt: p.labelPt, validScopes: p.validScopes },
+          update: { resource: p.resource, action: p.action, labelPt: p.labelPt, validScopes: p.validScopes },
+        });
+      }
+    } catch (err) {
+      // Nunca derruba o boot — mesmo padrão de BillingSchedulerService/TenantMigrationManagerService:
+      // uma falha aqui não deve impedir o resto da aplicação de subir; o próximo boot tenta de novo.
+      // eslint-disable-next-line no-console
+      console.error('Falha ao semear o catálogo de permissões:', err);
+    }
+  }
 
   async getEffectivePermissions(userId: string): Promise<Record<string, Scope | null>> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });

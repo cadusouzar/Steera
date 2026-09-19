@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { Scope } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthorizationService } from './authorization.service';
 
@@ -17,11 +18,39 @@ describe('AuthorizationService', () => {
       user: { findUnique: jest.fn() },
       employee: { findMany: jest.fn(), findUnique: jest.fn() },
       profilePermission: { findMany: jest.fn() },
+      permission: { upsert: jest.fn() },
     };
     const module = await Test.createTestingModule({
       providers: [AuthorizationService, { provide: PrismaService, useValue: prisma }],
     }).compile();
     service = module.get(AuthorizationService);
+  });
+
+  describe('onApplicationBootstrap (auto-seed do catálogo de permissões)', () => {
+    it('faz upsert de TODAS as entradas do catálogo', async () => {
+      await service.onApplicationBootstrap();
+      expect(prisma.permission.upsert).toHaveBeenCalledTimes(PERMISSION_CATALOG.length);
+      const codes = prisma.permission.upsert.mock.calls.map((c: any[]) => c[0].where.code);
+      expect(codes.sort()).toEqual(PERMISSION_CATALOG.map((p) => p.code).sort());
+      // O `create` tem que trazer o registro COMPLETO (sem isso, a FK de ProfilePermission passa
+      // mas o catálogo fica inutilizável pra qualquer tela que leia labelPt/validScopes).
+      const first = prisma.permission.upsert.mock.calls[0][0];
+      expect(first.create).toEqual({
+        code: PERMISSION_CATALOG[0].code,
+        resource: PERMISSION_CATALOG[0].resource,
+        action: PERMISSION_CATALOG[0].action,
+        labelPt: PERMISSION_CATALOG[0].labelPt,
+        validScopes: PERMISSION_CATALOG[0].validScopes,
+      });
+    });
+
+    it('nunca derruba o boot quando o banco falha', async () => {
+      prisma.permission.upsert.mockRejectedValue(new Error('db down'));
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
+    });
   });
 
   describe('getEffectivePermissions', () => {
