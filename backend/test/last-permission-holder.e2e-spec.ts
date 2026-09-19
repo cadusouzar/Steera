@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { Scope } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { AuthorizationService } from '../src/authorization/authorization.service';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
@@ -208,26 +209,74 @@ describe('Trava do último detentor de usuarios.gerenciar (e2e)', () => {
       .expect(204);
   });
 
-  it('o perfil derivado de um ADMIN de módulos restritos não concede o catálogo inteiro', async () => {
-    const secondAdminId = await createAdminLogin();
-    const codes = await sys(async () => {
-      const user = await prisma.user.findUniqueOrThrow({ where: { id: secondAdminId } });
-      const grants = await prisma.profilePermission.findMany({ where: { profileId: user.profileId! } });
+  // Regressão-alvo da 2ª rodada de fixes da revisão final: `getOrCreateProfileForSignature`
+  // reaproveitava QUALQUER perfil homônimo sem olhar os grants. Como todo login novo nasce com
+  // `hasFullPontoAccess: true`, a assinatura de um ADMIN sempre gera o nome 'Administrador Geral',
+  // independente dos `modules` — então um admin restrito era anexado ao perfil do FUNDADOR
+  // (catálogo inteiro) e ganhava acesso total em silêncio.
+  it('um ADMIN de módulos restritos NÃO herda o perfil completo do fundador — vai pra um perfil próprio', async () => {
+    const secondAdminId = await createAdminLogin(); // modules: ['DASHBOARD']
+
+    const founderProfileId = (await sys(() => prisma.user.findUniqueOrThrow({ where: { id: founderId } }))).profileId;
+    const secondProfileId = (await sys(() => prisma.user.findUniqueOrThrow({ where: { id: secondAdminId } }))).profileId;
+
+    expect(secondProfileId).not.toBeNull();
+    expect(secondProfileId).not.toBe(founderProfileId);
+
+    const secondCodes = await sys(async () => {
+      const grants = await prisma.profilePermission.findMany({ where: { profileId: secondProfileId! } });
       return grants.map((g) => g.permissionCode).sort();
     });
-    // Reaproveita o "Administrador Geral" do fundador (mesmo nome de assinatura) — o fundador tem
-    // TODOS os módulos, então o perfil legitimamente carrega o catálogo inteiro. O que este teste
-    // fixa é que `usuarios.gerenciar` está lá com escopo EMPRESA e que o perfil foi REAPROVEITADO,
-    // não duplicado (M1).
-    expect(codes).toContain('usuarios.gerenciar');
-    const profiles = await sys(() => prisma.profile.findMany({ where: { companyId, name: 'Administrador Geral' } }));
-    expect(profiles).toHaveLength(1);
+    // Exatamente o que DASHBOARD concede + os dois códigos gated só por papel — nada de Clientes,
+    // Finanças, Ponto, Cargos ou Funcionários vindos de graça do perfil do fundador.
+    expect(secondCodes).toEqual(['campos-personalizados.gerenciar', 'dashboard.ver', 'usuarios.gerenciar']);
+
+    // E o que o backend devolve como permissões efetivas desse login (o mesmo objeto que vai pro
+    // claim do JWT) reflete só o conjunto restrito, não o do fundador.
+    const effective = await sys(() => app.get(AuthorizationService).getEffectivePermissions(secondAdminId));
+    expect(Object.keys(effective).sort()).toEqual([
+      'campos-personalizados.gerenciar',
+      'dashboard.ver',
+      'usuarios.gerenciar',
+    ]);
+
+    const founderCodes = await sys(async () => {
+      const grants = await prisma.profilePermission.findMany({ where: { profileId: founderProfileId! } });
+      return grants.map((g) => g.permissionCode);
+    });
+    expect(founderCodes.length).toBeGreaterThan(secondCodes.length);
+    expect(founderCodes).toContain('clientes.gerenciar');
+
+    // O perfil novo nasce com nome desambiguado, sem colidir com o do fundador.
+    const secondProfile = await sys(() => prisma.profile.findUniqueOrThrow({ where: { id: secondProfileId! } }));
+    expect(secondProfile.name).toBe('Administrador Geral (2)');
+
+    // `usuarios.gerenciar` continua presente com escopo EMPRESA (é gated só por papel).
     expect(
       await sys(() =>
         prisma.profilePermission.findFirst({
-          where: { profileId: profiles[0].id, permissionCode: 'usuarios.gerenciar' },
+          where: { profileId: secondProfileId!, permissionCode: 'usuarios.gerenciar' },
         }),
       ),
     ).toMatchObject({ scope: Scope.EMPRESA });
+
+  });
+
+  // Um TERCEIRO admin com a MESMA assinatura restrita reaproveita o perfil já desambiguado, em vez
+  // de criar 'Administrador Geral (3)' — a desambiguação não pode virar duplicação sem fim.
+  it('dois ADMINs com a mesma assinatura restrita compartilham o mesmo perfil desambiguado', async () => {
+    const a = await createAdminLogin();
+    const b = await createAdminLogin();
+
+    const [pa, pb] = await sys(async () => [
+      (await prisma.user.findUniqueOrThrow({ where: { id: a } })).profileId,
+      (await prisma.user.findUniqueOrThrow({ where: { id: b } })).profileId,
+    ]);
+    expect(pa).toBe(pb);
+
+    const profiles = await sys(() =>
+      prisma.profile.findMany({ where: { companyId }, orderBy: { name: 'asc' }, select: { name: true } }),
+    );
+    expect(profiles.map((p) => p.name)).toEqual(['Administrador Geral', 'Administrador Geral (2)']);
   });
 });

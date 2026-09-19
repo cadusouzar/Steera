@@ -109,28 +109,72 @@ describe('getOrCreateProfileForSignature', () => {
     grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }],
   };
 
-  it('reaproveita um perfil homônimo já existente na empresa, sem criar outro', async () => {
-    const tx = {
+  // Simula o banco: perfis por (companyId, name) com seus grants, para exercitar o laço de
+  // desambiguação de verdade em vez de mockar cada chamada individualmente.
+  function makeTx(seed: { id: string; name: string; grants: { permissionCode: string; scope: Scope | null }[] }[] = []) {
+    const profiles = [...seed];
+    let nextId = 1;
+    return {
+      profiles,
       profile: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'profile-existente' }),
-        create: jest.fn(),
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve(profiles.find((p) => p.name === where.name) ?? null),
+        ),
+        create: jest.fn(({ data }: any) => {
+          const created = {
+            id: `profile-criado-${nextId++}`,
+            name: data.name,
+            grants: data.permissions.create.map((g: any) => ({ permissionCode: g.permissionCode, scope: g.scope })),
+          };
+          profiles.push(created);
+          return Promise.resolve(created);
+        }),
+      },
+      profilePermission: {
+        findMany: jest.fn(({ where }: any) =>
+          Promise.resolve(profiles.find((p) => p.id === where.profileId)?.grants ?? []),
+        ),
       },
     };
+  }
+
+  it('(a) mesmo nome + MESMOS grants: reaproveita o perfil existente, sem criar outro', async () => {
+    const tx = makeTx([
+      { id: 'profile-existente', name: 'Administrador Geral', grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }] },
+    ]);
     const id = await getOrCreateProfileForSignature(tx as any, 'company-1', signature);
     expect(id).toBe('profile-existente');
     expect(tx.profile.findFirst).toHaveBeenCalledWith({ where: { companyId: 'company-1', name: 'Administrador Geral' } });
     expect(tx.profile.create).not.toHaveBeenCalled();
   });
 
-  it('cria o perfil com os grants da assinatura quando não existe nenhum homônimo', async () => {
-    const tx = {
-      profile: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 'profile-novo' }),
-      },
+  it('reaproveita mesmo com os grants na ORDEM diferente (comparação por conjunto, não por posição)', async () => {
+    const multi: ProfileSignature = {
+      name: 'Administrador Geral',
+      isProtected: true,
+      grants: [
+        { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA },
+        { permissionCode: 'dashboard.ver', scope: null },
+      ],
     };
+    const tx = makeTx([
+      {
+        id: 'profile-existente',
+        name: 'Administrador Geral',
+        grants: [
+          { permissionCode: 'dashboard.ver', scope: null },
+          { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA },
+        ],
+      },
+    ]);
+    expect(await getOrCreateProfileForSignature(tx as any, 'company-1', multi)).toBe('profile-existente');
+    expect(tx.profile.create).not.toHaveBeenCalled();
+  });
+
+  it('cria o perfil com os grants da assinatura quando não existe nenhum homônimo', async () => {
+    const tx = makeTx();
     const id = await getOrCreateProfileForSignature(tx as any, 'company-1', signature);
-    expect(id).toBe('profile-novo');
+    expect(id).toBe('profile-criado-1');
     expect(tx.profile.create).toHaveBeenCalledWith({
       data: {
         companyId: 'company-1',
@@ -139,5 +183,63 @@ describe('getOrCreateProfileForSignature', () => {
         permissions: { create: [{ companyId: 'company-1', permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }] },
       },
     });
+  });
+
+  // Regressão-alvo da 2ª rodada de fixes: o perfil do fundador (catálogo inteiro) NÃO pode ser
+  // reaproveitado por um admin restrito só porque a assinatura dele gera o mesmo nome.
+  it('(b) mesmo nome + grants DIFERENTES: cria um perfil NOVO com nome desambiguado, nunca reaproveita', async () => {
+    const tx = makeTx([
+      {
+        id: 'profile-fundador',
+        name: 'Administrador Geral',
+        grants: [
+          { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA },
+          { permissionCode: 'clientes.gerenciar', scope: Scope.EMPRESA },
+        ],
+      },
+    ]);
+    const id = await getOrCreateProfileForSignature(tx as any, 'company-1', signature);
+    expect(id).not.toBe('profile-fundador');
+    expect(tx.profile.create).toHaveBeenCalledTimes(1);
+    const created = tx.profile.create.mock.calls[0][0];
+    expect(created.data.name).toBe('Administrador Geral (2)');
+    expect(created.data.permissions.create).toEqual([
+      { companyId: 'company-1', permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA },
+    ]);
+  });
+
+  it('(c) a MESMA assinatura restrita chamada de novo reaproveita o perfil já desambiguado, não cria um terceiro', async () => {
+    const tx = makeTx([
+      {
+        id: 'profile-fundador',
+        name: 'Administrador Geral',
+        grants: [
+          { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA },
+          { permissionCode: 'clientes.gerenciar', scope: Scope.EMPRESA },
+        ],
+      },
+    ]);
+    const first = await getOrCreateProfileForSignature(tx as any, 'company-1', signature);
+    const second = await getOrCreateProfileForSignature(tx as any, 'company-1', signature);
+    expect(second).toBe(first);
+    expect(tx.profile.create).toHaveBeenCalledTimes(1);
+    expect(tx.profiles).toHaveLength(2); // fundador + o desambiguado, nunca um terceiro
+  });
+
+  it('uma TERCEIRA assinatura distinta sob o mesmo nome continua incrementando o sufixo', async () => {
+    const tx = makeTx([
+      { id: 'profile-fundador', name: 'Administrador Geral', grants: [{ permissionCode: 'clientes.gerenciar', scope: Scope.EMPRESA }] },
+    ]);
+    await getOrCreateProfileForSignature(tx as any, 'company-1', signature);
+    const outra: ProfileSignature = {
+      name: 'Administrador Geral',
+      isProtected: true,
+      grants: [{ permissionCode: 'dashboard.ver', scope: null }],
+    };
+    await getOrCreateProfileForSignature(tx as any, 'company-1', outra);
+    expect(tx.profile.create.mock.calls.map((c: any[]) => c[0].data.name)).toEqual([
+      'Administrador Geral (2)',
+      'Administrador Geral (3)',
+    ]);
   });
 });

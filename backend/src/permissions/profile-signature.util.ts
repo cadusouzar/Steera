@@ -97,31 +97,89 @@ export function computeProfileSignature(user: ProfileSignatureInput): ProfileSig
   return { name: `Legado: ${sortedModules.join(', ')}`, isProtected: false, grants };
 }
 
+/** Teto de tentativas de desambiguação de nome de perfil — ver o laço em
+ * `getOrCreateProfileForSignature`. Alto o bastante pra nunca ser atingido por uso real (seria
+ * preciso uma empresa com 100 perfis homônimos de grants distintos), baixo o bastante pra falhar
+ * rápido e alto se algo estiver errado. */
+const MAX_PROFILE_NAME_ATTEMPTS = 100;
+
+/** Compara dois conjuntos de concessões ignorando a ordem — um `Profile` só é "o mesmo perfil" de
+ * uma assinatura se conceder EXATAMENTE os mesmos pares `permissionCode`+`scope`. */
+function grantsMatch(
+  existingGrants: { permissionCode: string; scope: Scope | null }[],
+  signatureGrants: ProfileSignature['grants'],
+): boolean {
+  if (existingGrants.length !== signatureGrants.length) return false;
+  const key = (g: { permissionCode: string; scope: Scope | null }) => `${g.permissionCode}:${g.scope ?? 'null'}`;
+  const existingSet = new Set(existingGrants.map(key));
+  return signatureGrants.every((g) => existingSet.has(key(g)));
+}
+
 /**
- * Resolve o `Profile` de uma assinatura dentro de uma empresa, criando-o só se ainda não existir.
+ * Resolve o `Profile` de uma assinatura dentro de uma empresa, criando-o só se ainda não existir um
+ * perfil que conceda EXATAMENTE o mesmo conjunto de permissões.
  *
  * Substitui o `profileCache` em memória que o backfill mantinha por execução (achado M1 da revisão
  * final): aquele cache nascia vazio a cada rodada do script, então uma empresa cujo fundador já
  * tinha um "Administrador Geral" criado por `register()` ganhava um SEGUNDO perfil homônimo ao
- * backfillar um admin antigo sem `profileId`. Consultar o banco (um `findFirst` a mais por usuário —
+ * backfillar um admin antigo sem `profileId`. Consultar o banco (duas consultas a mais por usuário —
  * irrelevante num script de cutover único) é ao mesmo tempo mais simples e mais correto, e serve
  * igualmente ao outro chamador novo, `UsersService.create()`.
  *
- * `Pick<Prisma.TransactionClient, 'profile'>` cobre os dois call sites sem `any`: ambos passam um
- * `tx` de dentro de um `$transaction` interativo.
+ * **Por que a checagem de grants, e não só o nome (2ª rodada de fixes da revisão final):** a versão
+ * anterior reaproveitava QUALQUER perfil com o mesmo `(companyId, name)`, sem olhar o que ele de
+ * fato concedia. Como todo login novo nasce com `hasFullPontoAccess: true` (o `@default(true)` da
+ * coluna — `CreateUserDto` não tem campo pra outra coisa), `computeProfileSignature` sempre cai no
+ * ramo `fullPonto` pra um ADMIN, que sempre produz o nome `'Administrador Geral'`, INDEPENDENTE dos
+ * `modules` dele. Resultado: um segundo admin criado com `modules: ['DASHBOARD']` computava
+ * corretamente um `grants` restrito e em seguida era anexado ao perfil homônimo do FUNDADOR
+ * (catálogo inteiro, vindo de `register()`), jogando fora o conjunto restrito e ganhando acesso
+ * total em silêncio — inflação de privilégio no DADO do perfil. Ainda não explorável na Fase 1
+ * (nada autoriza por perfil ainda), mas a Fase 2 vai ler exatamente este dado como verdade.
+ *
+ * Quando o nome colide mas os grants diferem, o perfil novo nasce com um sufixo (`... (2)`,
+ * `... (3)`, ...) até achar um nome livre OU um homônimo cujos grants batem — assim um TERCEIRO
+ * admin com a mesma assinatura restrita reaproveita o perfil já desambiguado em vez de criar mais um.
+ *
+ * `Pick<Prisma.TransactionClient, 'profile' | 'profilePermission'>` cobre os dois call sites sem
+ * `any`: ambos passam um `tx` de dentro de um `$transaction` interativo.
  */
 export async function getOrCreateProfileForSignature(
-  tx: Pick<Prisma.TransactionClient, 'profile'>,
+  tx: Pick<Prisma.TransactionClient, 'profile' | 'profilePermission'>,
   companyId: string,
   signature: ProfileSignature,
 ): Promise<string> {
-  const existing = await tx.profile.findFirst({ where: { companyId, name: signature.name } });
-  if (existing) return existing.id;
+  let candidateName = signature.name;
+  let suffix = 1;
+  let found = false;
+
+  // Teto explícito em vez de `for(;;)`: o laço só termina porque `findFirst` filtra pelo nome
+  // candidato e um nome novo acaba não existindo — uma garantia do banco, não do código deste
+  // arquivo. Um teto barato transforma qualquer cenário patológico (ou um mock mal feito num teste)
+  // num erro claro em vez de um laço infinito silencioso.
+  for (; suffix <= MAX_PROFILE_NAME_ATTEMPTS; suffix += 1) {
+    candidateName = suffix === 1 ? signature.name : `${signature.name} (${suffix})`;
+    const existing = await tx.profile.findFirst({ where: { companyId, name: candidateName } });
+    if (!existing) {
+      found = true; // nome livre — cria abaixo com este nome
+      break;
+    }
+    const existingGrants = await tx.profilePermission.findMany({ where: { profileId: existing.id } });
+    if (grantsMatch(existingGrants, signature.grants)) return existing.id; // mesmo perfil de fato
+    // Nome colidiu, mas o CONJUNTO de grants difere — tenta o próximo sufixo.
+  }
+
+  if (!found) {
+    throw new Error(
+      `Não foi possível resolver um nome livre para o perfil "${signature.name}" na empresa ${companyId} ` +
+        `após ${MAX_PROFILE_NAME_ATTEMPTS} tentativas`,
+    );
+  }
 
   const created = await tx.profile.create({
     data: {
       companyId,
-      name: signature.name,
+      name: candidateName,
       isProtected: signature.isProtected,
       permissions: {
         create: signature.grants.map((g) => ({ companyId, permissionCode: g.permissionCode, scope: g.scope })),

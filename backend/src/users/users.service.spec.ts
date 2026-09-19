@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
+import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
 
@@ -18,10 +19,27 @@ describe('UsersService', () => {
       company: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },
       // create() agora deriva e atribui um Profile ao login novo (achado I2 da revisão final) —
-      // por padrão o perfil homônimo já existe na empresa e é reaproveitado.
+      // por padrão o perfil homônimo já existe na empresa E concede exatamente os mesmos grants que
+      // a assinatura computada (ver profilePermission.findMany abaixo), então é reaproveitado.
+      // `findFirst` é sensível ao NOME (como o banco real): só o nome exato semeado existe, qualquer
+      // sufixo de desambiguação (`... (2)`) volta null. Sem isso o laço de desambiguação de
+      // getOrCreateProfileForSignature nunca terminaria neste mock.
       profile: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'profile-existente' }),
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve(where.name === 'Administrador Geral' ? { id: 'profile-existente' } : null),
+        ),
         create: jest.fn().mockResolvedValue({ id: 'profile-novo' }),
+      },
+      // Grants do perfil homônimo existente — a checagem de igualdade de conjunto (2ª rodada de
+      // fixes) precisa bater com o que computeProfileSignature produz pro DTO usado na maioria dos
+      // testes (`role: 'ADMIN', modules: ['DASHBOARD']` → dashboard.ver + os dois códigos gated só
+      // por papel), senão o perfil existente não é reaproveitado.
+      profilePermission: {
+        findMany: jest.fn().mockResolvedValue([
+          { permissionCode: 'dashboard.ver', scope: null },
+          { permissionCode: 'campos-personalizados.gerenciar', scope: 'EMPRESA' },
+          { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
+        ]),
       },
       // Suporta os dois estilos de $transaction usados neste service: array (block(), via
       // runTenantTransaction) e callback (updatePontoAccess() desligando acesso, via
@@ -105,6 +123,27 @@ describe('UsersService', () => {
     });
     expect(prisma.profile.create).not.toHaveBeenCalled();
     expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-existente');
+  });
+
+  // Regressão-alvo da 2ª rodada de fixes: o perfil homônimo do FUNDADOR (catálogo inteiro) não pode
+  // ser herdado por um admin novo de módulos restritos só porque a assinatura gera o mesmo nome.
+  it('create NÃO anexa um ADMIN restrito ao perfil homônimo do fundador quando os grants diferem', async () => {
+    prisma.profilePermission.findMany.mockResolvedValue(
+      PERMISSION_CATALOG.map((p) => ({ permissionCode: p.code, scope: p.validScopes.length === 0 ? null : 'EMPRESA' })),
+    );
+    prisma.user.create.mockResolvedValue({ id: 'u4', email: 'restrito@a.com', role: 'ADMIN' });
+
+    await service.create('c1', { email: 'restrito@a.com', role: 'ADMIN', modules: ['DASHBOARD'] } as any);
+
+    expect(prisma.profile.create).toHaveBeenCalledTimes(1);
+    const created = prisma.profile.create.mock.calls[0][0];
+    expect(created.data.name).toBe('Administrador Geral (2)');
+    expect(created.data.permissions.create.map((g: any) => g.permissionCode).sort()).toEqual([
+      'campos-personalizados.gerenciar',
+      'dashboard.ver',
+      'usuarios.gerenciar',
+    ]);
+    expect(prisma.user.create.mock.calls[0][0].data.profileId).toBe('profile-novo');
   });
 
   it('create cria o perfil quando ainda não existe um homônimo, com os grants da assinatura', async () => {
