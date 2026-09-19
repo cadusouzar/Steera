@@ -27,6 +27,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
   let prisma: PrismaService;
   let companyId: string;
   let adminToken: string;
+  let administradorGeralId: string;
 
   const runId = Date.now();
   const adminEmail = `central-tx-admin-${runId}@test.com`;
@@ -52,6 +53,11 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
 
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
     companyId = user.companyId;
+    // O fundador nasce vinculado ao perfil protegido "Administrador Geral" (todas as permissões) —
+    // reaproveitado abaixo pra criar outros logins de teste sem precisar de um POST /profiles à
+    // parte, mesmo padrão já usado em profiles-shared-permission-guard.e2e-spec.ts/
+    // profiles-reassign-and-delete-guard.e2e-spec.ts.
+    administradorGeralId = user.profileId!;
   });
 
   afterAll(async () => {
@@ -113,7 +119,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
         email: empEmail,
         role: 'EMPLOYEE',
         employeeId: empRes.body.id,
-        modules: ['DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS', 'PONTO_REGISTRO', 'PONTO_ADMINISTRACAO', 'COMERCIAL', 'OPERACOES', 'FINANCAS'],
+        profileId: administradorGeralId,
       })
       .expect(201);
     const empUserId = loginRes.body.user.id;

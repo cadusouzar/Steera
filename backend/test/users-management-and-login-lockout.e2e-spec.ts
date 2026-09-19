@@ -39,6 +39,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
   let companyId: string;
   let adminToken: string;
   let adminEmail: string;
+  let administradorGeralId: string;
 
   beforeEach(async () => {
     const url = process.env.DATABASE_URL ?? '';
@@ -58,6 +59,10 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
 
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
     companyId = user.companyId;
+    // O fundador nasce vinculado ao perfil protegido "Administrador Geral" (todas as permissões) —
+    // reaproveitado abaixo pra criar os logins de teste deste arquivo sem precisar de um
+    // POST /profiles à parte, mesmo padrão já usado em profiles-shared-permission-guard.e2e-spec.ts.
+    administradorGeralId = user.profileId!;
   });
 
   afterEach(async () => {
@@ -87,7 +92,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
     const createRes = await request(apps[0].getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
-      .send({ email: `delete-me-${Date.now()}@test.com`, role: 'ADMIN', modules: ['DASHBOARD'] })
+      .send({ email: `delete-me-${Date.now()}@test.com`, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
     const userId = createRes.body.user.id;
 
@@ -118,7 +123,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
     const createRes = await request(apps[0].getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
-      .send({ email: empEmail, role: 'ADMIN', modules: ['DASHBOARD'] })
+      .send({ email: empEmail, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
     const userId = createRes.body.user.id;
 
@@ -163,7 +168,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
     const createRes = await request(apps[0].getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
-      .send({ email, role: 'ADMIN', modules: ['DASHBOARD'] })
+      .send({ email, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
 
     // As 5 tentativas erradas (a última é a que trava) — todas com a mensagem genérica de sempre,
@@ -191,7 +196,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
     const createRes = await request(apps[0].getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
-      .send({ email, role: 'ADMIN', modules: ['DASHBOARD'] })
+      .send({ email, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
     const userId = createRes.body.user.id;
 
@@ -221,7 +226,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
     const createRes = await request(apps[0].getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
-      .send({ email, role: 'ADMIN', modules: ['DASHBOARD'] })
+      .send({ email, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
     const userId = createRes.body.user.id;
 
