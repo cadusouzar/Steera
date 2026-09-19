@@ -835,11 +835,9 @@ interface ApiSystemUser {
   role: 'ADMIN' | 'EMPLOYEE';
   employeeId: string | null;
   modules: string[];
-  // LOCKED: travado pelo próprio backend por excesso de tentativas de senha erradas (17/09/2026) —
-  // diferente de BLOCKED (sempre uma ação deliberada de um admin), mas os dois usam a mesma ação
-  // de desbloqueio (unblock/reset de senha).
   status: 'ACTIVE' | 'BLOCKED' | 'LOCKED';
   hasFullPontoAccess: boolean;
+  profileId: string | null;
 }
 
 export interface SystemUser {
@@ -850,6 +848,7 @@ export interface SystemUser {
   modules: string[];
   status: 'active' | 'blocked' | 'locked';
   hasFullPontoAccess: boolean;
+  profileId: string | null;
 }
 
 function mapSystemUser(u: ApiSystemUser): SystemUser {
@@ -861,6 +860,7 @@ function mapSystemUser(u: ApiSystemUser): SystemUser {
     modules: u.modules,
     status: u.status.toLowerCase() as SystemUser['status'],
     hasFullPontoAccess: u.hasFullPontoAccess,
+    profileId: u.profileId,
   };
 }
 
@@ -873,7 +873,7 @@ export async function createSystemUser(dto: {
   email: string;
   role: 'admin' | 'employee';
   employeeId?: string;
-  modules: string[];
+  profileId: string;
 }): Promise<{ user: SystemUser; temporaryPassword: string }> {
   const res = await request<{ user: ApiSystemUser; temporaryPassword: string }>('/companies/me/users', {
     method: 'POST',
@@ -881,20 +881,19 @@ export async function createSystemUser(dto: {
       email: dto.email,
       role: dto.role.toUpperCase(),
       employeeId: dto.role === 'employee' ? dto.employeeId : undefined,
-      modules: dto.modules,
+      profileId: dto.profileId,
     }),
   });
   return { user: mapSystemUser(res.user), temporaryPassword: res.temporaryPassword };
 }
 
-// Edição de um login já existente (17/09/2026) — hoje só os módulos, sem precisar bloquear e
-// recriar o login do zero (limitação anterior, documentada no CLAUDE.md/vault).
-export async function updateSystemUser(id: string, dto: { modules: string[] }): Promise<SystemUser> {
-  const res = await request<ApiSystemUser>(`/companies/me/users/${id}`, {
+// Substitui updateSystemUser()/updatePontoAccess() (Fase 2a, 19/09/2026) — Módulos e acesso de
+// Ponto deixam de ser editados diretamente, passam a ser SEMPRE derivados do Perfil escolhido.
+export async function assignUserProfile(userId: string, profileId: string): Promise<void> {
+  await request(`/companies/me/users/${userId}/profile`, {
     method: 'PATCH',
-    body: JSON.stringify({ modules: dto.modules }),
+    body: JSON.stringify({ profileId }),
   });
-  return mapSystemUser(res);
 }
 
 // Exclusão de verdade (17/09/2026) — diferente de bloquear, que é reversível. O backend recusa
@@ -918,10 +917,67 @@ export async function unblockSystemUser(id: string): Promise<void> {
   await request(`/companies/me/users/${id}/unblock`, { method: 'PATCH' });
 }
 
-export async function updatePontoAccess(userId: string, hasFullPontoAccess: boolean): Promise<void> {
-  await request(`/companies/me/users/${userId}/ponto-access`, {
-    method: 'PATCH',
-    body: JSON.stringify({ hasFullPontoAccess }),
+// ---- Perfis de Acesso (Fase 2a, 19/09/2026) ----
+export interface PermissionCatalogEntry {
+  code: string;
+  resource: string;
+  action: string;
+  labelPt: string;
+  validScopes: ('PROPRIO' | 'EQUIPE' | 'DEPARTAMENTO' | 'EMPRESA')[];
+}
+
+export async function getPermissionCatalog(): Promise<PermissionCatalogEntry[]> {
+  return request<PermissionCatalogEntry[]>('/profiles/catalog');
+}
+
+export interface ProfileGrant {
+  permissionCode: string;
+  scope: 'PROPRIO' | 'EQUIPE' | 'DEPARTAMENTO' | 'EMPRESA' | null;
+}
+
+interface ApiProfile {
+  id: string;
+  name: string;
+  isProtected: boolean;
+  userCount: number;
+  grants: ProfileGrant[];
+}
+
+export interface Profile {
+  id: string;
+  name: string;
+  isProtected: boolean;
+  userCount: number;
+  grants: ProfileGrant[];
+}
+
+function mapProfile(p: ApiProfile): Profile {
+  return { id: p.id, name: p.name, isProtected: p.isProtected, userCount: p.userCount, grants: p.grants };
+}
+
+export async function listProfiles(): Promise<Profile[]> {
+  const items = await request<ApiProfile[]>('/profiles');
+  return items.map(mapProfile);
+}
+
+export async function createProfile(dto: { name: string; grants: ProfileGrant[] }): Promise<Profile> {
+  const res = await request<ApiProfile>('/profiles', { method: 'POST', body: JSON.stringify(dto) });
+  return mapProfile(res);
+}
+
+export async function updateProfile(id: string, dto: { name: string; grants: ProfileGrant[] }): Promise<Profile> {
+  const res = await request<ApiProfile>(`/profiles/${id}`, { method: 'PATCH', body: JSON.stringify(dto) });
+  return mapProfile(res);
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+  await request(`/profiles/${id}`, { method: 'DELETE' });
+}
+
+export async function reassignAndDeleteProfile(id: string, targetProfileId: string): Promise<void> {
+  await request(`/profiles/${id}/reassign-and-delete`, {
+    method: 'POST',
+    body: JSON.stringify({ targetProfileId }),
   });
 }
 
@@ -1386,7 +1442,7 @@ export async function listPendingAdjustmentRequests(params?: {
   pageSize?: number;
 }): Promise<Paginated<AdjustmentRequestRecord>> {
   const qs = new URLSearchParams();
-  qs.set('status', (params?.status ?? 'pending').toUpperCase());
+  if (params?.status) qs.set('status', params.status.toUpperCase());
   if (params?.page) qs.set('page', String(params.page));
   if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
   const res = await request<Paginated<ApiTimeAdjustmentRequest>>(`/time-adjustment-requests?${qs.toString()}`);
