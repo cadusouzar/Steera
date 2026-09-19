@@ -178,8 +178,6 @@ describe('Trava do último detentor de usuarios.gerenciar (e2e)', () => {
     // Um login EMPLOYEE nunca recebe `usuarios.gerenciar` (nenhum módulo concede esse código, e a
     // união de "códigos gated só por papel" só se aplica a ADMIN).
     expect(await holdsUsuariosGerenciar(employeeLoginId)).toBe(false);
-    // O fundador é o ÚNICO detentor da permissão neste ponto — antes do fix C2, isso bastava pra
-    // esta ação (sobre um alvo irrelevante ao invariante) ser rejeitada com 400.
     await request(app.getHttpServer())
       .patch(`/companies/me/users/${employeeLoginId}/block`)
       .set('Authorization', adminToken)
@@ -187,6 +185,25 @@ describe('Trava do último detentor de usuarios.gerenciar (e2e)', () => {
 
     await request(app.getHttpServer())
       .delete(`/companies/me/users/${employeeLoginId}`)
+      .set('Authorization', adminToken)
+      .expect(204);
+  });
+
+  // Este é o teste que de fato falha SEM o fix C2 (verificado ao vivo removendo o early-return:
+  // 400 em vez de 204). É o estado de TODA empresa que já existia antes deste plano, e o que
+  // tornava block()/remove() completamente inutilizáveis: ninguém detém `usuarios.gerenciar` por
+  // este join, então a contagem de "outros detentores" dá 0 e a checagem incondicional rejeitava
+  // qualquer alvo, mesmo um que nunca teve nada a ver com o invariante protegido.
+  it('empresa em que NINGUÉM detém usuarios.gerenciar (estado pré-backfill): excluir um login sem a permissão ainda funciona', async () => {
+    const secondAdminId = await createAdminLogin();
+
+    // Simula o estado legado: nenhum Profile da empresa concede `usuarios.gerenciar`.
+    await sys(() => prisma.profilePermission.deleteMany({ where: { companyId, permissionCode: 'usuarios.gerenciar' } }));
+    expect(await holdsUsuariosGerenciar(founderId)).toBe(false);
+    expect(await holdsUsuariosGerenciar(secondAdminId)).toBe(false);
+
+    await request(app.getHttpServer())
+      .delete(`/companies/me/users/${secondAdminId}`)
       .set('Authorization', adminToken)
       .expect(204);
   });
