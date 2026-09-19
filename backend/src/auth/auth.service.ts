@@ -4,6 +4,7 @@ import { AppModule as AppModuleEnum, Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { join } from 'path';
 import { AuthorizationService } from '../authorization/authorization.service';
+import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { listMigrationNames } from '../prisma/migration-files.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { getTenantCompanyId, runAsSystem, runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
@@ -158,6 +159,26 @@ export class AuthService {
           // globalmente aqui não tem custo de throughput relevante.
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tenant_provisioning')::bigint)`;
           const company = await tx.company.create({ data: { name: dto.companyName } });
+          // "Administrador Geral": perfil protegido do fundador, com TODAS as permissões do
+          // catálogo concedidas incondicionalmente (não só as que ALL_MODULES implicaria sob o
+          // sistema antigo) — mesmo padrão/nome já usado por scripts/backfill-profiles.ts pra
+          // empresas legadas. Profile é central (como Company/User), então tx.profile.create()
+          // roteia pro client certo pela mesma razão que tx.company.create()/tx.user.create() já
+          // roteiam: nenhum contexto de tenant já resolvido existe ainda neste ponto do fluxo.
+          const profile = await tx.profile.create({
+            data: {
+              companyId: company.id,
+              name: 'Administrador Geral',
+              isProtected: true,
+              permissions: {
+                create: PERMISSION_CATALOG.map((def) => ({
+                  companyId: company.id,
+                  permissionCode: def.code,
+                  scope: def.validScopes.length === 0 ? null : 'EMPRESA',
+                })),
+              },
+            },
+          });
           const schemaName = tenantSchemaName(company.id);
           assertValidSchemaName(schemaName);
           // CREATE SCHEMA e a migration replay abaixo rodam DENTRO desta mesma transação
@@ -177,6 +198,7 @@ export class AuthService {
               passwordHash,
               role: 'ADMIN',
               modules: ALL_MODULES,
+              profileId: profile.id,
             },
           });
           return { user: createdUser, company };

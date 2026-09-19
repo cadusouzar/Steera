@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import { AuthorizationService } from '../authorization/authorization.service';
+import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import * as passwordUtil from './password.util';
@@ -36,6 +37,9 @@ describe('AuthService', () => {
       tenantMigration: { create: jest.fn().mockResolvedValue({}) },
       company: { create: jest.fn() },
       employee: { findFirst: jest.fn() },
+      // Task 7: Profile do fundador ("Administrador Geral") criado dentro da mesma transação de
+      // register(), antes de tx.user.create().
+      profile: { create: jest.fn() },
     };
     authorization = { getEffectivePermissions: jest.fn().mockResolvedValue({}) };
     const module = await Test.createTestingModule({
@@ -251,6 +255,7 @@ describe('AuthService', () => {
     // (Task 1) rejeitaria "company-1" (hífen + curto demais) antes mesmo do CREATE SCHEMA rodar,
     // mascarando o P2002 real que este teste quer provar.
     prisma.company.create.mockResolvedValue({ id: 'companyduplicado123456789', name: 'Empresa Duplicada' });
+    prisma.profile.create.mockResolvedValue({ id: 'profile-duplicado' });
     prisma.user.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`email`)', {
         code: 'P2002',
@@ -263,12 +268,52 @@ describe('AuthService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('creates an "Administrador Geral" profile with every catalog permission and assigns it to the founder', async () => {
+    // Id no formato cuid-like (minúsculo alfanumérico, sem hífen) — assertValidSchemaName (Task 1)
+    // rejeitaria "company-1" (hífen) antes mesmo de chegar em tx.profile.create, mascarando o que
+    // este teste quer provar (mesmo cuidado já documentado nos outros testes de register() deste
+    // arquivo).
+    const companyId = 'companyprofile123456789012';
+    prisma.company.create.mockResolvedValue({ id: companyId, name: 'Empresa Teste', planTier: 'BASICO', maxEmployeeLogins: 10 });
+    prisma.profile.create.mockResolvedValue({ id: 'profile-1' });
+    prisma.user.create.mockResolvedValue({ id: 'user-1', companyId, email: 'a@b.com', role: 'ADMIN', modules: [], mustChangePassword: false, employeeId: null, hasFullPontoAccess: true, profileId: 'profile-1' });
+
+    await service.register({ companyName: 'Empresa Teste', email: 'a@b.com', password: 'senha12345678' }, fakeRes);
+
+    expect(prisma.profile.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ companyId, name: 'Administrador Geral', isProtected: true }),
+    }));
+    expect(prisma.user.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ profileId: 'profile-1' }),
+    }));
+  });
+
+  it('grants unconditionally every one of the 19 PERMISSION_CATALOG entries to the new profile, with scope EMPRESA (or null for scopeless permissions)', async () => {
+    const companyId = 'companyprofile223456789012';
+    prisma.company.create.mockResolvedValue({ id: companyId, name: 'Empresa Teste', planTier: 'BASICO', maxEmployeeLogins: 10 });
+    prisma.profile.create.mockResolvedValue({ id: 'profile-1' });
+    prisma.user.create.mockResolvedValue({ id: 'user-1', companyId, email: 'a@b.com', role: 'ADMIN', modules: [], mustChangePassword: false, employeeId: null, hasFullPontoAccess: true, profileId: 'profile-1' });
+
+    await service.register({ companyName: 'Empresa Teste', email: 'a@b.com', password: 'senha12345678' }, fakeRes);
+
+    const call = prisma.profile.create.mock.calls[0][0];
+    const grants = call.data.permissions.create;
+    expect(grants).toHaveLength(PERMISSION_CATALOG.length);
+    for (const def of PERMISSION_CATALOG) {
+      const grant = grants.find((g: any) => g.permissionCode === def.code);
+      expect(grant).toBeDefined();
+      expect(grant.companyId).toBe(companyId);
+      expect(grant.scope).toBe(def.validScopes.length === 0 ? null : 'EMPRESA');
+    }
+  });
+
   describe('register — provisionamento de schema', () => {
     it('cria o schema físico e aplica todas as migrations de tenant dentro da mesma transação, antes de criar o usuário', async () => {
       // Id no formato cuid-like (minúsculo alfanumérico, sem hífen) — assertValidSchemaName
       // (Task 1) rejeitaria um valor com hífen antes de chegar no CREATE SCHEMA.
       const companyId = 'companyabc123456789012345';
       prisma.company.create.mockResolvedValue({ id: companyId });
+      prisma.profile.create.mockResolvedValue({ id: 'profile-schema-test' });
       prisma.user.create.mockResolvedValue({
         id: 'user-1', companyId, email: 'a@b.com', role: 'ADMIN', modules: [],
         mustChangePassword: false, employeeId: null, hasFullPontoAccess: true,
