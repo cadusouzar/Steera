@@ -1,8 +1,11 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Scope } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { getPermissionDefinition } from '../src/permissions/permission-catalog';
+import { MODULE_TO_PERMISSIONS } from '../src/permissions/profile-signature.util';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 
@@ -83,8 +86,30 @@ async function teardownFixture(f: Fixture): Promise<void> {
   await f.app.close();
 }
 
+// create() não aceita mais `modules` diretamente (Task 7, authorization-profiles-screen,
+// `1a824c5`) — `modules`/`hasFullPontoAccess` de um login novo são sempre DERIVADOS do Perfil
+// escolhido, nunca o inverso. Pra manter este arquivo fiel ao que cada módulo granular
+// efetivamente concede (o próprio motivo dele existir), um Profile com EXATAMENTE as permissões
+// dos módulos pedidos é criado primeiro (via POST /profiles, Task 6), reaproveitando o mesmo
+// MODULE_TO_PERMISSIONS que o backend usa pra derivar módulos a partir de um perfil — na direção
+// inversa aqui, mas a mesma fonte da verdade, então o teste nunca diverge silenciosamente do mapa
+// real caso ele mude.
+function grantsForModules(modules: string[]): { permissionCode: string; scope: Scope | null }[] {
+  return modules.flatMap((m) =>
+    (MODULE_TO_PERMISSIONS[m] ?? []).map((permissionCode) => {
+      const def = getPermissionDefinition(permissionCode);
+      return { permissionCode, scope: def.validScopes.length === 0 ? null : Scope.EMPRESA };
+    }),
+  );
+}
+
 async function createLoginAndLogin(f: Fixture, modules: string[]) {
   const email = `granular-${Math.random().toString(36).slice(2)}@test.com`;
+  const profileRes = await request(f.app.getHttpServer())
+    .post('/profiles')
+    .set('Authorization', f.adminToken)
+    .send({ name: `Teste ${modules.join('+')} ${Math.random().toString(36).slice(2)}`, grants: grantsForModules(modules) })
+    .expect(201);
   const empRes = await request(f.app.getHttpServer())
     .post('/employees')
     .set('Authorization', f.adminToken)
@@ -97,7 +122,7 @@ async function createLoginAndLogin(f: Fixture, modules: string[]) {
   const loginRes = await request(f.app.getHttpServer())
     .post('/companies/me/users')
     .set('Authorization', f.adminToken)
-    .send({ email, role: 'EMPLOYEE', employeeId: empRes.body.id, modules })
+    .send({ email, role: 'EMPLOYEE', employeeId: empRes.body.id, profileId: profileRes.body.id })
     .expect(201);
   const authRes = await request(f.app.getHttpServer())
     .post('/auth/login')
