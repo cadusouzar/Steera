@@ -67,10 +67,26 @@ export class AuthService {
         hasFullPontoAccess: effectiveHasFullPontoAccess(user),
         // Permissões efetivas do perfil atual (Task 5, ver AuthorizationService) — carregadas no
         // JWT pra PermissionsGuard nunca precisar de uma consulta extra ao banco por requisição.
-        permissions: await this.authorization.getEffectivePermissions(user.id),
+        permissions: await this.getEffectivePermissionsAsSystem(user.id),
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m', algorithm: 'HS256' },
     );
+  }
+
+  // Achado crítico pós-Task 5 (verificação manual de uma task posterior): User/ProfilePermission
+  // têm FORCE ROW LEVEL SECURITY — sem nenhum contexto de tenant ativo (app.current_company_id) e
+  // sem bypass, a política de RLS filtra a linha em silêncio (comportamento documentado do
+  // Postgres, já usado no resto deste arquivo), então AuthorizationService.getEffectivePermissions
+  // via `this.prisma.user.findUnique` via um client sem contexto nenhum enxergava `undefined` e
+  // devolvia `{}` sempre. Isso nunca aparece em teste unitário (mocka AuthorizationService por
+  // completo) — só um register()/login() real contra Postgres expõe. register()/login()/refresh()
+  // são rotas @Public() sem contexto de tenant ambiente (TenantContextInterceptor só roda em rotas
+  // autenticadas) — precisam do mesmo bypass runAsSystem() já usado pelas outras consultas
+  // pontuais-por-id deste arquivo (lookup de company em register(), de email em login(), de token em
+  // refresh()). AuthorizationService não pode importar runAsSystem diretamente (restrito a
+  // src/auth/**/test/** por eslint), daí o wrap acontecer aqui, no call site.
+  private getEffectivePermissionsAsSystem(userId: string) {
+    return runAsSystem(() => this.authorization.getEffectivePermissions(userId));
   }
 
   // Formato único do objeto `user` devolvido por register()/login()/getProfile() — montado à mão
@@ -222,7 +238,7 @@ export class AuthService {
     // aqui, ao contrário de UsersService.create(). `company` já está em
     // escopo (acabou de ser criado nesta mesma transação), sem precisar de
     // include nenhum.
-    const permissions = await this.authorization.getEffectivePermissions(user.id);
+    const permissions = await this.getEffectivePermissionsAsSystem(user.id);
     return { accessToken, user: this.toPublicUser({ ...user, company }, permissions) };
   }
 
@@ -285,7 +301,7 @@ export class AuthService {
     const accessToken = await this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
-    const permissions = await this.authorization.getEffectivePermissions(user.id);
+    const permissions = await this.getEffectivePermissionsAsSystem(user.id);
     return { accessToken, user: this.toPublicUser(user, permissions) };
   }
 
@@ -401,7 +417,7 @@ export class AuthService {
       where: { id: userId },
       include: { company: { select: { name: true, planTier: true, maxEmployeeLogins: true } } },
     });
-    const permissions = await this.authorization.getEffectivePermissions(userId);
+    const permissions = await this.getEffectivePermissionsAsSystem(userId);
     return this.toPublicUser(user, permissions);
   }
 
