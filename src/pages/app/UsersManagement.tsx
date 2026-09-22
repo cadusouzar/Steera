@@ -64,78 +64,18 @@ interface UserFormState {
   email: string;
   role: 'admin' | 'employee';
   employeeId: string;
-  modules: string[];
+  profileId: string;
 }
 
-const emptyForm: UserFormState = { email: '', role: 'admin', employeeId: '', modules: ['DASHBOARD'] };
-
-// Grade de módulos reaproveitada pelos modais de criação E edição — evita duas cópias divergentes
-// do mesmo seletor (achado ao planejar a edição de módulos, 17/09/2026).
-const ModulesPicker: React.FC<{ selected: string[]; onToggle: (id: string) => void }> = ({ selected, onToggle }) => {
-  const renderOption = (mod: ModuleOption) => {
-    const isSelected = selected.includes(mod.id);
-    return (
-      <motion.button
-        whileTap={{ scale: 0.97 }}
-        type="button"
-        key={mod.id}
-        onClick={() => onToggle(mod.id)}
-        className={`relative flex flex-col items-start p-4 rounded-xl border transition-all duration-200 h-full overflow-hidden w-full ${
-          isSelected
-            ? 'border-primary bg-primary/5 shadow-sm'
-            : 'border-border/60 bg-background hover:border-border hover:bg-secondary/30'
-        }`}
-      >
-        <div className="flex items-start justify-between w-full mb-3">
-          <div className={`p-2.5 rounded-lg transition-colors ${
-            isSelected ? 'bg-primary/10 text-primary' : 'bg-secondary/50 text-muted-foreground group-hover:text-foreground'
-          }`}>
-            {mod.icon}
-          </div>
-          <div className={`shrink-0 w-5 h-5 mt-1 rounded-full border-2 flex items-center justify-center transition-all ${
-            isSelected ? 'border-primary bg-primary text-white' : 'border-border/80 bg-transparent'
-          }`}>
-            {isSelected && (
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            )}
-          </div>
-        </div>
-        <span className={`text-sm font-bold text-left leading-tight w-full ${isSelected ? 'text-primary' : 'text-foreground/80'}`}>
-          {mod.label}
-        </span>
-      </motion.button>
-    );
-  };
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-        {STANDALONE_MODULES.map(renderOption)}
-      </div>
-      {MODULE_GROUPS.map(group => (
-        <div key={group.id}>
-          <div className="flex items-center gap-2 text-xs font-bold text-muted uppercase tracking-wider mb-2">
-            {group.groupIcon}
-            {group.groupLabel}
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-            {group.options.map(renderOption)}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
+const emptyForm: UserFormState = { email: '', role: 'admin', employeeId: '', profileId: '' };
 
 const UsersManagement = () => {
   const currentUser = getCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
-  const myHasFullPontoAccess = currentUser?.hasFullPontoAccess ?? false;
 
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
+  const [profiles, setProfiles] = useState<api.Profile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -147,11 +87,11 @@ const UsersManagement = () => {
   const [emailError, setEmailError] = useState<string>();
 
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
-  const [pontoAccessSaving, setPontoAccessSaving] = useState<string | null>(null);
 
-  // Edição de módulos de um login já existente (17/09/2026) — sem precisar bloquear e recriar.
+  // Edição de perfil de um login já existente (17/09/2026, adaptado pra Perfis em 19/09/2026) —
+  // sem precisar bloquear e recriar.
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
-  const [editModules, setEditModules] = useState<string[]>([]);
+  const [editProfileId, setEditProfileId] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Exclusão de verdade (17/09/2026) — confirmação em duas etapas, nunca window.confirm().
@@ -220,9 +160,14 @@ const UsersManagement = () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [systemUsers, employeeItems] = await Promise.all([api.listSystemUsers(), api.listEmployees()]);
+      const [systemUsers, employeeItems, profileItems] = await Promise.all([
+        api.listSystemUsers(),
+        api.listEmployees(),
+        api.listProfiles(),
+      ]);
       setUsers(systemUsers);
       setEmployees(employeeItems);
+      setProfiles(profileItems);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os usuários.');
     } finally {
@@ -287,16 +232,6 @@ const UsersManagement = () => {
     });
   }, [users, searchQuery, employeeById]);
 
-  const toggleModule = (moduleId: string) => {
-    setFormData(prev => {
-      const isSelected = prev.modules.includes(moduleId);
-      if (isSelected) {
-        return { ...prev, modules: prev.modules.filter(m => m !== moduleId) };
-      }
-      return { ...prev, modules: [...prev.modules, moduleId] };
-    });
-  };
-
   const openNewModal = () => {
     setFormData(emptyForm);
     setActionError(null);
@@ -312,7 +247,8 @@ const UsersManagement = () => {
   const isFormValid =
     formData.email.trim() !== '' &&
     isValidEmail(formData.email) &&
-    (formData.role === 'admin' || formData.employeeId !== '');
+    (formData.role === 'admin' || formData.employeeId !== '') &&
+    formData.profileId !== '';
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -328,7 +264,7 @@ const UsersManagement = () => {
         email: formData.email.trim(),
         role: formData.role,
         employeeId: formData.role === 'employee' ? formData.employeeId : undefined,
-        modules: formData.modules,
+        profileId: formData.profileId,
       });
       setUsers(prev => [...prev, result.user]);
       setTempPasswordBanner({ email: result.user.email, temporaryPassword: result.temporaryPassword });
@@ -361,20 +297,6 @@ const UsersManagement = () => {
     }
   };
 
-  const togglePontoAccess = async (user: SystemUser) => {
-    if (pontoAccessSaving) return;
-    setPontoAccessSaving(user.id);
-    setActionError(null);
-    try {
-      await api.updatePontoAccess(user.id, !user.hasFullPontoAccess);
-      await loadData();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar o acesso ao Ponto deste usuário.');
-    } finally {
-      setPontoAccessSaving(null);
-    }
-  };
-
   const closeCredentialBanner = () => {
     setTempPasswordBanner(null);
     setCopied(false);
@@ -393,7 +315,7 @@ const UsersManagement = () => {
 
   const openEditModal = (user: SystemUser) => {
     setEditingUser(user);
-    setEditModules(user.modules);
+    setEditProfileId(user.profileId ?? '');
     setActionError(null);
   };
 
@@ -402,21 +324,17 @@ const UsersManagement = () => {
     setActionError(null);
   };
 
-  const toggleEditModule = (moduleId: string) => {
-    setEditModules(prev => (prev.includes(moduleId) ? prev.filter(m => m !== moduleId) : [...prev, moduleId]));
-  };
-
-  const handleSaveModules = async (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser || isSavingEdit) return;
     setIsSavingEdit(true);
     setActionError(null);
     try {
-      const updated = await api.updateSystemUser(editingUser.id, { modules: editModules });
-      setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+      await api.assignUserProfile(editingUser.id, editProfileId);
+      await loadData();
       closeEditModal();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar os módulos deste usuário.');
+      setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar o perfil deste usuário.');
     } finally {
       setIsSavingEdit(false);
     }
@@ -597,6 +515,11 @@ const UsersManagement = () => {
                               : 'Login administrativo'}
                           </td>
                           <td className="px-8 py-5">
+                            <div className="flex flex-wrap items-center gap-1.5 max-w-xs mb-1.5">
+                              <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                                {profiles.find((p) => p.id === user.profileId)?.name ?? '—'}
+                              </span>
+                            </div>
                             {user.modules.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5 max-w-xs">
                                 {user.modules.slice(0, MAX_VISIBLE_MODULE_PILLS).map(m => (
@@ -708,7 +631,7 @@ const UsersManagement = () => {
               className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
             >
               <Pencil size={15} className="text-muted shrink-0" />
-              Editar Módulos
+              Editar Perfil
             </button>
             <button
               type="button"
@@ -733,32 +656,6 @@ const UsersManagement = () => {
               )}
               {menuUser.status === 'active' ? 'Bloquear Acesso' : 'Desbloquear Acesso'}
             </button>
-            {menuUser.role === 'admin' && (
-              myHasFullPontoAccess ? (
-                <button
-                  type="button"
-                  onClick={() => { closeActionsMenu(); togglePontoAccess(menuUser); }}
-                  disabled={pontoAccessSaving === menuUser.id}
-                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left disabled:opacity-50"
-                >
-                  {pontoAccessSaving === menuUser.id ? (
-                    <Loader2 size={15} className="animate-spin shrink-0" />
-                  ) : (
-                    <Clock size={15} className="text-muted shrink-0" />
-                  )}
-                  {pontoAccessSaving === menuUser.id
-                    ? 'Salvando...'
-                    : menuUser.hasFullPontoAccess
-                      ? 'Restringir ao Próprio Time (Ponto)'
-                      : 'Dar Acesso Total ao Ponto'}
-                </button>
-              ) : (
-                <div className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-muted">
-                  <Clock size={15} className="shrink-0" />
-                  {menuUser.hasFullPontoAccess ? 'Acesso total ao Ponto' : 'Restrito ao próprio time no Ponto'}
-                </div>
-              )
-            )}
             <div className="my-1.5 border-t border-border/40" />
             <button
               type="button"
@@ -866,13 +763,17 @@ const UsersManagement = () => {
                 <div className="pt-2 border-t border-border/40 mt-4">
                   <label className="block text-xs font-bold text-foreground/80 mb-3 uppercase tracking-wider mt-4 flex items-center gap-2">
                     <Shield size={14} className="text-primary" />
-                    Módulos Autorizados
+                    Perfil de Acesso
                   </label>
                   <p className="text-xs text-muted mb-4">
-                    Selecione quais áreas do sistema este usuário poderá visualizar e editar.
+                    O que este login pode fazer é definido pelo Perfil escolhido — configure perfis em "Perfis de Acesso".
                   </p>
-
-                  <ModulesPicker selected={formData.modules} onToggle={toggleModule} />
+                  <CustomSelect
+                    value={formData.profileId}
+                    onChange={(val) => setFormData({ ...formData, profileId: val })}
+                    options={profiles.map((p) => ({ value: p.id, label: p.name }))}
+                    placeholder="Selecione um perfil..."
+                  />
                 </div>
 
                 <p className="text-xs text-muted bg-secondary/20 border border-border/40 rounded-xl px-4 py-3 flex items-center gap-2">
@@ -930,7 +831,7 @@ const UsersManagement = () => {
                 <div>
                   <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
                     <Pencil size={22} className="text-primary"/>
-                    Editar Módulos
+                    Editar Perfil
                   </h2>
                   <p className="text-sm text-muted mt-1 break-all">{editingUser.email}</p>
                 </div>
@@ -948,16 +849,20 @@ const UsersManagement = () => {
                 </div>
               )}
 
-              <form onSubmit={handleSaveModules} className="space-y-6">
+              <form onSubmit={handleSaveProfile} className="space-y-6">
                 <div>
                   <label className="block text-xs font-bold text-foreground/80 mb-3 uppercase tracking-wider flex items-center gap-2">
                     <Shield size={14} className="text-primary" />
-                    Módulos Autorizados
+                    Perfil de Acesso
                   </label>
                   <p className="text-xs text-muted mb-4">
-                    Altera imediatamente o que este login pode visualizar e editar — não precisa recriar o acesso.
+                    Troca imediatamente o que este login pode fazer, e revoga as sessões ativas dele.
                   </p>
-                  <ModulesPicker selected={editModules} onToggle={toggleEditModule} />
+                  <CustomSelect
+                    value={editProfileId}
+                    onChange={setEditProfileId}
+                    options={profiles.map((p) => ({ value: p.id, label: p.name }))}
+                  />
                 </div>
 
                 <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
@@ -976,7 +881,7 @@ const UsersManagement = () => {
                     className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
                     {isSavingEdit && <Loader2 size={16} className="animate-spin" />}
-                    {isSavingEdit ? 'Salvando...' : 'Salvar Módulos'}
+                    {isSavingEdit ? 'Salvando...' : 'Salvar Perfil'}
                   </motion.button>
                 </div>
               </form>
