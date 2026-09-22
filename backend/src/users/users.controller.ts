@@ -59,6 +59,6 @@ export class UsersController {
   @Patch(':id/profile')
   @HttpCode(204)
   assignProfile(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: AssignProfileDto) {
-    return this.users.assignProfile(user.companyId, id, dto.profileId);
+    return this.users.assignProfile(user.companyId, id, dto.profileId, user);
   }
 }

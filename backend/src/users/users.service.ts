@@ -6,7 +6,9 @@ import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
 import { deriveHasFullPontoAccessFromGrants, deriveModulesFromGrants } from '../permissions/profile-signature.util';
 import { reassignUserProfile } from '../permissions/profile-assignment.util';
-import { assertNotLastHolderOfPermission } from './last-permission-holder.util';
+import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
+import { assertNotLastAdminWithFullPontoAccess, assertNotLastHolderOfPermission } from './last-permission-holder.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 
@@ -34,7 +36,10 @@ const SAFE_USER_SELECT = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
+  ) {}
 
   // hasFullPontoAccess sempre normalizado antes de sair daqui (ver ponto-access.util.ts) — a
   // coluna crua nasce `true` pra TODA linha, inclusive logins EMPLOYEE, que nunca têm acesso total
@@ -189,7 +194,12 @@ export class UsersService {
   // edição direta de `modules` (`PATCH /companies/me/users/:id`, removida) quanto o toggle de
   // `hasFullPontoAccess` (`PATCH .../ponto-access`, removido): os dois agora são SEMPRE derivados
   // do Perfil escolhido, nunca editados em separado (ver spec da Fase 2a).
-  async assignProfile(companyId: string, userId: string, profileId: string): Promise<void> {
+  async assignProfile(
+    companyId: string,
+    userId: string,
+    profileId: string,
+    currentUser: AuthenticatedUser,
+  ): Promise<void> {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     const newProfile = await this.prisma.profile.findFirst({ where: { id: profileId, companyId } });
@@ -200,13 +210,42 @@ export class UsersService {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
 
-        if (user.profileId) {
-          const currentGrants = await tx.profilePermission.findMany({ where: { profileId: user.profileId } });
-          const newGrants = await tx.profilePermission.findMany({ where: { profileId } });
+        // Relido DENTRO da trava (não o `user` capturado antes dela) — fecha uma corrida estreita
+        // onde duas reatribuições concorrentes do MESMO usuário poderiam basear a checagem abaixo
+        // num `profileId` já desatualizado.
+        const freshUser = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+        const newGrants = await tx.profilePermission.findMany({ where: { profileId } });
+
+        if (freshUser.profileId) {
+          const currentGrants = await tx.profilePermission.findMany({ where: { profileId: freshUser.profileId } });
           const hadIt = currentGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
           const willHaveIt = newGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
           if (hadIt && !willHaveIt) {
             await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
+          }
+
+          // Achado na revisão final da branch (Fase 2a, 22/09/2026): remover
+          // PATCH .../ponto-access apagou, sem substituto, as duas proteções que ele carregava —
+          // (a) só um ADMIN que já tem acesso total podia mudar o acesso total de OUTRO ADMIN,
+          // (b) nunca deixar a empresa sem NENHUM ADMIN de acesso total. hasFullPontoAccess agora
+          // é derivado do Perfil (`ponto.administrar@EMPRESA`), então as duas proteções precisam
+          // ser recriadas aqui, o único lugar (junto de ProfilesService.update(), ver lá) que pode
+          // mudar esse valor efetivo hoje. Só relevante pra ADMIN (EMPLOYEE nunca tem acesso total,
+          // por definição — deriveHasFullPontoAccessFromGrants/effectiveHasFullPontoAccess).
+          if (freshUser.role === 'ADMIN') {
+            const hadFullPonto = deriveHasFullPontoAccessFromGrants(currentGrants);
+            const willHaveFullPonto = deriveHasFullPontoAccessFromGrants(newGrants);
+            if (hadFullPonto !== willHaveFullPonto) {
+              this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+            }
+            if (hadFullPonto && !willHaveFullPonto) {
+              // Variante de UM usuário (exclui ESTE login, não o perfil inteiro) — ver o comentário
+              // longo em `assertNotLastAdminWithFullPontoAccess`: a variante de LOTE usada em
+              // ProfilesService descartaria da contagem os OUTROS admins que compartilham este
+              // mesmo perfil e que NÃO estão sendo movidos, rejeitando com 400 uma reatribuição
+              // individual perfeitamente segura.
+              await assertNotLastAdminWithFullPontoAccess(tx, companyId, userId);
+            }
           }
         }
 

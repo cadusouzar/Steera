@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import * as profileAssignmentUtil from '../permissions/profile-assignment.util';
 import * as lastPermissionHolderUtil from './last-permission-holder.util';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
+import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { UsersService } from './users.service';
 
 describe('UsersService', () => {
@@ -49,7 +51,14 @@ describe('UsersService', () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ exists: false }]),
     };
     const module = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        UsersService,
+        { provide: PrismaService, useValue: prisma },
+        // Injetado desde a revisão final da branch (Fase 2a, 22/09/2026) — assignProfile() usa
+        // `assertHasFullPontoAccess` pra restaurar o gate que morreu junto com
+        // `PATCH .../ponto-access`. Só esse método do serviço é usado aqui.
+        { provide: TimeManagementAuthService, useValue: { assertHasFullPontoAccess: jest.fn() } },
+      ],
     }).compile();
     service = module.get(UsersService);
   });
@@ -379,24 +388,68 @@ describe('UsersService', () => {
       jest.restoreAllMocks();
     });
 
-    function makeTxPrisma(currentProfileId: string | null) {
+    // Chamador padrão dos testes: um ADMIN que JÁ tem acesso total ao Ponto — o caso que passa
+    // livremente pelo gate restaurado na revisão final da branch (22/09/2026). Testes que exercitam
+    // o gate em si passam `makeCaller({ hasFullPontoAccess: false })` ou `role: 'EMPLOYEE'`.
+    function makeCaller(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
+      return {
+        userId: 'caller-1',
+        companyId: 'company-1',
+        role: 'ADMIN',
+        modules: [],
+        mustChangePassword: false,
+        hasFullPontoAccess: true,
+        permissions: {},
+        ...overrides,
+      };
+    }
+
+    // `assertHasFullPontoAccess` real (não um jest.fn() vazio): o gate só protege de verdade se o
+    // teste exercitar a MESMA regra que o backend aplica (404 pra quem não é ADMIN de acesso total).
+    function makeTimeAuth() {
+      return new TimeManagementAuthService({} as any);
+    }
+
+    function makeTxPrisma(currentProfileId: string | null, role: 'ADMIN' | 'EMPLOYEE' = 'EMPLOYEE') {
       const tx = {
         $executeRaw: jest.fn(),
-        profilePermission: { findMany: jest.fn() },
+        // Releitura do alvo DENTRO da trava (revisão final da branch, 22/09/2026) — fecha a corrida
+        // de duas reatribuições concorrentes do mesmo usuário baseando a checagem num profileId já
+        // desatualizado.
+        user: {
+          findUniqueOrThrow: jest
+            .fn()
+            .mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: currentProfileId, role }),
+        },
+        profilePermission: { findMany: jest.fn().mockResolvedValue([]) },
       };
       const txPrisma = {
-        user: { findFirst: jest.fn().mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: currentProfileId }) },
+        user: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: currentProfileId, role }),
+        },
         profile: { findFirst: jest.fn().mockResolvedValue({ id: 'new-profile', companyId: 'company-1' }) },
         $transaction: jest.fn((cb: any) => cb(tx)),
       };
       return { prisma: txPrisma, tx };
     }
 
+    // ORDEM IMPORTA: o service lê `newGrants` PRIMEIRO (fora do `if (profileId)`) e só depois
+    // `currentGrants` — inverter estes dois mocks faz os testes afirmarem o contrário do código.
+    function mockGrants(tx: any, newGrants: unknown[], currentGrants: unknown[]) {
+      (tx.profilePermission.findMany as jest.Mock)
+        .mockResolvedValueOnce(newGrants)
+        .mockResolvedValueOnce(currentGrants);
+    }
+
     it('lança NotFoundException se o login não existir na empresa', async () => {
       const localPrisma = { user: { findFirst: jest.fn().mockResolvedValue(null) }, profile: { findFirst: jest.fn() } };
-      const localService = new UsersService(localPrisma as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth());
 
-      await expect(localService.assignProfile('company-1', 'missing', 'p2')).rejects.toThrow(NotFoundException);
+      await expect(localService.assignProfile('company-1', 'missing', 'p2', makeCaller())).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lança BadRequestException se o novo profileId não existir na empresa', async () => {
@@ -404,9 +457,11 @@ describe('UsersService', () => {
         user: { findFirst: jest.fn().mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: 'p1' }) },
         profile: { findFirst: jest.fn().mockResolvedValue(null) },
       };
-      const localService = new UsersService(localPrisma as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth());
 
-      await expect(localService.assignProfile('company-1', 'u1', 'missing')).rejects.toThrow(BadRequestException);
+      await expect(localService.assignProfile('company-1', 'u1', 'missing', makeCaller())).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('não chama a trava se o usuário nunca teve perfil (profileId null)', async () => {
@@ -417,12 +472,23 @@ describe('UsersService', () => {
         .spyOn(profileAssignmentUtil, 'reassignUserProfile')
         .mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma(null);
-      const localService = new UsersService(localPrisma as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth());
 
-      await localService.assignProfile('company-1', 'u1', 'new-profile');
+      await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
       expect(assertNotLastHolderOfPermissionSpy).not.toHaveBeenCalled();
       expect(reassignUserProfileSpy).toHaveBeenCalledWith(tx, 'u1', 'new-profile');
+    });
+
+    it('relê o usuário DENTRO da trava (não usa o objeto lido antes dela)', async () => {
+      jest.spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission').mockResolvedValue(undefined);
+      jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
+      const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
+      const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+      await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
+
+      expect(tx.user.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'u1' } });
     });
 
     it('chama a trava se o perfil atual concedia usuarios.gerenciar e o novo não', async () => {
@@ -431,12 +497,10 @@ describe('UsersService', () => {
         .mockResolvedValue(undefined);
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
-      (tx.profilePermission.findMany as jest.Mock)
-        .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }]) // perfil atual
-        .mockResolvedValueOnce([]); // perfil novo
-      const localService = new UsersService(localPrisma as any);
+      mockGrants(tx, [], [{ permissionCode: 'usuarios.gerenciar' }]);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth());
 
-      await localService.assignProfile('company-1', 'u1', 'new-profile');
+      await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
       expect(assertNotLastHolderOfPermissionSpy).toHaveBeenCalledWith(tx, 'company-1', 'usuarios.gerenciar', 'u1');
     });
@@ -447,14 +511,129 @@ describe('UsersService', () => {
         .mockResolvedValue(undefined);
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
-      (tx.profilePermission.findMany as jest.Mock)
-        .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }])
-        .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }]);
-      const localService = new UsersService(localPrisma as any);
+      mockGrants(tx, [{ permissionCode: 'usuarios.gerenciar' }], [{ permissionCode: 'usuarios.gerenciar' }]);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth());
 
-      await localService.assignProfile('company-1', 'u1', 'new-profile');
+      await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
       expect(assertNotLastHolderOfPermissionSpy).not.toHaveBeenCalled();
+    });
+
+    // Achado Important #1 da revisão final da branch (22/09/2026): remover `PATCH .../ponto-access`
+    // apagou o gate ("só quem já tem acesso total muda o acesso total de outro ADMIN") e o
+    // invariante ("a empresa nunca fica sem NENHUM ADMIN de acesso total"). Ataque demonstrado pelo
+    // revisor: um ADMIN restrito se reatribuía ao perfil "Administrador Geral" e recuperava o
+    // acesso total da empresa inteira, em dois cliques.
+    describe('acesso total ao Ponto (ponto.administrar@EMPRESA)', () => {
+      const FULL_PONTO = [{ permissionCode: 'ponto.administrar', scope: 'EMPRESA' }];
+      const RESTRITO = [{ permissionCode: 'ponto.administrar', scope: 'EQUIPE' }];
+
+      beforeEach(() => {
+        jest.spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission').mockResolvedValue(undefined);
+        jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
+      });
+
+      it('BARRA (404) um ADMIN restrito tentando GANHAR acesso total — a escalação demonstrada pelo revisor', async () => {
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
+        mockGrants(tx, FULL_PONTO, RESTRITO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await expect(
+          localService.assignProfile(
+            'company-1',
+            'u1',
+            'new-profile',
+            makeCaller({ hasFullPontoAccess: false }),
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('BARRA (404) um chamador EMPLOYEE mexendo no acesso total de um ADMIN', async () => {
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
+        mockGrants(tx, FULL_PONTO, RESTRITO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await expect(
+          localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller({ role: 'EMPLOYEE' })),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('PERMITE quando o chamador já tem acesso total', async () => {
+        const assertOtherAdminSpy = jest
+          .spyOn(lastPermissionHolderUtil, 'assertNotLastAdminWithFullPontoAccess')
+          .mockResolvedValue(undefined);
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
+        mockGrants(tx, FULL_PONTO, RESTRITO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
+
+        // Ganhar acesso total nunca aciona o invariante de "último detentor" — só perdê-lo aciona.
+        expect(assertOtherAdminSpy).not.toHaveBeenCalled();
+      });
+
+      it('aciona o invariante ao REBAIXAR um ADMIN que tinha acesso total, excluindo o PRÓPRIO login (nunca o perfil inteiro)', async () => {
+        const assertOtherAdminSpy = jest
+          .spyOn(lastPermissionHolderUtil, 'assertNotLastAdminWithFullPontoAccess')
+          .mockResolvedValue(undefined);
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
+        mockGrants(tx, RESTRITO, FULL_PONTO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
+
+        expect(assertOtherAdminSpy).toHaveBeenCalledWith(tx, 'company-1', 'u1');
+      });
+
+      it('propaga o BadRequestException do invariante quando o rebaixado era o ÚLTIMO ADMIN de acesso total', async () => {
+        jest
+          .spyOn(lastPermissionHolderUtil, 'assertNotLastAdminWithFullPontoAccess')
+          .mockRejectedValue(new BadRequestException('sem outro admin de acesso total'));
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
+        mockGrants(tx, RESTRITO, FULL_PONTO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await expect(
+          localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller()),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('NÃO aciona gate nem invariante quando o alvo é EMPLOYEE (nunca tem acesso total, por definição)', async () => {
+        const assertOtherAdminSpy = jest
+          .spyOn(lastPermissionHolderUtil, 'assertNotLastAdminWithFullPontoAccess')
+          .mockResolvedValue(undefined);
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'EMPLOYEE');
+        mockGrants(tx, RESTRITO, FULL_PONTO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        // Chamador sem acesso total: passaria batido só porque o alvo é EMPLOYEE.
+        await localService.assignProfile(
+          'company-1',
+          'u1',
+          'new-profile',
+          makeCaller({ hasFullPontoAccess: false }),
+        );
+
+        expect(assertOtherAdminSpy).not.toHaveBeenCalled();
+      });
+
+      it('NÃO aciona gate nem invariante quando o acesso total não muda (os dois perfis dão acesso total)', async () => {
+        const assertOtherAdminSpy = jest
+          .spyOn(lastPermissionHolderUtil, 'assertNotLastAdminWithFullPontoAccess')
+          .mockResolvedValue(undefined);
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
+        mockGrants(tx, FULL_PONTO, FULL_PONTO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await localService.assignProfile(
+          'company-1',
+          'u1',
+          'new-profile',
+          makeCaller({ hasFullPontoAccess: false }),
+        );
+
+        expect(assertOtherAdminSpy).not.toHaveBeenCalled();
+      });
     });
   });
 });

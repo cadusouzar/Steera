@@ -39,7 +39,7 @@ export class ProfilesController {
 
   @Patch(':id')
   update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateProfileDto) {
-    return this.profiles.update(user.companyId, id, dto);
+    return this.profiles.update(user.companyId, id, dto, user);
   }
 
   @Delete(':id')
@@ -55,6 +55,6 @@ export class ProfilesController {
     @Param('id') id: string,
     @Body() dto: ReassignAndDeleteDto,
   ) {
-    return this.profiles.reassignAndDelete(user.companyId, id, dto);
+    return this.profiles.reassignAndDelete(user.companyId, id, dto, user);
   }
 }

@@ -1,10 +1,16 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Scope } from '@prisma/client';
+import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { recomputeAndSaveUserAccess, reassignUserProfile } from '../permissions/profile-assignment.util';
-import { assertOtherProfileGrantsPermission } from '../users/last-permission-holder.util';
+import { deriveHasFullPontoAccessFromGrants } from '../permissions/profile-signature.util';
+import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
+import {
+  assertOtherAdminGrantsFullPontoAccess,
+  assertOtherProfileGrantsPermission,
+} from '../users/last-permission-holder.util';
 import { CreateProfileDto, ProfileGrantDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ReassignAndDeleteDto } from './dto/reassign-and-delete.dto';
@@ -19,7 +25,10 @@ interface ProfileWithCount {
 
 @Injectable()
 export class ProfilesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly timeManagementAuth: TimeManagementAuthService,
+  ) {}
 
   async findAllForCompany(companyId: string) {
     const profiles = await this.prisma.profile.findMany({
@@ -55,7 +64,7 @@ export class ProfilesService {
     return this.toPublicProfile(profile);
   }
 
-  async update(companyId: string, id: string, dto: UpdateProfileDto) {
+  async update(companyId: string, id: string, dto: UpdateProfileDto, currentUser: AuthenticatedUser) {
     this.validateGrants(dto.grants);
     const profile = await this.prisma.profile.findFirst({ where: { id, companyId } });
     if (!profile) throw new NotFoundException(`Perfil ${id} não encontrado nesta empresa`);
@@ -64,6 +73,9 @@ export class ProfilesService {
     }
 
     const willGrantUsuariosGerenciar = dto.grants.some((g) => g.permissionCode === 'usuarios.gerenciar');
+    const willGrantFullPonto = dto.grants.some(
+      (g) => g.permissionCode === 'ponto.administrar' && g.scope === Scope.EMPRESA,
+    );
 
     // Transação montada à mão no client CENTRAL (nunca runTenantTransaction/
     // runTenantInteractiveTransaction) — mesmo padrão e mesmo motivo já usado por
@@ -79,9 +91,12 @@ export class ProfilesService {
         // `status: 'ACTIVE'` aqui — mas essa é a lista que ALIMENTA a mutação (recálculo de
         // módulos/hasFullPontoAccess abaixo), não só a checagem de trava. Um holder BLOCKED/LOCKED
         // ficava sem o recálculo, voltando com acesso desatualizado (mais amplo do que deveria) ao
-        // ser desbloqueado depois. A checagem de trava (`assertOtherProfileGrantsPermission`) já
-        // filtra ACTIVE internamente, então continua correta mesmo sem esse filtro aqui.
+        // ser desbloqueado depois. As checagens de trava (`assertOtherProfileGrantsPermission`/
+        // `assertOtherAdminGrantsFullPontoAccess`) já filtram ACTIVE internamente, então continuam
+        // corretas mesmo sem esse filtro aqui.
         const affectedUsers = await tx.user.findMany({ where: { profileId: id } });
+        const currentGrants = await tx.profilePermission.findMany({ where: { profileId: id } });
+        const currentlyGrantsUsuariosGerenciar = currentGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
 
         // Corrigido numa rodada de revisão de segurança pós-implementação (ver task-4-report.md):
         // a versão original chamava `assertNotLastHolderOfPermission` uma vez POR USUÁRIO afetado,
@@ -93,8 +108,26 @@ export class ProfilesService {
         // perfil, que ainda concede esta permissão?" — e por isso dá a resposta correta rodando
         // antes OU depois da reescrita (mantido antes, por fail-fast, consistente com o resto do
         // método: validar tudo antes de escrever).
-        if (!willGrantUsuariosGerenciar) {
+        //
+        // Achado menor na mesma revisão final (Fase 2a, 22/09/2026): a condição era só
+        // `!willGrantUsuariosGerenciar`, sem olhar se o perfil de fato CONCEDIA a permissão antes —
+        // editar um perfil que nunca teve `usuarios.gerenciar` (o caso comum) rodava a trava à toa
+        // e podia devolver um 400 confuso ("a empresa precisa ter pelo menos um login...") numa
+        // edição que não removia nada de ninguém.
+        if (!willGrantUsuariosGerenciar && currentlyGrantsUsuariosGerenciar) {
           await assertOtherProfileGrantsPermission(tx, companyId, 'usuarios.gerenciar', id);
+        }
+
+        // Mesmo achado do Important #1 (ver UsersService.assignProfile) — este é o SEGUNDO lugar
+        // que pode mudar o acesso total de Ponto de um ADMIN, agora em lote: editar um perfil
+        // compartilhado por vários ADMINs podendo derrubar `ponto.administrar` de EMPRESA pra algo
+        // menor zeraria o acesso total de todos eles de uma vez, sem nenhuma checagem. Só relevante
+        // se pelo menos um dos usuários afetados for ADMIN.
+        const hasAffectedAdmin = affectedUsers.some((u) => u.role === 'ADMIN');
+        const currentlyGrantsFullPonto = deriveHasFullPontoAccessFromGrants(currentGrants);
+        if (hasAffectedAdmin && currentlyGrantsFullPonto && !willGrantFullPonto) {
+          this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+          await assertOtherAdminGrantsFullPontoAccess(tx, companyId, id);
         }
 
         await tx.profilePermission.deleteMany({ where: { profileId: id } });
@@ -127,7 +160,12 @@ export class ProfilesService {
     await this.prisma.profile.delete({ where: { id } });
   }
 
-  async reassignAndDelete(companyId: string, id: string, dto: ReassignAndDeleteDto) {
+  async reassignAndDelete(
+    companyId: string,
+    id: string,
+    dto: ReassignAndDeleteDto,
+    currentUser: AuthenticatedUser,
+  ) {
     if (dto.targetProfileId === id) {
       throw new BadRequestException('O perfil de destino precisa ser diferente do excluído');
     }
@@ -172,6 +210,24 @@ export class ProfilesService {
         // — e por isso só precisa ser chamada UMA vez, não uma vez por usuário.
         if (sourceHasIt && !targetHasIt) {
           await assertOtherProfileGrantsPermission(tx, companyId, 'usuarios.gerenciar', id);
+        }
+
+        // Mesma proteção de acesso total ao Ponto já aplicada em `update()` e em
+        // `UsersService.assignProfile()` (revisão final da branch, Fase 2a, 22/09/2026). A brief
+        // desta rodada marcava este ponto como OPCIONAL, mas aposentar um perfil por reatribuição é
+        // de fato um TERCEIRO caminho capaz de mudar o acesso total de um ADMIN — inclusive na
+        // direção perigosa: um ADMIN restrito pode excluir o PRÓPRIO perfil restrito reatribuindo a
+        // si mesmo pro perfil de acesso total, exatamente a escalação que o gate de
+        // `assignProfile()` passou a barrar. Fechado aqui com o mesmo par gate+invariante, pra não
+        // deixar uma porta lateral aberta pra mesma classe de bug.
+        const sourceFullPonto = deriveHasFullPontoAccessFromGrants(sourceGrants);
+        const targetFullPonto = deriveHasFullPontoAccessFromGrants(targetGrants);
+        const hasAffectedAdmin = affectedUsers.some((u) => u.role === 'ADMIN');
+        if (hasAffectedAdmin && sourceFullPonto !== targetFullPonto) {
+          this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+        }
+        if (hasAffectedAdmin && sourceFullPonto && !targetFullPonto) {
+          await assertOtherAdminGrantsFullPontoAccess(tx, companyId, id);
         }
 
         // Sequencial de propósito, mesmo motivo de update() — ver Global Constraints do plano.

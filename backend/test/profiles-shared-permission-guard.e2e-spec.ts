@@ -7,9 +7,25 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
 import { ProfilesService } from '../src/profiles/profiles.service';
+import { TimeManagementAuthService } from '../src/time-management/time-management-auth.service';
+import { AuthenticatedUser } from '../src/auth/decorators/current-user.decorator';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
+}
+
+// Chamador destes testes: um ADMIN de acesso total ao Ponto — passa livremente pelo gate
+// restaurado na revisão final da branch (22/09/2026), que não é o assunto destes dois arquivos.
+function fullAccessCaller(companyIdArg: string): AuthenticatedUser {
+  return {
+    userId: 'e2e-caller',
+    companyId: companyIdArg,
+    role: 'ADMIN',
+    modules: [],
+    mustChangePassword: false,
+    hasFullPontoAccess: true,
+    permissions: {},
+  };
 }
 
 async function bootApp(): Promise<INestApplication> {
@@ -56,7 +72,7 @@ describe('ProfilesService.update() — trava de último detentor entre perfis co
 
     app = await bootApp();
     prisma = app.get(PrismaService);
-    profiles = new ProfilesService(prisma);
+    profiles = new ProfilesService(prisma, new TimeManagementAuthService(prisma));
 
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
@@ -143,7 +159,7 @@ describe('ProfilesService.update() — trava de último detentor entre perfis co
     expect(await countActiveHoldersOfUsuariosGerenciar()).toBe(2);
 
     await expect(
-      runWithTenant(companyId, () => profiles.update(companyId, unico.id, { name: 'Único', grants: [] })),
+      runWithTenant(companyId, () => profiles.update(companyId, unico.id, { name: 'Único', grants: [] }, fullAccessCaller(companyId))),
     ).rejects.toThrow(BadRequestException);
 
     // Nada foi parcialmente aplicado — a transação foi revertida por inteiro.
@@ -182,7 +198,7 @@ describe('ProfilesService.update() — trava de último detentor entre perfis co
     expect(await countActiveHoldersOfUsuariosGerenciar()).toBe(3);
 
     const updated = await runWithTenant(companyId, () =>
-      profiles.update(companyId, unico.id, { name: 'Único', grants: [] }),
+      profiles.update(companyId, unico.id, { name: 'Único', grants: [] }, fullAccessCaller(companyId)),
     );
     expect(updated.grants.find((g) => g.permissionCode === 'usuarios.gerenciar')).toBeUndefined();
 

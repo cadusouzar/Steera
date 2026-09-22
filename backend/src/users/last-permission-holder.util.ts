@@ -113,3 +113,78 @@ export async function assertOtherProfileGrantsPermission(
     );
   }
 }
+
+/**
+ * Variante de `assertNotLastHolderOfPermission` (ação de UM usuário só — exclui aquele usuário, não
+ * o perfil inteiro) para o acesso total ao Controle de Ponto. Par de
+ * `assertOtherAdminGrantsFullPontoAccess` logo abaixo, que é a variante de LOTE.
+ *
+ * **Por que as duas existem, e por que usar a errada aqui é um bug de verdade (achado ao rodar a
+ * suíte e2e completa desta rodada de correção, 22/09/2026):** a brief desta correção mandava usar a
+ * variante de LOTE (que exclui o `profileId` inteiro) também em `UsersService.assignProfile()`.
+ * Isso é estrito DEMAIS pro caso de um usuário só: excluir o perfil inteiro descarta da contagem os
+ * OUTROS ADMINs que compartilham aquele mesmo perfil e que NÃO estão sendo movidos — eles continuam
+ * com acesso total depois da ação, mas a checagem fingia que não. Consequência real, não hipotética:
+ * mover UM admin pra fora do "Administrador Geral" compartilhado passava a ser rejeitado com 400
+ * mesmo com outros 5 admins intactos naquele mesmo perfil (reproduzido por
+ * `test/profiles.e2e-spec.ts`, que passava antes e quebrou com a versão da brief). A pergunta certa
+ * pra uma ação individual é sempre "tirando ESTE usuário, sobra algum ADMIN ativo com acesso
+ * total?" — exatamente o que esta função pergunta.
+ */
+export async function assertNotLastAdminWithFullPontoAccess(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+  excludingUserId: string,
+): Promise<void> {
+  const rows = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+    `SELECT COUNT(*)::bigint as count
+     FROM "public"."User" u
+     JOIN "public"."ProfilePermission" pp ON pp."profileId" = u."profileId"
+     WHERE u."companyId" = $1
+       AND u.status = 'ACTIVE'
+       AND u.role = 'ADMIN'
+       AND u.id != $2
+       AND pp."permissionCode" = 'ponto.administrar'
+       AND pp.scope = 'EMPRESA'`,
+    companyId,
+    excludingUserId,
+  );
+  if (Number(rows[0]?.count ?? 0) === 0) {
+    throw new BadRequestException(
+      'A empresa precisa manter pelo menos um login ADMIN com acesso total ao Controle de Ponto',
+    );
+  }
+}
+
+/**
+ * Variante de `assertOtherProfileGrantsPermission` especificamente para o acesso total ao Controle
+ * de Ponto (`hasFullPontoAccess`, agora derivado do Perfil via `ponto.administrar@EMPRESA`, nunca
+ * mais um campo editado direto — ver `PATCH .../ponto-access`, removido). Só ADMIN importa aqui
+ * (`effectiveHasFullPontoAccess`/`deriveHasFullPontoAccessFromGrants` já tratam EMPLOYEE como
+ * sempre `false`, por definição) — por isso o filtro `u.role = 'ADMIN'` explícito, diferente da
+ * variante genérica de permissão.
+ */
+export async function assertOtherAdminGrantsFullPontoAccess(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+  excludingProfileId: string,
+): Promise<void> {
+  const rows = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+    `SELECT COUNT(*)::bigint as count
+     FROM "public"."User" u
+     JOIN "public"."ProfilePermission" pp ON pp."profileId" = u."profileId"
+     WHERE u."companyId" = $1
+       AND u.status = 'ACTIVE'
+       AND u.role = 'ADMIN'
+       AND u."profileId" != $2
+       AND pp."permissionCode" = 'ponto.administrar'
+       AND pp.scope = 'EMPRESA'`,
+    companyId,
+    excludingProfileId,
+  );
+  if (Number(rows[0]?.count ?? 0) === 0) {
+    throw new BadRequestException(
+      'A empresa precisa manter pelo menos um login ADMIN com acesso total ao Controle de Ponto',
+    );
+  }
+}

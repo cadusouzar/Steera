@@ -7,9 +7,25 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
 import { ProfilesService } from '../src/profiles/profiles.service';
+import { TimeManagementAuthService } from '../src/time-management/time-management-auth.service';
+import { AuthenticatedUser } from '../src/auth/decorators/current-user.decorator';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
+}
+
+// Chamador destes testes: um ADMIN de acesso total ao Ponto — passa livremente pelo gate
+// restaurado na revisão final da branch (22/09/2026), que não é o assunto destes dois arquivos.
+function fullAccessCaller(companyIdArg: string): AuthenticatedUser {
+  return {
+    userId: 'e2e-caller',
+    companyId: companyIdArg,
+    role: 'ADMIN',
+    modules: [],
+    mustChangePassword: false,
+    hasFullPontoAccess: true,
+    permissions: {},
+  };
 }
 
 async function bootApp(): Promise<INestApplication> {
@@ -64,7 +80,7 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
 
     app = await bootApp();
     prisma = app.get(PrismaService);
-    profiles = new ProfilesService(prisma);
+    profiles = new ProfilesService(prisma, new TimeManagementAuthService(prisma));
 
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
@@ -149,7 +165,7 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
 
     await expect(
       runWithTenant(companyId, () =>
-        profiles.reassignAndDelete(companyId, unico.id, { targetProfileId: semGerenciar.id }),
+        profiles.reassignAndDelete(companyId, unico.id, { targetProfileId: semGerenciar.id }, fullAccessCaller(companyId)),
       ),
     ).rejects.toThrow(BadRequestException);
 
@@ -178,7 +194,7 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
     );
 
     await runWithTenant(companyId, () =>
-      profiles.reassignAndDelete(companyId, unico.id, { targetProfileId: comGerenciar.id }),
+      profiles.reassignAndDelete(companyId, unico.id, { targetProfileId: comGerenciar.id }, fullAccessCaller(companyId)),
     );
 
     // Perfil de origem excluído de verdade desta vez.

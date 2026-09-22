@@ -1,5 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
-import { assertNotLastHolderOfPermission, assertOtherProfileGrantsPermission } from './last-permission-holder.util';
+import {
+  assertNotLastAdminWithFullPontoAccess,
+  assertNotLastHolderOfPermission,
+  assertOtherAdminGrantsFullPontoAccess,
+  assertOtherProfileGrantsPermission,
+} from './last-permission-holder.util';
 
 // Estes testes inspecionam o TEXTO do SQL e a ORDEM dos parâmetros de propósito. A versão anterior
 // só mockava `$queryRawUnsafe` devolvendo um valor e afirmava sobre ele — foi exatamente por isso
@@ -146,6 +151,136 @@ describe('assertOtherProfileGrantsPermission', () => {
     it('não usa tabela sem qualificação de schema (regressão de PgBouncer, mesma classe de bug já corrigida em assertNotLastHolderOfPermission)', async () => {
       const tx = makeTx([{ count: 5n }]);
       await assertOtherProfileGrantsPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'profile-1');
+      const sql = tx.$queryRawUnsafe.mock.calls[0][0] as string;
+      expect(sql).not.toMatch(/FROM\s+"User"/);
+      expect(sql).not.toMatch(/JOIN\s+"ProfilePermission"/);
+    });
+  });
+});
+
+// Adicionada na revisão final da branch (Fase 2a, 22/09/2026): remover `PATCH .../ponto-access`
+// apagou junto o invariante "a empresa nunca fica sem NENHUM ADMIN de acesso total ao Ponto".
+// Como `hasFullPontoAccess` passou a ser DERIVADO do Perfil (`ponto.administrar` com scope
+// `EMPRESA`), o invariante precisa ser reexpresso em cima de `ProfilePermission` — e, ao contrário
+// da variante genérica, só ADMIN conta (um EMPLOYEE nunca tem acesso total, por definição).
+describe('assertOtherAdminGrantsFullPontoAccess', () => {
+  function makeTx(...results: unknown[]) {
+    const fn = jest.fn();
+    for (const r of results) fn.mockResolvedValueOnce(r);
+    return { $queryRawUnsafe: fn };
+  }
+
+  it('não lança quando outro ADMIN ativo, em outro perfil, ainda tem ponto.administrar@EMPRESA', async () => {
+    const tx = makeTx([{ count: 1n }]);
+    await expect(
+      assertOtherAdminGrantsFullPontoAccess(tx as any, 'company-1', 'profile-1'),
+    ).resolves.toBeUndefined();
+    expect(tx.$queryRawUnsafe).toHaveBeenCalledTimes(1);
+  });
+
+  it('lança BadRequestException quando nenhum outro perfil dá acesso total a um ADMIN ativo', async () => {
+    const tx = makeTx([{ count: 0n }]);
+    await expect(
+      assertOtherAdminGrantsFullPontoAccess(tx as any, 'company-1', 'profile-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('a mensagem fala de acesso total ao Ponto (não de gerenciar usuários)', async () => {
+    const tx = makeTx([{ count: 0n }]);
+    await expect(
+      assertOtherAdminGrantsFullPontoAccess(tx as any, 'company-1', 'profile-1'),
+    ).rejects.toThrow(/acesso total ao Controle de Ponto/);
+  });
+
+  it('trata a consulta vazia (defesa contra linha ausente) como zero detentores — lança', async () => {
+    const tx = makeTx([]);
+    await expect(
+      assertOtherAdminGrantsFullPontoAccess(tx as any, 'company-1', 'profile-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  describe('SQL emitido', () => {
+    it('qualifica o schema, filtra por ADMIN/ACTIVE/scope EMPRESA e recebe os binds na ordem certa', async () => {
+      const tx = makeTx([{ count: 3n }]);
+      await assertOtherAdminGrantsFullPontoAccess(tx as any, 'company-1', 'profile-1');
+
+      const [sql, ...params] = tx.$queryRawUnsafe.mock.calls[0];
+      expect(sql).toContain('"public"."User"');
+      expect(sql).toContain('"public"."ProfilePermission"');
+      // Binds: $1 = companyId, $2 = profileId excluído. O permissionCode é literal aqui (esta
+      // função existe só para `ponto.administrar`), diferente da variante genérica.
+      expect(params).toEqual(['company-1', 'profile-1']);
+      expect(sql).toContain('u."companyId" = $1');
+      expect(sql).toContain('u."profileId" != $2');
+      expect(sql).toContain("u.status = 'ACTIVE'");
+      // Diferença central em relação a assertOtherProfileGrantsPermission: só ADMIN conta.
+      expect(sql).toContain("u.role = 'ADMIN'");
+      expect(sql).toContain("pp.\"permissionCode\" = 'ponto.administrar'");
+      expect(sql).toContain("pp.scope = 'EMPRESA'");
+    });
+
+    it('não usa tabela sem qualificação de schema (regressão de PgBouncer)', async () => {
+      const tx = makeTx([{ count: 3n }]);
+      await assertOtherAdminGrantsFullPontoAccess(tx as any, 'company-1', 'profile-1');
+      const sql = tx.$queryRawUnsafe.mock.calls[0][0] as string;
+      expect(sql).not.toMatch(/FROM\s+"User"/);
+      expect(sql).not.toMatch(/JOIN\s+"ProfilePermission"/);
+    });
+  });
+});
+
+// Par de UM USUÁRIO da função acima (ver o comentário longo no .ts). A distinção não é cosmética:
+// usar a variante de LOTE numa ação individual descarta da contagem os OUTROS admins do MESMO
+// perfil que não estão sendo movidos — o que quebrou `test/profiles.e2e-spec.ts` (verde antes,
+// vermelho depois) rejeitando com 400 uma reatribuição individual perfeitamente segura.
+describe('assertNotLastAdminWithFullPontoAccess', () => {
+  function makeTx(...results: unknown[]) {
+    const fn = jest.fn();
+    for (const r of results) fn.mockResolvedValueOnce(r);
+    return { $queryRawUnsafe: fn };
+  }
+
+  it('não lança quando outro ADMIN ativo (mesmo que no MESMO perfil) ainda tem acesso total', async () => {
+    const tx = makeTx([{ count: 1n }]);
+    await expect(
+      assertNotLastAdminWithFullPontoAccess(tx as any, 'company-1', 'user-1'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('lança BadRequestException quando este é o último ADMIN de acesso total', async () => {
+    const tx = makeTx([{ count: 0n }]);
+    await expect(
+      assertNotLastAdminWithFullPontoAccess(tx as any, 'company-1', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('trata a consulta vazia (defesa contra linha ausente) como zero detentores — lança', async () => {
+    const tx = makeTx([]);
+    await expect(
+      assertNotLastAdminWithFullPontoAccess(tx as any, 'company-1', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  describe('SQL emitido', () => {
+    it('exclui pelo ID DO USUÁRIO (u.id != $2), nunca pelo profileId — a diferença central', async () => {
+      const tx = makeTx([{ count: 3n }]);
+      await assertNotLastAdminWithFullPontoAccess(tx as any, 'company-1', 'user-1');
+
+      const [sql, ...params] = tx.$queryRawUnsafe.mock.calls[0];
+      expect(params).toEqual(['company-1', 'user-1']);
+      expect(sql).toContain('u.id != $2');
+      expect(sql).not.toContain('u."profileId" != $2');
+      expect(sql).toContain('"public"."User"');
+      expect(sql).toContain('"public"."ProfilePermission"');
+      expect(sql).toContain("u.status = 'ACTIVE'");
+      expect(sql).toContain("u.role = 'ADMIN'");
+      expect(sql).toContain("pp.\"permissionCode\" = 'ponto.administrar'");
+      expect(sql).toContain("pp.scope = 'EMPRESA'");
+    });
+
+    it('não usa tabela sem qualificação de schema (regressão de PgBouncer)', async () => {
+      const tx = makeTx([{ count: 3n }]);
+      await assertNotLastAdminWithFullPontoAccess(tx as any, 'company-1', 'user-1');
       const sql = tx.$queryRawUnsafe.mock.calls[0][0] as string;
       expect(sql).not.toMatch(/FROM\s+"User"/);
       expect(sql).not.toMatch(/JOIN\s+"ProfilePermission"/);
