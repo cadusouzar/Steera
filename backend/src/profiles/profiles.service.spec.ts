@@ -221,7 +221,11 @@ describe('ProfilesService', () => {
         data: [{ companyId: 'company-1', profileId: 'p1', permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }],
       });
       expect(tx.profile.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { name: 'Financeiro' } });
-      expect(tx.user.findMany).toHaveBeenCalledWith({ where: { profileId: 'p1', status: 'ACTIVE' } });
+      // Achado Important #2 da revisão final da branch (22/09/2026): SEM `status: 'ACTIVE'` — esta
+      // lista alimenta a MUTAÇÃO (recálculo de modules/hasFullPontoAccess), não uma checagem. Um
+      // holder BLOCKED/LOCKED ficava sem o recálculo e voltava com acesso desatualizado ao ser
+      // desbloqueado depois.
+      expect(tx.user.findMany).toHaveBeenCalledWith({ where: { profileId: 'p1' } });
     });
   });
 });
@@ -355,6 +359,10 @@ describe('reassignAndDelete', () => {
     expect(reassignUserProfile).toHaveBeenNthCalledWith(1, tx, 'u1', 'target');
     expect(reassignUserProfile).toHaveBeenNthCalledWith(2, tx, 'u2', 'target');
     expect(tx.profile.delete).toHaveBeenCalledWith({ where: { id: 'source' } });
+    // Mesma correção de update(): esta lista alimenta a MUTAÇÃO (mover cada login antes de apagar o
+    // perfil). Com o filtro de status, um holder BLOCKED/LOCKED era deixado pra trás e virava órfão
+    // (`profileId: null`, via o `onDelete: SetNull` da FK) no `profile.delete` logo em seguida.
+    expect(tx.user.findMany).toHaveBeenCalledWith({ where: { profileId: 'source' } });
   });
 
   // Correção deliberada em relação à brief original desta task (ver task-5-report.md): a checagem

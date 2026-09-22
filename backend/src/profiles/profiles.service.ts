@@ -75,7 +75,13 @@ export class ProfilesService {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
 
-        const affectedUsers = await tx.user.findMany({ where: { profileId: id, status: 'ACTIVE' } });
+        // Achado na revisão final da branch (Fase 2a, 22/09/2026, Important #2): antes filtrava
+        // `status: 'ACTIVE'` aqui — mas essa é a lista que ALIMENTA a mutação (recálculo de
+        // módulos/hasFullPontoAccess abaixo), não só a checagem de trava. Um holder BLOCKED/LOCKED
+        // ficava sem o recálculo, voltando com acesso desatualizado (mais amplo do que deveria) ao
+        // ser desbloqueado depois. A checagem de trava (`assertOtherProfileGrantsPermission`) já
+        // filtra ACTIVE internamente, então continua correta mesmo sem esse filtro aqui.
+        const affectedUsers = await tx.user.findMany({ where: { profileId: id } });
 
         // Corrigido numa rodada de revisão de segurança pós-implementação (ver task-4-report.md):
         // a versão original chamava `assertNotLastHolderOfPermission` uma vez POR USUÁRIO afetado,
@@ -146,7 +152,13 @@ export class ProfilesService {
         const sourceHasIt = sourceGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
         const targetHasIt = targetGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
 
-        const affectedUsers = await tx.user.findMany({ where: { profileId: id, status: 'ACTIVE' } });
+        // Sem `status: 'ACTIVE'` (revisão final da branch, Fase 2a, 22/09/2026, Important #2 — mesma
+        // correção de update()): esta lista alimenta a MUTAÇÃO (mover cada login pro perfil de
+        // destino antes de apagar o de origem), não uma checagem. Com o filtro, um holder
+        // BLOCKED/LOCKED ficava pra trás e era silenciosamente órfão (`profileId: null`, via o
+        // `onDelete: SetNull` da FK) quando `tx.profile.delete` rodava logo abaixo. A trava
+        // (`assertOtherProfileGrantsPermission`) já filtra ACTIVE internamente e segue correta.
+        const affectedUsers = await tx.user.findMany({ where: { profileId: id } });
 
         // CORREÇÃO deliberada em relação à brief original (ver task-5-report.md): a brief pedia um
         // loop chamando `assertNotLastHolderOfPermission` uma vez POR usuário afetado — exatamente
