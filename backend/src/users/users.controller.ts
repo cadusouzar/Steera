@@ -20,7 +20,7 @@ export class UsersController {
   @Roles('ADMIN')
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUserDto) {
-    return this.users.create(user.companyId, dto);
+    return this.users.create(user.companyId, dto, user);
   }
 
   // block()/unblock() no service não retornam corpo (ao contrário do resto do

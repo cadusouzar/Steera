@@ -375,6 +375,58 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     expect(promoted.hasFullPontoAccess).toBe(true);
   });
 
+  // Achado na 3ª rodada de re-revisão (22/09/2026) — o QUARTO caminho, e o único que cria um login
+  // NOVO: `UsersService.create()` derivava `hasFullPontoAccess` do perfil escolhido sem gate
+  // nenhum. Sequência do ataque, três chamadas comuns: criar um Perfil com
+  // `ponto.administrar@EMPRESA` (inofensivo sozinho), criar um login ADMIN novo apontando pra ele
+  // (já nasce com acesso total), e entrar nele com a senha temporária fixa ('Mudar@123').
+  it('BARRA com 404 um ADMIN restrito CRIANDO um login ADMIN novo com acesso total', async () => {
+    const restrito = await runWithTenant(companyId, () =>
+      profiles.create(companyId, { name: 'Restrito Criador', grants: PONTO_DE_EQUIPE }),
+    );
+    const creator = await createAdmin('criador-restrito', restrito.id);
+    const loginRes = await request(app.getHttpServer())
+      .post('/auth/login')
+      .set('x-requested-with', 'XMLHttpRequest')
+      .send({ email: creator.email, password: creator.temporaryPassword })
+      .expect(201);
+    const changeRes = await request(app.getHttpServer())
+      .patch('/auth/me/password')
+      .set('Authorization', `Bearer ${loginRes.body.accessToken}`)
+      .send({ currentPassword: creator.temporaryPassword, newPassword: 'senha-propria-98765' })
+      .expect(200);
+    const creatorToken = `Bearer ${changeRes.body.accessToken}`;
+
+    // Passo 1 do ataque: criar o perfil de acesso total. Permitido de propósito — um perfil sem
+    // ninguém atribuído não concede nada a ninguém.
+    const weaponRes = await request(app.getHttpServer())
+      .post('/profiles')
+      .set('Authorization', creatorToken)
+      .send({ name: 'Arma', grants: FULL_PONTO })
+      .expect(201);
+
+    // Passo 2: mintar um ADMIN novo já com acesso total — agora barrado.
+    const victimEmail = `vitima-${runId}@test.com`;
+    await request(app.getHttpServer())
+      .post('/companies/me/users')
+      .set('Authorization', creatorToken)
+      .send({ email: victimEmail, role: 'ADMIN', profileId: weaponRes.body.id })
+      .expect(404);
+
+    // Nenhum login foi criado.
+    const notCreated = await sys(() => prisma.user.findUnique({ where: { email: victimEmail } }));
+    expect(notCreated).toBeNull();
+
+    // A MESMA criação, feita por quem já tem acesso total, é permitida — prova que o 404 veio do
+    // gate, não de outra checagem no caminho.
+    const okRes = await request(app.getHttpServer())
+      .post('/companies/me/users')
+      .set('Authorization', adminToken)
+      .send({ email: victimEmail, role: 'ADMIN', profileId: weaponRes.body.id })
+      .expect(201);
+    expect(okRes.body.user.hasFullPontoAccess).toBe(true);
+  });
+
   it('rejeita (400) um profileId vazio antes de chegar ao service (@IsNotEmpty no DTO)', async () => {
     await request(app.getHttpServer())
       .patch(`/companies/me/users/${(await createAdmin('dto-vazio')).id}/profile`)

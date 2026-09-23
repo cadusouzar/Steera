@@ -58,7 +58,7 @@ export class UsersService {
     return users.map((u) => this.toPublicUser(u));
   }
 
-  async create(companyId: string, dto: CreateUserDto) {
+  async create(companyId: string, dto: CreateUserDto, currentUser: AuthenticatedUser) {
     if (dto.role === 'EMPLOYEE') {
       if (!dto.employeeId) throw new BadRequestException('employeeId é obrigatório para login do tipo EMPLOYEE');
       const employee = await this.prisma.employee.findFirst({ where: { id: dto.employeeId, companyId } });
@@ -110,6 +110,21 @@ export class UsersService {
           const grants = await tx.profilePermission.findMany({ where: { profileId: dto.profileId } });
           const modules = deriveModulesFromGrants(grants);
           const hasFullPontoAccess = deriveHasFullPontoAccessFromGrants(grants);
+
+          // Achado na 3ª rodada de re-revisão (22/09/2026) — o QUARTO caminho pra mesma escalação,
+          // e o único que criava um login NOVO em vez de mexer num existente: um ADMIN restrito
+          // podia criar um Perfil com `ponto.administrar@EMPRESA` (inofensivo sozinho — perfil sem
+          // ninguém atribuído não concede nada a ninguém) e em seguida criar aqui um login ADMIN
+          // novo apontando pra ele, que já nascia com `hasFullPontoAccess: true`. Como a senha
+          // temporária é fixa e conhecida ('Mudar@123'), bastava entrar na conta nova. Três
+          // chamadas comuns de API, nenhum erro em lugar nenhum.
+          //
+          // Só o GATE, nunca o invariante: criar um usuário novo não pode REDUZIR a contagem de
+          // admins de acesso total existentes, então `assertOtherAdminGrantsFullPontoAccess`/
+          // `assertNotLastAdminWithFullPontoAccess` não têm o que checar aqui.
+          if (dto.role === 'ADMIN' && hasFullPontoAccess) {
+            this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+          }
 
           return tx.user.create({
             data: {
@@ -241,8 +256,14 @@ export class UsersService {
         // (a) só um ADMIN que já tem acesso total podia mudar o acesso total de OUTRO ADMIN,
         // (b) nunca deixar a empresa sem NENHUM ADMIN de acesso total. hasFullPontoAccess agora
         // é derivado do Perfil (`ponto.administrar@EMPRESA`), então as duas proteções precisam
-        // ser recriadas aqui, o único lugar (junto de ProfilesService.update(), ver lá) que pode
-        // mudar esse valor efetivo hoje. Só relevante pra ADMIN (EMPLOYEE nunca tem acesso total,
+        // ser recriadas em CADA caminho capaz de mudar esse valor efetivo. São quatro, todos
+        // gateados hoje (auditoria de 22/09/2026, feita depois de três rodadas seguidas acharem um
+        // caminho esquecido): este, `UsersService.create()` (login novo já nascendo com acesso
+        // total), `ProfilesService.update()` e `ProfilesService.reassignAndDelete()`. Os três
+        // últimos escrevem via `recomputeAndSaveUserAccess`, o único writer compartilhado do campo;
+        // `AuthService.register()` não conta (não escreve o campo — usa o `@default(true)` da
+        // coluna — e é o fundador de uma empresa nova, sem chamador autenticado pra gatear).
+        // Só relevante pra ADMIN (EMPLOYEE nunca tem acesso total,
         // por definição — deriveHasFullPontoAccessFromGrants/effectiveHasFullPontoAccess).
         if (freshUser.role === 'ADMIN') {
           const hadFullPonto = deriveHasFullPontoAccessFromGrants(currentGrants);

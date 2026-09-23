@@ -121,8 +121,11 @@ export class ProfilesService {
           await assertOtherProfileGrantsPermission(tx, companyId, 'usuarios.gerenciar', id);
         }
 
-        // Mesmo achado do Important #1 (ver UsersService.assignProfile) — este é o SEGUNDO lugar
-        // que pode mudar o acesso total de Ponto de um ADMIN, agora em lote: editar um perfil
+        // Mesmo achado do Important #1 (ver UsersService.assignProfile) — um dos QUATRO caminhos
+        // capazes de mudar o acesso total de Ponto de um ADMIN (os outros três:
+        // `UsersService.create()`, `UsersService.assignProfile()` e `reassignAndDelete()` abaixo;
+        // lista confirmada por auditoria em 22/09/2026, ver o comentário em assignProfile). Este é
+        // o caminho em LOTE: editar um perfil
         // compartilhado por vários ADMINs podendo derrubar `ponto.administrar` de EMPRESA pra algo
         // menor zeraria o acesso total de todos eles de uma vez, sem nenhuma checagem. Só relevante
         // se pelo menos um dos usuários afetados for ADMIN.
@@ -230,7 +233,7 @@ export class ProfilesService {
         // Mesma proteção de acesso total ao Ponto já aplicada em `update()` e em
         // `UsersService.assignProfile()` (revisão final da branch, Fase 2a, 22/09/2026). A brief
         // desta rodada marcava este ponto como OPCIONAL, mas aposentar um perfil por reatribuição é
-        // de fato um TERCEIRO caminho capaz de mudar o acesso total de um ADMIN — inclusive na
+        // de fato mais um dos quatro caminhos capazes de mudar o acesso total de um ADMIN — inclusive na
         // direção perigosa: um ADMIN restrito pode excluir o PRÓPRIO perfil restrito reatribuindo a
         // si mesmo pro perfil de acesso total, exatamente a escalação que o gate de
         // `assignProfile()` passou a barrar. Fechado aqui com o mesmo par gate+invariante, pra não
