@@ -160,10 +160,16 @@ const UsersManagement = () => {
     setIsLoading(true);
     setLoadError(null);
     try {
+      // `api.listProfiles()` só pra admin (achado na revisão final da branch, 22/09/2026):
+      // `GET /profiles` é gated por `@Roles('ADMIN')`, mas esta tela continua visível (somente
+      // leitura) pra um login não-admin com o módulo de Funcionários — chamar incondicionalmente
+      // fazia a tela INTEIRA falhar com erro de carregamento pra esse visitante. Um não-admin
+      // também não precisa da lista: o seletor de Perfil só aparece nos fluxos de criar/editar
+      // login, ambos exclusivos de admin.
       const [systemUsers, employeeItems, profileItems] = await Promise.all([
         api.listSystemUsers(),
         api.listEmployees(),
-        api.listProfiles(),
+        isAdmin ? api.listProfiles() : Promise.resolve([] as api.Profile[]),
       ]);
       setUsers(systemUsers);
       setEmployees(employeeItems);
@@ -173,7 +179,7 @@ const UsersManagement = () => {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     loadData();
