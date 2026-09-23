@@ -883,7 +883,11 @@ const UsersManagement = () => {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     type="submit"
-                    disabled={isSavingEdit}
+                    // `!editProfileId` além de `isSavingEdit` (revisão final da branch, 22/09/2026):
+                    // o modal abre semeado com `user.profileId ?? ''`, e um login sem perfil (o FK é
+                    // `onDelete: SetNull`) deixava submeter vazio — o backend respondia com um erro
+                    // de nome em branco, confuso. O formulário de criação já gatilhava assim.
+                    disabled={isSavingEdit || !editProfileId}
                     className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
                     {isSavingEdit && <Loader2 size={16} className="animate-spin" />}
