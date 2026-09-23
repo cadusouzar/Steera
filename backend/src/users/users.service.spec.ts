@@ -617,6 +617,66 @@ describe('UsersService', () => {
         expect(assertOtherAdminSpy).not.toHaveBeenCalled();
       });
 
+      // Achado da re-revisão (22/09/2026): todo este bloco de ADMIN vivia aninhado dentro de
+      // `if (freshUser.profileId)`, então um login SEM perfil (`profileId: null`, alcançável pelo
+      // `onDelete: SetNull` da FK — o mesmo cenário do fix de profileId vazio) escapava do gate por
+      // completo justamente ao ser promovido pra um perfil de acesso total.
+      it('BARRA (404) promover um login SEM perfil (profileId null) a um perfil de acesso total', async () => {
+        const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
+        mockGrants(tx, FULL_PONTO, []);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await expect(
+          localService.assignProfile(
+            'company-1',
+            'u1',
+            'new-profile',
+            makeCaller({ hasFullPontoAccess: false }),
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('PERMITE a mesma promoção de um login sem perfil quando o chamador tem acesso total', async () => {
+        const assertOtherAdminSpy = jest
+          .spyOn(lastPermissionHolderUtil, 'assertNotLastAdminWithFullPontoAccess')
+          .mockResolvedValue(undefined);
+        const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
+        mockGrants(tx, FULL_PONTO, []);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
+
+        expect(assertOtherAdminSpy).not.toHaveBeenCalled();
+      });
+
+      it('NÃO chama a trava de usuarios.gerenciar para um login sem perfil anterior', async () => {
+        const assertNotLastHolderSpy = jest
+          .spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission')
+          .mockResolvedValue(undefined);
+        const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
+        mockGrants(tx, FULL_PONTO, []);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
+
+        expect(assertNotLastHolderSpy).not.toHaveBeenCalled();
+      });
+
+      it('BARRA (404) um ADMIN restrito GANHANDO acesso total a partir de um perfil restrito', async () => {
+        const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
+        mockGrants(tx, FULL_PONTO, RESTRITO);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+
+        await expect(
+          localService.assignProfile(
+            'company-1',
+            'u1',
+            'new-profile',
+            makeCaller({ hasFullPontoAccess: false }),
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
       it('NÃO aciona gate nem invariante quando o acesso total não muda (os dois perfis dão acesso total)', async () => {
         const assertOtherAdminSpy = jest
           .spyOn(lastPermissionHolderUtil, 'assertNotLastAdminWithFullPontoAccess')

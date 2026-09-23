@@ -73,8 +73,11 @@ export class ProfilesService {
     }
 
     const willGrantUsuariosGerenciar = dto.grants.some((g) => g.permissionCode === 'usuarios.gerenciar');
-    const willGrantFullPonto = dto.grants.some(
-      (g) => g.permissionCode === 'ponto.administrar' && g.scope === Scope.EMPRESA,
+    // Mesma derivação usada em todo o resto do projeto, em vez de uma reimplementação à mão —
+    // hoje as duas concordam (validateGrants já rejeita permissionCode duplicado), mas sem isso
+    // nada impediria as duas de divergirem numa mudança futura.
+    const willGrantFullPonto = deriveHasFullPontoAccessFromGrants(
+      dto.grants.map((g) => ({ permissionCode: g.permissionCode, scope: g.scope ?? null })),
     );
 
     // Transação montada à mão no client CENTRAL (nunca runTenantTransaction/
@@ -123,10 +126,22 @@ export class ProfilesService {
         // compartilhado por vários ADMINs podendo derrubar `ponto.administrar` de EMPRESA pra algo
         // menor zeraria o acesso total de todos eles de uma vez, sem nenhuma checagem. Só relevante
         // se pelo menos um dos usuários afetados for ADMIN.
+        //
+        // Achado CRÍTICO na re-revisão (22/09/2026): a primeira versão deste bloco só checava o
+        // sentido do REBAIXAMENTO (`currentlyGrantsFullPonto && !willGrantFullPonto`), deixando o
+        // sentido da CONCESSÃO completamente aberto — exatamente a escalação que esta rodada
+        // inteira existe pra fechar, só que por outro endpoint. `ProfilesController` é
+        // `@Roles('ADMIN')` e nada mais, e o perfil de um ADMIN restrito é `isProtected: false`:
+        // ele podia editar o PRÓPRIO perfil adicionando `ponto.administrar@EMPRESA` e, com
+        // `currentlyGrantsFullPonto === false`, a condição inteira dava `false` e NENHUMA checagem
+        // rodava. O gate agora dispara em QUALQUER mudança do acesso total (os dois sentidos),
+        // enquanto o invariante segue só no rebaixamento — conceder nunca pode zerar a contagem.
         const hasAffectedAdmin = affectedUsers.some((u) => u.role === 'ADMIN');
         const currentlyGrantsFullPonto = deriveHasFullPontoAccessFromGrants(currentGrants);
-        if (hasAffectedAdmin && currentlyGrantsFullPonto && !willGrantFullPonto) {
+        if (hasAffectedAdmin && currentlyGrantsFullPonto !== willGrantFullPonto) {
           this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+        }
+        if (hasAffectedAdmin && currentlyGrantsFullPonto && !willGrantFullPonto) {
           await assertOtherAdminGrantsFullPontoAccess(tx, companyId, id);
         }
 

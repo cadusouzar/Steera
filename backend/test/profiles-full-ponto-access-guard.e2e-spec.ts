@@ -316,6 +316,65 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     expect(await countFullPontoAdmins()).toBe(1);
   });
 
+  // Achado CRÍTICO da re-revisão (22/09/2026) — o exploit que faltava, agora provado fechado sobre
+  // HTTP real. Não precisa de nenhuma precondição especial: `ProfilesController` é `@Roles('ADMIN')`
+  // e nada mais, e o perfil de um ADMIN restrito é `isProtected: false`, então ele podia editar o
+  // PRÓPRIO perfil adicionando `ponto.administrar@EMPRESA`. A primeira versão do gate só olhava o
+  // sentido do REBAIXAMENTO, então nenhuma checagem rodava nesse caminho e o `hasFullPontoAccess`
+  // dele virava `true` no token seguinte.
+  it('BARRA com 404 um ADMIN restrito que edita o PRÓPRIO perfil pra CONCEDER acesso total', async () => {
+    const autoPromocao = await runWithTenant(companyId, () =>
+      profiles.create(companyId, { name: 'Auto Promoção', grants: PONTO_DE_EQUIPE }),
+    );
+    expect(autoPromocao.isProtected).toBe(false); // nada protege o próprio perfil dele
+
+    const selfPromoter = await createAdmin('auto-promocao', autoPromocao.id);
+    const loginRes = await request(app.getHttpServer())
+      .post('/auth/login')
+      .set('x-requested-with', 'XMLHttpRequest')
+      .send({ email: selfPromoter.email, password: selfPromoter.temporaryPassword })
+      .expect(201);
+    const changeRes = await request(app.getHttpServer())
+      .patch('/auth/me/password')
+      .set('Authorization', `Bearer ${loginRes.body.accessToken}`)
+      .send({ currentPassword: selfPromoter.temporaryPassword, newPassword: 'senha-propria-54321' })
+      .expect(200);
+    const selfToken = `Bearer ${changeRes.body.accessToken}`;
+
+    const meRes = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', selfToken)
+      .expect(200);
+    expect(meRes.body.role).toBe('ADMIN');
+    expect(meRes.body.hasFullPontoAccess).toBe(false);
+
+    // O ataque: editar o próprio perfil adicionando ponto.administrar@EMPRESA.
+    await request(app.getHttpServer())
+      .patch(`/profiles/${autoPromocao.id}`)
+      .set('Authorization', selfToken)
+      .send({ name: 'Auto Promoção', grants: FULL_PONTO })
+      .expect(404);
+
+    // Nada foi escrito: o perfil segue concedendo só EQUIPE, e ele segue sem acesso total.
+    const grantsAfter = await sys(() => prisma.profilePermission.findMany({ where: { profileId: autoPromocao.id } }));
+    expect(grantsAfter).toHaveLength(1);
+    expect(grantsAfter[0].permissionCode).toBe('ponto.administrar');
+    expect(grantsAfter[0].scope).toBe(Scope.EQUIPE);
+    const stillRestricted = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: selfPromoter.id } }));
+    expect(stillRestricted.hasFullPontoAccess).toBe(false);
+
+    // A MESMA edição, feita por quem já tem acesso total, é permitida — prova que o 404 acima veio
+    // do gate, não de outra checagem qualquer no caminho.
+    await request(app.getHttpServer())
+      .patch(`/profiles/${autoPromocao.id}`)
+      .set('Authorization', adminToken)
+      .send({ name: 'Auto Promoção', grants: FULL_PONTO })
+      .expect(200);
+
+    const promoted = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: selfPromoter.id } }));
+    expect(promoted.hasFullPontoAccess).toBe(true);
+  });
+
   it('rejeita (400) um profileId vazio antes de chegar ao service (@IsNotEmpty no DTO)', async () => {
     await request(app.getHttpServer())
       .patch(`/companies/me/users/${(await createAdmin('dto-vazio')).id}/profile`)

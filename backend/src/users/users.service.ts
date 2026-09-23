@@ -216,36 +216,49 @@ export class UsersService {
         const freshUser = await tx.user.findUniqueOrThrow({ where: { id: userId } });
         const newGrants = await tx.profilePermission.findMany({ where: { profileId } });
 
+        // Um login sem perfil (`profileId: null`, alcançável pelo `onDelete: SetNull` da FK) não
+        // concede nada — então os grants "atuais" dele são uma lista VAZIA, não um motivo pra pular
+        // as checagens. Achado na re-revisão (22/09/2026): com todo o bloco abaixo aninhado dentro
+        // de `if (freshUser.profileId)`, promover justamente esse login pra um perfil de acesso
+        // total escapava do gate por completo.
+        const currentGrants = freshUser.profileId
+          ? await tx.profilePermission.findMany({ where: { profileId: freshUser.profileId } })
+          : [];
+
+        // Só esta checagem depende de haver um perfil anterior: "ele tinha `usuarios.gerenciar` e
+        // vai perder?" não faz sentido pra quem nunca teve perfil nenhum (não dá pra remover uma
+        // permissão que nunca se teve, e a contagem de detentores não muda).
         if (freshUser.profileId) {
-          const currentGrants = await tx.profilePermission.findMany({ where: { profileId: freshUser.profileId } });
           const hadIt = currentGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
           const willHaveIt = newGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
           if (hadIt && !willHaveIt) {
             await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
           }
+        }
 
-          // Achado na revisão final da branch (Fase 2a, 22/09/2026): remover
-          // PATCH .../ponto-access apagou, sem substituto, as duas proteções que ele carregava —
-          // (a) só um ADMIN que já tem acesso total podia mudar o acesso total de OUTRO ADMIN,
-          // (b) nunca deixar a empresa sem NENHUM ADMIN de acesso total. hasFullPontoAccess agora
-          // é derivado do Perfil (`ponto.administrar@EMPRESA`), então as duas proteções precisam
-          // ser recriadas aqui, o único lugar (junto de ProfilesService.update(), ver lá) que pode
-          // mudar esse valor efetivo hoje. Só relevante pra ADMIN (EMPLOYEE nunca tem acesso total,
-          // por definição — deriveHasFullPontoAccessFromGrants/effectiveHasFullPontoAccess).
-          if (freshUser.role === 'ADMIN') {
-            const hadFullPonto = deriveHasFullPontoAccessFromGrants(currentGrants);
-            const willHaveFullPonto = deriveHasFullPontoAccessFromGrants(newGrants);
-            if (hadFullPonto !== willHaveFullPonto) {
-              this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
-            }
-            if (hadFullPonto && !willHaveFullPonto) {
-              // Variante de UM usuário (exclui ESTE login, não o perfil inteiro) — ver o comentário
-              // longo em `assertNotLastAdminWithFullPontoAccess`: a variante de LOTE usada em
-              // ProfilesService descartaria da contagem os OUTROS admins que compartilham este
-              // mesmo perfil e que NÃO estão sendo movidos, rejeitando com 400 uma reatribuição
-              // individual perfeitamente segura.
-              await assertNotLastAdminWithFullPontoAccess(tx, companyId, userId);
-            }
+        // Achado na revisão final da branch (Fase 2a, 22/09/2026): remover
+        // PATCH .../ponto-access apagou, sem substituto, as duas proteções que ele carregava —
+        // (a) só um ADMIN que já tem acesso total podia mudar o acesso total de OUTRO ADMIN,
+        // (b) nunca deixar a empresa sem NENHUM ADMIN de acesso total. hasFullPontoAccess agora
+        // é derivado do Perfil (`ponto.administrar@EMPRESA`), então as duas proteções precisam
+        // ser recriadas aqui, o único lugar (junto de ProfilesService.update(), ver lá) que pode
+        // mudar esse valor efetivo hoje. Só relevante pra ADMIN (EMPLOYEE nunca tem acesso total,
+        // por definição — deriveHasFullPontoAccessFromGrants/effectiveHasFullPontoAccess).
+        if (freshUser.role === 'ADMIN') {
+          const hadFullPonto = deriveHasFullPontoAccessFromGrants(currentGrants);
+          const willHaveFullPonto = deriveHasFullPontoAccessFromGrants(newGrants);
+          // Gate nos DOIS sentidos: ganhar acesso total é exatamente a escalação que esta proteção
+          // existe pra impedir, não só perdê-lo.
+          if (hadFullPonto !== willHaveFullPonto) {
+            this.timeManagementAuth.assertHasFullPontoAccess(currentUser);
+          }
+          if (hadFullPonto && !willHaveFullPonto) {
+            // Variante de UM usuário (exclui ESTE login, não o perfil inteiro) — ver o comentário
+            // longo em `assertNotLastAdminWithFullPontoAccess`: a variante de LOTE usada em
+            // ProfilesService descartaria da contagem os OUTROS admins que compartilham este
+            // mesmo perfil e que NÃO estão sendo movidos, rejeitando com 400 uma reatribuição
+            // individual perfeitamente segura.
+            await assertNotLastAdminWithFullPontoAccess(tx, companyId, userId);
           }
         }
 

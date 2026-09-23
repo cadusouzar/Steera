@@ -372,7 +372,9 @@ describe('ProfilesService', () => {
         expect(assertOtherAdminGrantsFullPontoAccess).not.toHaveBeenCalled();
       });
 
-      it('NÃO checa nada quando o perfil já não dava acesso total antes da edição', async () => {
+      // Sem MUDANÇA de acesso total (EQUIPE → nenhum é `false` → `false`): nem gate nem invariante.
+      // Um chamador restrito passando sem lançar É a asserção de que o gate não disparou.
+      it('NÃO checa nada quando o acesso total não muda (já não dava antes, continua sem dar)', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], RESTRITO);
         const service = new ProfilesService(prisma as any, makeTimeAuth());
 
@@ -383,6 +385,50 @@ describe('ProfilesService', () => {
           makeCaller({ hasFullPontoAccess: false }),
         );
 
+        expect(assertOtherAdminGrantsFullPontoAccess).not.toHaveBeenCalled();
+      });
+
+      // Achado CRÍTICO da re-revisão (22/09/2026): o gate só olhava o sentido do REBAIXAMENTO, e o
+      // exploit real passava pelo sentido oposto. `ProfilesController` é `@Roles('ADMIN')` e nada
+      // mais; o perfil de um ADMIN restrito é `isProtected: false` — ele editava o PRÓPRIO perfil
+      // adicionando `ponto.administrar@EMPRESA` e, como `currentlyGrantsFullPonto` era `false`, a
+      // condição inteira dava `false` e NENHUMA checagem rodava. Depois do
+      // `recomputeAndSaveUserAccess`, o `hasFullPontoAccess` dele virava `true`.
+      it('BARRA (404) um ADMIN restrito CONCEDENDO acesso total (a escalação pelo sentido oposto)', async () => {
+        const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], RESTRITO);
+        const service = new ProfilesService(prisma as any, makeTimeAuth());
+
+        await expect(
+          service.update(
+            'company-1',
+            'p1',
+            { name: 'Perfil', grants: FULL_PONTO },
+            makeCaller({ hasFullPontoAccess: false }),
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('BARRA (404) a concessão mesmo partindo de um perfil que não tinha ponto.administrar nenhum', async () => {
+        const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], []);
+        const service = new ProfilesService(prisma as any, makeTimeAuth());
+
+        await expect(
+          service.update(
+            'company-1',
+            'p1',
+            { name: 'Perfil', grants: FULL_PONTO },
+            makeCaller({ hasFullPontoAccess: false }),
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('PERMITE a concessão quando o chamador já tem acesso total, sem acionar o invariante', async () => {
+        const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], RESTRITO);
+        const service = new ProfilesService(prisma as any, makeTimeAuth());
+
+        await service.update('company-1', 'p1', { name: 'Perfil', grants: FULL_PONTO }, makeCaller());
+
+        // Conceder nunca pode zerar a contagem — o invariante não tem o que checar aqui.
         expect(assertOtherAdminGrantsFullPontoAccess).not.toHaveBeenCalled();
       });
     });
