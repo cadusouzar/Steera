@@ -209,6 +209,29 @@ describe('CustomFieldValuesService', () => {
       );
     });
 
+    // CNPJ alfanumérico (Receita Federal, a partir de 2026): minúsculas/máscara aceitas e gravadas
+    // normalizadas em maiúsculas, só [0-9A-Z].
+    it('aceita e normaliza um CNPJ alfanumérico válido pra um campo CNPJ', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.CNPJ, columnName: 'custom_cnpj' }),
+      ]);
+      await service.setValues('client', 'rec1', { custom_cnpj: '12.abc.345/01de-35' }, tx as any);
+      expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'UPDATE "Client" SET "custom_cnpj" = $1 WHERE id = $2',
+        '12ABC34501DE35',
+        'rec1',
+      );
+    });
+
+    it('rejeita um CNPJ alfanumérico com dígito verificador errado', async () => {
+      tx.customFieldDefinition.findMany.mockResolvedValue([
+        makeDefinition({ type: CustomFieldType.CNPJ, columnName: 'custom_cnpj' }),
+      ]);
+      await expect(
+        service.setValues('client', 'rec1', { custom_cnpj: '12ABC34501DE36' }, tx as any),
+      ).rejects.toThrow('precisa ser um CNPJ válido');
+    });
+
     it('adiciona o cast ::text[] pra um campo MULTI_SELECT', async () => {
       tx.customFieldDefinition.findMany.mockResolvedValue([
         makeDefinition({
