@@ -1,8 +1,9 @@
 import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { FriendlyThrottlerGuard } from '../auth/guards/friendly-throttler.guard';
 import { ModulesGuard } from '../auth/guards/modules.guard';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
@@ -50,7 +51,7 @@ export class TimeClockController {
   // que ser explicitamente pulado ou explicitamente configurado em toda rota que usa ThrottlerGuard
   // — aqui não faz sentido nenhum (não é uma ação de login).
   @Post('punches')
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(FriendlyThrottlerGuard)
   @SkipThrottle({ 'login-email': true })
   @Throttle({ default: { limit: 30, ttl: 900_000 } })
   @UseInterceptors(FileInterceptor('photo', { limits: { fileSize: 8 * 1024 * 1024 } }))
