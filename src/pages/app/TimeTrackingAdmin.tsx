@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import {
   Users, ClipboardList, FileText, AlertTriangle, Settings, MapPin,
   Check, X, Loader2, Plus, Paperclip, Wrench,
@@ -42,6 +43,36 @@ function formatDateTime(iso: string) {
 }
 function formatDateOnly(dateStr: string) {
   return dateStr.split('-').reverse().join('/');
+}
+
+// Filtro de status compartilhado pelas abas de Solicitações de Ajuste e Justificativas — as duas
+// eram fixas em "pendente", então uma vez aprovada/rejeitada a solicitação sumia da tela pra
+// sempre, sem nenhum lugar pra consultar o motivo depois.
+type ReviewStatusFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
+function reviewStatusBadgeTone(status: string): 'green' | 'yellow' | 'red' | 'gray' {
+  if (status === 'approved') return 'green';
+  if (status === 'rejected') return 'red';
+  if (status === 'pending') return 'yellow';
+  return 'gray';
+}
+const REVIEW_STATUS_LABELS: Record<ReviewStatusFilter, string> = {
+  pending: 'Pendente', approved: 'Aprovada', rejected: 'Rejeitada', cancelled: 'Cancelada', all: 'Todas',
+};
+function StatusFilterSelect({ value, onChange, includeCancelled }: { value: ReviewStatusFilter; onChange: (v: ReviewStatusFilter) => void; includeCancelled?: boolean }) {
+  const options: ReviewStatusFilter[] = includeCancelled
+    ? ['pending', 'approved', 'rejected', 'cancelled', 'all']
+    : ['pending', 'approved', 'rejected', 'all'];
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as ReviewStatusFilter)}
+      className="bg-background border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-primary text-foreground"
+    >
+      {options.map((o) => (
+        <option key={o} value={o}>{REVIEW_STATUS_LABELS[o]}</option>
+      ))}
+    </select>
+  );
 }
 
 // `downloadUrl` nunca pode virar `<a href>` direto — a rota exige o JWT de acesso normal além do
@@ -170,15 +201,17 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [actingId, setActingId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('pending');
+  const [viewingNote, setViewingNote] = useState<AdjustmentRequestRecord | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    listPendingAdjustmentRequests({ status: 'pending', pageSize: 100 })
+    listPendingAdjustmentRequests({ status: statusFilter === 'all' ? undefined : statusFilter, pageSize: 100 })
       .then((res) => setItems(res.items))
       .catch((err) => setError(err instanceof Error ? err.message : 'Não foi possível carregar as solicitações.'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
@@ -212,11 +245,19 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
   };
 
   return (
-    <SectionPanel title="Solicitações de ajuste pendentes" subtitle="Aprovar gera uma nova marcação e uma trilha de auditoria completa; o registro original nunca é alterado. Rejeitar exige um motivo." error={error} loading={loading} empty={items.length === 0} emptyLabel="Nenhuma solicitação pendente.">
+    <div>
+      <div className="flex justify-end mb-3">
+        <StatusFilterSelect value={statusFilter} onChange={setStatusFilter} includeCancelled />
+      </div>
+      <SectionPanel
+        title={statusFilter === 'pending' ? 'Solicitações de ajuste pendentes' : `Solicitações de ajuste — ${REVIEW_STATUS_LABELS[statusFilter]}`}
+        subtitle="Aprovar gera uma nova marcação e uma trilha de auditoria completa; o registro original nunca é alterado. Rejeitar exige um motivo."
+        error={error} loading={loading} empty={items.length === 0} emptyLabel="Nenhuma solicitação encontrada para este filtro."
+      >
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b-2 border-border/60 bg-secondary/10">
-            <Th>Funcionário</Th><Th>Data</Th><Th>Tipo</Th><Th>Motivo</Th><Th>Anexo</Th><Th className="text-right">Ações</Th>
+            <Th>Funcionário</Th><Th>Data</Th><Th>Tipo</Th><Th>Motivo da Solicitação</Th><Th>Anexo</Th><Th>Status</Th><Th className="text-right">Ações / Análise</Th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/40">
@@ -228,20 +269,38 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
                 <Td>{ADJUSTMENT_TYPE_LABELS[r.type]}</Td>
                 <Td className="max-w-xs"><span className="text-sm">{r.reason}</span></Td>
                 <Td>{r.downloadUrl ? <button onClick={() => openAttachment(r.downloadUrl!)} className="text-primary hover:underline inline-flex items-center gap-1 text-sm"><Paperclip size={14} /> Ver</button> : '-'}</Td>
+                <Td><Badge tone={reviewStatusBadgeTone(r.status)}>{REVIEW_STATUS_LABELS[r.status]}</Badge></Td>
                 <Td className="text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => handleApprove(r.id)} disabled={actingId === r.id} className="px-3 py-2 rounded-lg bg-green-500/10 text-green-600 hover:bg-green-500/20 text-xs font-bold flex items-center gap-1 disabled:opacity-50">
-                      <Check size={14} /> Aprovar
-                    </button>
-                    <button onClick={() => { setRejectingId(rejectingId === r.id ? null : r.id); setRejectReason(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 text-xs font-bold flex items-center gap-1">
-                      <X size={14} /> Rejeitar
-                    </button>
-                  </div>
+                  {r.status === 'pending' ? (
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => handleApprove(r.id)} disabled={actingId === r.id} className="px-3 py-2 rounded-lg bg-green-500/10 text-green-600 hover:bg-green-500/20 text-xs font-bold flex items-center gap-1 disabled:opacity-50">
+                        <Check size={14} /> Aprovar
+                      </button>
+                      <button onClick={() => { setRejectingId(rejectingId === r.id ? null : r.id); setRejectReason(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 text-xs font-bold flex items-center gap-1">
+                        <X size={14} /> Rejeitar
+                      </button>
+                    </div>
+                  ) : (r.status === 'approved' || r.status === 'rejected') ? (
+                    <div className="text-left text-xs text-muted">
+                      {r.reviewNote && (
+                        <button
+                          type="button"
+                          onClick={() => setViewingNote(r)}
+                          className="text-primary hover:underline font-medium"
+                        >
+                          Motivo da Análise
+                        </button>
+                      )}
+                      {r.reviewedAt && <p className="mt-1">{formatDateTime(r.reviewedAt)}</p>}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted">-</span>
+                  )}
                 </Td>
               </tr>
               {rejectingId === r.id && (
                 <tr key={`${r.id}-reject`}>
-                  <td colSpan={6} className="px-4 pb-4">
+                  <td colSpan={7} className="px-4 pb-4">
                     <div className="flex gap-2 bg-red-500/5 border border-red-500/20 rounded-xl p-3">
                       <input
                         autoFocus
@@ -261,7 +320,18 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
           ))}
         </tbody>
       </table>
-    </SectionPanel>
+      </SectionPanel>
+      <ReviewNoteModal
+        target={viewingNote ? {
+          typeLabel: ADJUSTMENT_TYPE_LABELS[viewingNote.type],
+          employeeLabel: employeeName(viewingNote.employeeId),
+          status: viewingNote.status as 'approved' | 'rejected',
+          reviewNote: viewingNote.reviewNote,
+          reviewedAt: viewingNote.reviewedAt,
+        } : null}
+        onClose={() => setViewingNote(null)}
+      />
+    </div>
   );
 }
 
@@ -274,15 +344,17 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [actingId, setActingId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('pending');
+  const [viewingNote, setViewingNote] = useState<JustificationRecord | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    listJustificationsForReview({ status: 'pending', pageSize: 100 })
+    listJustificationsForReview({ status: statusFilter === 'all' ? undefined : (statusFilter as 'pending' | 'approved' | 'rejected'), pageSize: 100 })
       .then((res) => setItems(res.items))
       .catch((err) => setError(err instanceof Error ? err.message : 'Não foi possível carregar as justificativas.'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
@@ -316,11 +388,19 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
   };
 
   return (
-    <SectionPanel title="Justificativas e atestados pendentes" subtitle="Atestados são tratados como dado sensível de saúde — o anexo é a única evidência aceita, nunca um diagnóstico digitado." error={error} loading={loading} empty={items.length === 0} emptyLabel="Nenhuma justificativa pendente.">
+    <div>
+      <div className="flex justify-end mb-3">
+        <StatusFilterSelect value={statusFilter} onChange={setStatusFilter} />
+      </div>
+      <SectionPanel
+        title={statusFilter === 'pending' ? 'Justificativas e atestados pendentes' : `Justificativas e atestados — ${REVIEW_STATUS_LABELS[statusFilter]}`}
+        subtitle="Atestados são tratados como dado sensível de saúde — o anexo é a única evidência aceita, nunca um diagnóstico digitado."
+        error={error} loading={loading} empty={items.length === 0} emptyLabel="Nenhuma justificativa encontrada para este filtro."
+      >
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b-2 border-border/60 bg-secondary/10">
-            <Th>Funcionário</Th><Th>Tipo</Th><Th>Descrição</Th><Th>Anexo</Th><Th className="text-right">Ações</Th>
+            <Th>Funcionário</Th><Th>Tipo</Th><Th>Descrição</Th><Th>Anexo</Th><Th>Status</Th><Th className="text-right">Ações / Análise</Th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/40">
@@ -331,20 +411,36 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
                 <Td>{JUSTIFICATION_TYPE_LABELS[j.type]}</Td>
                 <Td className="max-w-xs"><span className="text-sm">{j.description}</span></Td>
                 <Td>{j.downloadUrl ? <button onClick={() => openAttachment(j.downloadUrl!)} className="text-primary hover:underline inline-flex items-center gap-1 text-sm"><Paperclip size={14} /> Ver</button> : '-'}</Td>
+                <Td><Badge tone={reviewStatusBadgeTone(j.status)}>{REVIEW_STATUS_LABELS[j.status]}</Badge></Td>
                 <Td className="text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => handleApprove(j.id)} disabled={actingId === j.id} className="px-3 py-2 rounded-lg bg-green-500/10 text-green-600 hover:bg-green-500/20 text-xs font-bold flex items-center gap-1 disabled:opacity-50">
-                      <Check size={14} /> Aprovar
-                    </button>
-                    <button onClick={() => { setRejectingId(rejectingId === j.id ? null : j.id); setRejectReason(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 text-xs font-bold flex items-center gap-1">
-                      <X size={14} /> Rejeitar
-                    </button>
-                  </div>
+                  {j.status === 'pending' ? (
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => handleApprove(j.id)} disabled={actingId === j.id} className="px-3 py-2 rounded-lg bg-green-500/10 text-green-600 hover:bg-green-500/20 text-xs font-bold flex items-center gap-1 disabled:opacity-50">
+                        <Check size={14} /> Aprovar
+                      </button>
+                      <button onClick={() => { setRejectingId(rejectingId === j.id ? null : j.id); setRejectReason(''); }} className="px-3 py-2 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 text-xs font-bold flex items-center gap-1">
+                        <X size={14} /> Rejeitar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-left text-xs text-muted">
+                      {j.reviewNote && (
+                        <button
+                          type="button"
+                          onClick={() => setViewingNote(j)}
+                          className="text-primary hover:underline font-medium"
+                        >
+                          Motivo da Análise
+                        </button>
+                      )}
+                      {j.reviewedAt && <p className="mt-1">{formatDateTime(j.reviewedAt)}</p>}
+                    </div>
+                  )}
                 </Td>
               </tr>
               {rejectingId === j.id && (
                 <tr key={`${j.id}-reject`}>
-                  <td colSpan={5} className="px-4 pb-4">
+                  <td colSpan={6} className="px-4 pb-4">
                     <div className="flex gap-2 bg-red-500/5 border border-red-500/20 rounded-xl p-3">
                       <input
                         autoFocus
@@ -364,7 +460,18 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
           ))}
         </tbody>
       </table>
-    </SectionPanel>
+      </SectionPanel>
+      <ReviewNoteModal
+        target={viewingNote ? {
+          typeLabel: JUSTIFICATION_TYPE_LABELS[viewingNote.type],
+          employeeLabel: employeeName(viewingNote.employeeId),
+          status: viewingNote.status as 'approved' | 'rejected',
+          reviewNote: viewingNote.reviewNote,
+          reviewedAt: viewingNote.reviewedAt,
+        } : null}
+        onClose={() => setViewingNote(null)}
+      />
+    </div>
   );
 }
 
@@ -918,6 +1025,73 @@ function Badge({ tone, children }: { tone: 'green' | 'yellow' | 'red' | 'gray'; 
   }[tone];
   return <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${toneClass}`}>{children}</span>;
 }
+
+// Motivo da análise (reviewNote) pode ser bem longo (até 2000 caracteres) — exibir inline numa
+// célula/linha da tabela esticava o layout de forma ilegível. Mesmo modal (estrutura, animação e
+// classes) já usado em TimeTracking.tsx pro funcionário, pra dar a mesma experiência visual dos
+// dois lados (pedido do usuário, 18/09/2026) — reutilizado por AdjustmentsTab e JustificationsTab
+// em vez de duplicado, já que o conteúdo é idêntico (tipo, funcionário, status, motivo, data).
+interface ReviewNoteModalTarget {
+  typeLabel: string;
+  employeeLabel: string;
+  status: 'approved' | 'rejected';
+  reviewNote: string | null;
+  reviewedAt: string | null;
+}
+function ReviewNoteModal({ target, onClose }: { target: ReviewNoteModalTarget | null; onClose: () => void }) {
+  if (!target) return null;
+  return createPortal(
+    <AnimatePresence>
+      <>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
+        />
+        <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="w-full max-w-sm bg-background border border-border shadow-2xl rounded-2xl flex flex-col pointer-events-auto overflow-hidden"
+          >
+            <div className="p-5 border-b border-border flex items-center justify-between bg-secondary/10 shrink-0">
+              <h2 className="text-lg font-heading font-bold text-foreground">Motivo da Análise</h2>
+              <button
+                onClick={onClose}
+                className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <span className="font-bold text-sm text-foreground">{target.typeLabel}</span>
+                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${target.status === 'approved' ? 'bg-green-500/10 text-green-600 border-green-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>
+                  {target.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
+                </span>
+              </div>
+              <p className="text-xs text-muted mb-4">Funcionário: {target.employeeLabel}</p>
+
+              <div className="bg-secondary/10 p-4 rounded-xl border border-border/50">
+                <p className="font-semibold text-foreground text-xs uppercase tracking-wider mb-2">Motivo</p>
+                <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">{target.reviewNote}</p>
+                {target.reviewedAt && (
+                  <p className="text-[11px] text-muted mt-3">Analisado em {formatDateTime(target.reviewedAt)}</p>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </>
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   return (
     <div>

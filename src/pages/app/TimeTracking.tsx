@@ -203,6 +203,13 @@ const TimeTracking = () => {
   }, [linkedEmployeeId, refreshKey]);
 
   const pendingRequestForDate = (date: string) => ownRequests.find((r) => r.targetDate === date && r.status === 'pending');
+  // Mais recente solicitação já resolvida (aprovada/rejeitada) pra esta data — só usada quando não
+  // há mais nenhuma pendente, pra mostrar pro funcionário o resultado (e o motivo, se rejeitada) da
+  // própria solicitação em vez de ela simplesmente sumir depois de analisada.
+  const lastResolvedRequestForDate = (date: string) =>
+    ownRequests
+      .filter((r) => r.targetDate === date && (r.status === 'approved' || r.status === 'rejected'))
+      .sort((a, b) => (b.reviewedAt ?? b.createdAt).localeCompare(a.reviewedAt ?? a.createdAt))[0];
 
   // ---- Bater ponto: câmera, GPS, preview da foto, confirmação ----
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -218,6 +225,7 @@ const TimeTracking = () => {
   const [submittingPunch, setSubmittingPunch] = useState(false);
   const [submitPunchError, setSubmitPunchError] = useState('');
   const [selectedPunchDetail, setSelectedPunchDetail] = useState<TimePunch | null>(null);
+  const [viewingResolvedRequest, setViewingResolvedRequest] = useState<AdjustmentRequestRecord | null>(null);
   const [punchPhotoObjectUrl, setPunchPhotoObjectUrl] = useState<string | null>(null);
   const [punchPhotoLoading, setPunchPhotoLoading] = useState(false);
 
@@ -653,6 +661,7 @@ const TimeTracking = () => {
                   {[...(monthSummary?.days ?? [])].reverse().map((day) => {
                     const displayStatus = deriveDisplayStatus(day, todayStr);
                     const pending = pendingRequestForDate(day.date);
+                    const resolved = pending ? undefined : lastResolvedRequestForDate(day.date);
                     return (
                       <tr key={day.date} className="hover:bg-secondary/5 transition-colors">
                         <td className="py-4">
@@ -680,6 +689,20 @@ const TimeTracking = () => {
                           </span>
                           {pending && (
                             <div className="text-[10px] mt-1 text-orange-500 font-medium">Ajuste Pendente</div>
+                          )}
+                          {resolved && (
+                            <div className={`text-[10px] mt-1 font-medium ${resolved.status === 'approved' ? 'text-green-600' : 'text-red-500'}`}>
+                              Ajuste {resolved.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
+                              {resolved.reviewNote && (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingResolvedRequest(resolved)}
+                                  className="block mx-auto mt-0.5 text-muted font-normal normal-case underline decoration-dotted hover:text-foreground transition-colors"
+                                >
+                                  Ver motivo
+                                </button>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="py-4 text-right">
@@ -1149,6 +1172,61 @@ const TimeTracking = () => {
                         </p>
                       </div>
                     </div>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          </>
+        </AnimatePresence>,
+        document.body,
+      )}
+
+      {/* Motivo da Análise Modal — texto do reviewNote pode ser bem longo (até 2000 caracteres),
+          quebrava o layout da tabela quando exibido inline na célula de status. */}
+      {viewingResolvedRequest && createPortal(
+        <AnimatePresence>
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setViewingResolvedRequest(null)}
+              className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
+            />
+            <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-sm bg-background border border-border shadow-2xl rounded-2xl flex flex-col pointer-events-auto overflow-hidden"
+              >
+                <div className="p-5 border-b border-border flex items-center justify-between bg-secondary/10 shrink-0">
+                  <h2 className="text-lg font-heading font-bold text-foreground">Motivo da Análise</h2>
+                  <button
+                    onClick={() => setViewingResolvedRequest(null)}
+                    className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="font-bold text-sm text-foreground">{ADJUSTMENT_TYPE_LABELS[viewingResolvedRequest.type]}</span>
+                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${viewingResolvedRequest.status === 'approved' ? 'bg-green-500/10 text-green-600 border-green-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>
+                      {viewingResolvedRequest.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted mb-4">Dia solicitado: {formatDateLabel(viewingResolvedRequest.targetDate)}</p>
+
+                  <div className="bg-secondary/10 p-4 rounded-xl border border-border/50">
+                    <p className="font-semibold text-foreground text-xs uppercase tracking-wider mb-2">Motivo</p>
+                    <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">{viewingResolvedRequest.reviewNote}</p>
+                    {viewingResolvedRequest.reviewedAt && (
+                      <p className="text-[11px] text-muted mt-3">
+                        Analisado em {new Date(viewingResolvedRequest.reviewedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    )}
                   </div>
                 </div>
               </motion.div>
