@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Lock } from 'lucide-react';
 import FormField from '../FormField';
 import { fetchAddressByCep } from '../../lib/brazilLookups';
 import { updateMyCompany, updateMyName, type CurrentUser } from '../../lib/auth';
@@ -152,7 +152,7 @@ const AccountProfileEditForm: React.FC<AccountProfileEditFormProps> = ({ user, o
   };
 
   const inputClass = (hasError: boolean) =>
-    `w-full bg-background border ${inputBorderClass(hasError)} rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-shadow`;
+    `w-full bg-background border ${inputBorderClass(hasError)} rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-shadow disabled:bg-secondary/30 disabled:text-muted disabled:cursor-not-allowed`;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8" noValidate>
@@ -176,42 +176,47 @@ const AccountProfileEditForm: React.FC<AccountProfileEditFormProps> = ({ user, o
 
       <fieldset className="space-y-4">
         <legend className="text-lg font-bold text-foreground mb-2">Dados da empresa</legend>
-        {!isAdmin ? (
-          <p className="text-sm text-muted">Os dados da empresa só podem ser alterados por um administrador.</p>
-        ) : (
-          <>
-            <FormField label={isPF ? 'Nome completo' : 'Razão social'} htmlFor="account-legal-name" required error={errors.legalName}>
+        {!isAdmin && (
+          <p className="flex items-start gap-2 rounded-xl border border-border bg-secondary/30 px-4 py-3 text-sm text-muted">
+            <Lock size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
+            Os dados da empresa só podem ser alterados por um administrador — abaixo, apenas para consulta.
+          </p>
+        )}
+        {/* `disabled` nativo do fieldset bloqueia todos os campos de uma vez pra quem não é ADMIN: os
+            dados aparecem preenchidos (consulta), mas não dá pra editar — e o backend recusaria (403). */}
+        <fieldset disabled={!isAdmin} className="space-y-4">
+            <FormField label={isPF ? 'Nome completo' : 'Razão social'} htmlFor="account-legal-name" required={isAdmin} error={errors.legalName}>
               <input id="account-legal-name" value={company.legalName} maxLength={NAME_MAX_LENGTH} onChange={(e) => setField('legalName', e.target.value)} className={inputClass(!!errors.legalName)} />
             </FormField>
-            <FormField label={isPF ? 'Nome fantasia (opcional)' : 'Nome fantasia'} htmlFor="account-trade-name" required={!isPF} error={errors.tradeName}>
+            <FormField label={isPF ? 'Nome fantasia (opcional)' : 'Nome fantasia'} htmlFor="account-trade-name" required={isAdmin && !isPF} error={errors.tradeName}>
               <input id="account-trade-name" value={company.tradeName} maxLength={NAME_MAX_LENGTH} onChange={(e) => setField('tradeName', e.target.value)} className={inputClass(!!errors.tradeName)} />
             </FormField>
-            <FormField label="Telefone" htmlFor="account-phone" required error={errors.phone}>
+            <FormField label="Telefone" htmlFor="account-phone" required={isAdmin} error={errors.phone}>
               <input id="account-phone" value={company.phone} inputMode="tel" onChange={(e) => setField('phone', formatPhoneInput(e.target.value))} placeholder="(00) 00000-0000" className={inputClass(!!errors.phone)} />
             </FormField>
-            <FormField label="CEP" htmlFor="account-zip" required error={errors.zipCode}>
+            <FormField label="CEP" htmlFor="account-zip" required={isAdmin} error={errors.zipCode}>
               <input id="account-zip" value={company.zipCode} inputMode="numeric" onChange={(e) => setField('zipCode', formatCepInput(e.target.value))} onBlur={handleCepBlur} placeholder="00000-000" className={inputClass(!!errors.zipCode)} />
             </FormField>
             {cepNotice && <p className="text-sm text-foreground/70">{cepNotice}</p>}
-            <FormField label="Logradouro" htmlFor="account-street" required error={errors.street}>
+            <FormField label="Logradouro" htmlFor="account-street" required={isAdmin} error={errors.street}>
               <input id="account-street" value={company.street} maxLength={NAME_MAX_LENGTH} onChange={(e) => setField('street', e.target.value)} className={inputClass(!!errors.street)} />
             </FormField>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <FormField label="Número" htmlFor="account-number" required error={errors.number}>
+              <FormField label="Número" htmlFor="account-number" required={isAdmin} error={errors.number}>
                 <input id="account-number" value={company.number} maxLength={NUMBER_MAX_LENGTH} onChange={(e) => setField('number', e.target.value)} className={inputClass(!!errors.number)} />
               </FormField>
               <FormField label="Complemento" htmlFor="account-complement" error={errors.complement}>
                 <input id="account-complement" value={company.complement} maxLength={NAME_MAX_LENGTH} onChange={(e) => setField('complement', e.target.value)} className={inputClass(!!errors.complement)} />
               </FormField>
             </div>
-            <FormField label="Bairro" htmlFor="account-district" required error={errors.district}>
+            <FormField label="Bairro" htmlFor="account-district" required={isAdmin} error={errors.district}>
               <input id="account-district" value={company.district} maxLength={NAME_MAX_LENGTH} onChange={(e) => setField('district', e.target.value)} className={inputClass(!!errors.district)} />
             </FormField>
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_8rem] gap-4">
-              <FormField label="Cidade" htmlFor="account-city" required error={errors.city}>
+              <FormField label="Cidade" htmlFor="account-city" required={isAdmin} error={errors.city}>
                 <input id="account-city" value={company.city} maxLength={NAME_MAX_LENGTH} onChange={(e) => setField('city', e.target.value)} className={inputClass(!!errors.city)} />
               </FormField>
-              <FormField label="UF" htmlFor="account-state" required error={errors.state}>
+              <FormField label="UF" htmlFor="account-state" required={isAdmin} error={errors.state}>
                 <select id="account-state" value={company.state} onChange={(e) => setField('state', e.target.value)} className={inputClass(!!errors.state)}>
                   <option value="">Selecione</option>
                   {BRAZILIAN_STATES.map((uf) => (
@@ -223,8 +228,7 @@ const AccountProfileEditForm: React.FC<AccountProfileEditFormProps> = ({ user, o
             <p className="text-xs text-muted">
               {user.personType === 'PF' ? 'CPF' : 'CNPJ'} ({user.documentMasked ?? '—'}) e tipo de conta não podem ser alterados.
             </p>
-          </>
-        )}
+        </fieldset>
       </fieldset>
 
       <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
