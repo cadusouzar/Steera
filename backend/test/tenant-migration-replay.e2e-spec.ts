@@ -21,7 +21,12 @@ describe('applyMigrations (integration — Postgres real)', () => {
     if (!/\/quickflow_test(\?|$)/.test(url)) {
       throw new Error('DATABASE_URL must point to a *_test database for e2e tests');
     }
-    const company = await prisma.company.create({ data: { name: 'Migration Replay Test Co' } });
+    // `schemaName` é @unique e obrigatório desde a feature de cadastro ampliado/schema legível
+    // (25/09/2026) — esta suíte já cria/repassa migrations/dropa um schema físico próprio
+    // (`schemaName`, computado acima), então a Company criada aqui precisa apontar pra ESSE MESMO
+    // nome, não um valor arbitrário: é o schema que `applyMigrations` de fato replica e que o
+    // `afterAll` dropa.
+    const company = await prisma.company.create({ data: { name: 'Migration Replay Test Co', schemaName } });
     companyId = company.id;
   });
 
