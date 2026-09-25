@@ -167,6 +167,8 @@ model User {
   companyId           String
   company             Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   email               String         @unique
+  // Nome do responsável — informado pelo fundador no cadastro; logins criados pelo admin ficam null.
+  name                String?
   passwordHash        String
   role                UserRole
   // Sem `@relation` de propósito: `Employee` é um modelo de tenant, fisicamente roteado pro schema
@@ -254,9 +256,31 @@ model ProfilePermission {
   @@index([companyId])
 }
 
+enum CompanyPersonType {
+  PJ
+  PF
+}
+
 model Company {
   id                     String                  @id @default(cuid())
   name                   String
+  // Dados cadastrais (cadastro ampliado, 25/09/2026). Nullable porque empresas anteriores a esta
+  // feature não têm esses dados — a obrigatoriedade vale só pro cadastro novo (RegisterDto).
+  personType             CompanyPersonType?
+  // CPF: 11 dígitos; CNPJ: 14 caracteres [0-9A-Z] (alfanumérico). Único: uma conta por documento.
+  document               String?                 @unique
+  legalName              String?
+  tradeName              String?
+  phone                  String?
+  zipCode                String?
+  street                 String?
+  number                 String?
+  complement             String?
+  district               String?
+  city                   String?
+  // Nome do schema físico da empresa — gravado UMA vez no cadastro, nunca muda (ver
+  // tenant-schema.util.ts / tenant-schema-name-resolver.ts). Empresas anteriores: 'tenant_<id>'.
+  schemaName             String                  @unique
   planTier               CompanyPlanTier         @default(BASICO)
   maxEmployeeLogins      Int                     @default(10)
   createdAt              DateTime                @default(now())

@@ -322,7 +322,7 @@ describe('AuthService', () => {
       await service.register({ companyName: 'Acme', email: 'a@b.com', password: 'senha123456' }, fakeRes);
 
       expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
-        expect.stringContaining(`CREATE SCHEMA "tenant_${companyId}"`),
+        expect.stringMatching(/^CREATE SCHEMA "acme_[a-z0-9]{8}"$/),
       );
       const callOrder = prisma.$executeRawUnsafe.mock.invocationCallOrder;
       const userCreateOrder = prisma.user.create.mock.invocationCallOrder[0];

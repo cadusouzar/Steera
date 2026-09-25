@@ -8,7 +8,7 @@ import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { listMigrationNames } from '../prisma/migration-files.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { getTenantCompanyId, runAsSystem, runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
-import { assertValidSchemaName, tenantSchemaName } from '../prisma/tenant-schema.util';
+import { assertValidSchemaName, buildTenantSchemaName, generateCompanyId } from '../prisma/tenant-schema.util';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { applyMigrations } from '../prisma/tenant-migration.util';
 import { hashPassword, verifyPassword } from './password.util';
@@ -174,7 +174,9 @@ export class AuthService {
           // tenant. Provisionar uma empresa é raro e nunca um caminho quente, então serializar
           // globalmente aqui não tem custo de throughput relevante.
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tenant_provisioning')::bigint)`;
-          const company = await tx.company.create({ data: { name: dto.companyName } });
+          const newCompanyId = generateCompanyId();
+          const schemaName = buildTenantSchemaName(dto.companyName, newCompanyId);
+          const company = await tx.company.create({ data: { id: newCompanyId, name: dto.companyName, schemaName } });
           // "Administrador Geral": perfil protegido do fundador, com TODAS as permissões do
           // catálogo concedidas incondicionalmente (não só as que ALL_MODULES implicaria sob o
           // sistema antigo) — mesmo padrão/nome já usado por scripts/backfill-profiles.ts pra
@@ -195,7 +197,6 @@ export class AuthService {
               },
             },
           });
-          const schemaName = tenantSchemaName(company.id);
           assertValidSchemaName(schemaName);
           // CREATE SCHEMA e a migration replay abaixo rodam DENTRO desta mesma transação
           // PostgreSQL — DDL é transacional no Postgres, então qualquer falha (schema, uma
