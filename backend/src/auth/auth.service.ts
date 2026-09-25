@@ -159,6 +159,38 @@ export class AuthService {
     });
   }
 
+  // P2002 = unique constraint violation on User.email OU Company.document. Sem isso, um
+  // e-mail/documento duplicado (retry do usuário, ou dois cadastros concorrentes) vazava como 500
+  // opaco em vez de um erro de negócio claro. Colisão de `schemaName` não é mapeada de propósito:
+  // pickCompanyIdentity roda sob o lock, então nunca deve acontecer — se acontecer, é bug e deve
+  // aparecer como 500 logado.
+  //
+  // Achado no e2e real contra Postgres (Task 6): pra ALGUMAS violações desta constraint o Prisma
+  // devolve `err.meta` SEM `target` (motivo exato não isolado — não acontece com toda violação de
+  // unique constraint, só com esta em condições específicas) — o fast path acima nunca reconhece
+  // esse caso e relançava o erro cru como 500. Sem `target` pra decidir qual campo colidiu, a única
+  // forma confiável de desambiguar é consultar o banco: a transação que falhou já foi desfeita
+  // (Postgres reverte TUDO, incluindo o próprio Company/User que colidiram), então esta consulta
+  // roda DEPOIS, fora dela, via runAsSystem — mesmo padrão de login() (nenhum tenant conhecido
+  // ainda, rota @Public()).
+  private async resolveRegisterConflict(err: unknown, dto: RegisterDto, document: string): Promise<never> {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const target = JSON.stringify(err.meta?.target ?? '');
+      if (target.includes('document')) {
+        throw new ConflictException(`Já existe uma conta com este ${dto.personType === 'PJ' ? 'CNPJ' : 'CPF'}`);
+      }
+      if (target.includes('email')) throw new ConflictException('Este e-mail já está cadastrado');
+
+      const existingUser = await runAsSystem(() => this.prisma.user.findUnique({ where: { email: dto.email } }));
+      if (existingUser) throw new ConflictException('Este e-mail já está cadastrado');
+      const existingCompany = await runAsSystem(() => this.prisma.company.findUnique({ where: { document } }));
+      if (existingCompany) {
+        throw new ConflictException(`Já existe uma conta com este ${dto.personType === 'PJ' ? 'CNPJ' : 'CPF'}`);
+      }
+    }
+    throw err;
+  }
+
   async register(dto: RegisterDto, res: Response) {
     // Normaliza/valida ANTES da transação: erro de documento/telefone nunca chega a pegar o lock
     // global de provisionamento.
@@ -270,19 +302,9 @@ export class AuthService {
         }),
       );
     } catch (err) {
-      // P2002 = unique constraint violation on User.email OU Company.document. Sem isso, um
-      // e-mail/documento duplicado (retry do usuário, ou dois cadastros concorrentes) vazava como
-      // 500 opaco em vez de um erro de negócio claro. Colisão de `schemaName` não é mapeada de
-      // propósito: pickCompanyIdentity roda sob o lock, então nunca deve acontecer — se acontecer,
-      // é bug e deve aparecer como 500 logado.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        const target = JSON.stringify(err.meta?.target ?? '');
-        if (target.includes('document')) {
-          throw new ConflictException(`Já existe uma conta com este ${dto.personType === 'PJ' ? 'CNPJ' : 'CPF'}`);
-        }
-        if (target.includes('email')) throw new ConflictException('Este e-mail já está cadastrado');
-      }
-      throw err;
+      // `throw await ...`: resolveRegisterConflict sempre lança (Promise<never>) — o `throw` aqui é
+      // só pra o TypeScript entender que `result` está sempre atribuído depois deste bloco.
+      throw await this.resolveRegisterConflict(err, dto, document);
     }
     const { user, company } = result;
     const accessToken = await this.signAccessToken(user);

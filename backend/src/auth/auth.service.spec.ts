@@ -443,6 +443,39 @@ describe('AuthService', () => {
         service.register({ ...baseRegisterDto, personType: 'PF', document: '529.982.247-25', tradeName: undefined }, fakeRes),
       ).rejects.toThrow('Já existe uma conta com este CPF');
     });
+
+    // Achado no e2e real (Task 6, Postgres de verdade): pra ALGUMAS violações de unique constraint
+    // do User.email, o Prisma devolve err.meta SEM `target` — o fast path acima (que só olha
+    // meta.target) nunca reconhece esse caso e relança o erro cru como 500. Desambiguação por
+    // lookup fora da transação já desfeita (runAsSystem, mesmo padrão de login()).
+    describe('P2002 sem meta.target (Prisma às vezes omite o alvo da constraint)', () => {
+      it('e-mail já existe: consulta User por e-mail e mapeia pra 409 de e-mail', async () => {
+        prisma.$transaction.mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x', meta: {} }),
+        );
+        prisma.user.findUnique.mockResolvedValueOnce({ id: 'existing-user' });
+        await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow('Este e-mail já está cadastrado');
+        expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: baseRegisterDto.email } });
+      });
+
+      it('e-mail livre mas documento já existe: consulta Company por documento e mapeia pra 409 de CNPJ', async () => {
+        prisma.$transaction.mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x', meta: {} }),
+        );
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        prisma.company.findUnique.mockResolvedValueOnce({ id: 'existing-company' });
+        await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow('Já existe uma conta com este CNPJ');
+        expect(prisma.company.findUnique).toHaveBeenCalledWith({ where: { document: '11222333000181' } });
+      });
+
+      it('nem e-mail nem documento existem: relança o erro original em vez de inventar uma causa', async () => {
+        const original = new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x', meta: {} });
+        prisma.$transaction.mockRejectedValueOnce(original);
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        prisma.company.findUnique.mockResolvedValueOnce(null);
+        await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toBe(original);
+      });
+    });
   });
 
   it('changePassword rejects an incorrect current password', async () => {
