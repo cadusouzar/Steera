@@ -79,6 +79,17 @@ export function formatPhoneInput(raw: string): string {
   return digits;
 }
 
+export function formatCepInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits;
+}
+
+// Mesma lista de backend/src/auth/dto/register.dto.ts (BRAZILIAN_STATES).
+export const BRAZILIAN_STATES = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA',
+  'PR', 'PB', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+] as const;
+
 // Tetos espelhando os DTOs do backend (ver docs/superpowers/specs/2026-09-17-validation-and-error-
 // consistency-design.md) — generosos de propósito, só pra pegar erro de digitação.
 export const NAME_MAX_LENGTH = 255;

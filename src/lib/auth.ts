@@ -36,6 +36,13 @@ export interface CurrentUser {
   companyName: string | null;
   planTier: 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
   maxEmployeeLogins: number | null;
+  // Nome do responsável (User.name) — null em logins criados pelo admin (sem nome ainda).
+  name: string | null;
+  personType: 'PJ' | 'PF' | null;
+  // Documento sempre mascarado pelo backend — o valor cru nunca chega ao frontend.
+  documentMasked: string | null;
+  legalName: string | null;
+  tradeName: string | null;
 }
 
 interface ApiUser {
@@ -49,6 +56,11 @@ interface ApiUser {
   companyName: string | null;
   planTier: 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
   maxEmployeeLogins: number | null;
+  name: string | null;
+  personType: 'PJ' | 'PF' | null;
+  documentMasked: string | null;
+  legalName: string | null;
+  tradeName: string | null;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -77,6 +89,11 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     companyName: user.companyName,
     planTier: user.planTier,
     maxEmployeeLogins: user.maxEmployeeLogins,
+    name: user.name ?? null,
+    personType: user.personType ?? null,
+    documentMasked: user.documentMasked ?? null,
+    legalName: user.legalName ?? null,
+    tradeName: user.tradeName ?? null,
   };
 }
 
@@ -109,14 +126,32 @@ export async function login(email: string, password: string): Promise<CurrentUse
   return applySession(await res.json());
 }
 
-export async function register(companyName: string, email: string, password: string): Promise<CurrentUser> {
+export interface RegisterPayload {
+  personType: 'PJ' | 'PF';
+  document: string;
+  legalName: string;
+  tradeName?: string;
+  phone: string;
+  zipCode: string;
+  street: string;
+  number: string;
+  complement?: string;
+  district: string;
+  city: string;
+  state: string;
+  name: string;
+  email: string;
+  password: string;
+}
+
+export async function register(payload: RegisterPayload): Promise<CurrentUser> {
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
     credentials: 'include', // necessário pro cookie httpOnly do refresh token ir/voltar
     // X-Requested-With: mesma mitigação de CSRF do login acima (ver
     // AntiCsrfHeaderGuard no backend).
     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-    body: JSON.stringify({ companyName, email, password }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { message?: string });

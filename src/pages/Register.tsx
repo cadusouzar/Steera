@@ -1,12 +1,87 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import FlowBackground from '../components/FlowBackground';
 import FormField from '../components/FormField';
-import { register } from '../lib/auth';
-import { inputBorderClass, isValidEmail, NAME_MAX_LENGTH } from '../lib/validation';
+import { register, type RegisterPayload } from '../lib/auth';
+import { fetchAddressByCep, fetchCnpjData } from '../lib/brazilLookups';
+import {
+  BRAZILIAN_STATES,
+  formatCepInput,
+  formatCnpjInput,
+  formatCpfInput,
+  formatPhoneInput,
+  inputBorderClass,
+  isValidCnpj,
+  isValidCpf,
+  isValidEmail,
+  isValidPhone,
+  NAME_MAX_LENGTH,
+} from '../lib/validation';
+
+type Step = 0 | 1 | 2;
+type PersonType = 'PJ' | 'PF';
+
+interface FormState {
+  personType: PersonType;
+  document: string;
+  legalName: string;
+  tradeName: string;
+  phone: string;
+  zipCode: string;
+  street: string;
+  number: string;
+  complement: string;
+  district: string;
+  city: string;
+  state: string;
+  name: string;
+  email: string;
+  password: string;
+}
+
+const EMPTY_FORM: FormState = {
+  personType: 'PJ', document: '', legalName: '', tradeName: '', phone: '',
+  zipCode: '', street: '', number: '', complement: '', district: '', city: '', state: '',
+  name: '', email: '', password: '',
+};
+
+const STEP_TITLES = ['Empresa', 'Endereço', 'Seu acesso'] as const;
+
+type Errors = Partial<Record<keyof FormState, string>>;
+
+function required(value: string, label: string): string | undefined {
+  if (!value.trim()) return `${label} é obrigatório`;
+  if (value.length > NAME_MAX_LENGTH) return `${label} deve ter no máximo ${NAME_MAX_LENGTH} caracteres`;
+  return undefined;
+}
+
+function validateStep(step: Step, f: FormState): Errors {
+  const e: Errors = {};
+  if (step === 0) {
+    const isPJ = f.personType === 'PJ';
+    e.document = !f.document.trim()
+      ? `${isPJ ? 'CNPJ' : 'CPF'} é obrigatório`
+      : (isPJ ? isValidCnpj(f.document) : isValidCpf(f.document)) ? undefined : `${isPJ ? 'CNPJ' : 'CPF'} inválido`;
+    e.legalName = required(f.legalName, isPJ ? 'Razão social' : 'Nome completo');
+    e.tradeName = isPJ ? required(f.tradeName, 'Nome fantasia') : f.tradeName.length > NAME_MAX_LENGTH ? `Nome fantasia deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined;
+    e.phone = !f.phone.trim() ? 'Telefone é obrigatório' : isValidPhone(f.phone) ? undefined : 'Telefone inválido';
+  } else if (step === 1) {
+    e.zipCode = f.zipCode.replace(/\D/g, '').length === 8 ? undefined : 'CEP deve ter 8 dígitos';
+    e.street = required(f.street, 'Logradouro');
+    e.number = required(f.number, 'Número');
+    e.district = required(f.district, 'Bairro');
+    e.city = required(f.city, 'Cidade');
+    e.state = (BRAZILIAN_STATES as readonly string[]).includes(f.state) ? undefined : 'Selecione a UF';
+  } else {
+    e.name = required(f.name, 'Seu nome');
+    e.email = !f.email.trim() ? 'E-mail é obrigatório' : isValidEmail(f.email) ? undefined : 'E-mail inválido';
+    e.password = f.password.length >= 8 ? undefined : 'Senha deve ter pelo menos 8 caracteres';
+  }
+  return Object.fromEntries(Object.entries(e).filter(([, v]) => v)) as Errors;
+}
 
 const Register = () => {
   const [searchParams] = useSearchParams();
@@ -16,15 +91,14 @@ const Register = () => {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isCovering, setIsCovering] = useState(false);
 
-  const [companyName, setCompanyName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [step, setStep] = useState<Step>(0);
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [errors, setErrors] = useState<Errors>({});
+  const [lookupNotice, setLookupNotice] = useState<string | null>(null);
+  const [isLookingUp, setIsLookingUp] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [companyNameError, setCompanyNameError] = useState<string>();
-  const [emailError, setEmailError] = useState<string>();
-  const [passwordError, setPasswordError] = useState<string>();
 
   useEffect(() => {
     const plan = searchParams.get('plan');
@@ -33,23 +107,105 @@ const Register = () => {
     }
   }, [searchParams]);
 
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
+
+  const goNext = () => {
+    const stepErrors = validateStep(step, form);
+    setErrors(stepErrors);
+    if (Object.keys(stepErrors).length === 0) setStep((s) => (s + 1) as Step);
+  };
+
+  // Só preenche campos ainda vazios — nunca sobrescreve o que o usuário já digitou.
+  const fillIfEmpty = (patch: Partial<FormState>) =>
+    setForm((f) => {
+      const next = { ...f };
+      for (const [k, v] of Object.entries(patch) as [keyof FormState, string][]) {
+        if (v && !f[k].trim()) next[k] = v as never;
+      }
+      return next;
+    });
+
+  const handleDocumentBlur = async () => {
+    if (form.personType !== 'PJ' || !isValidCnpj(form.document)) return;
+    setIsLookingUp(true);
+    setLookupNotice(null);
+    const data = await fetchCnpjData(form.document);
+    setIsLookingUp(false);
+    if (!data) {
+      setLookupNotice('Não conseguimos buscar os dados deste CNPJ, preencha manualmente.');
+      return;
+    }
+    fillIfEmpty({
+      legalName: data.legalName,
+      tradeName: data.tradeName,
+      phone: data.phone ? formatPhoneInput(data.phone) : '',
+      zipCode: data.address.zipCode ? formatCepInput(data.address.zipCode) : '',
+      street: data.address.street,
+      number: data.address.number,
+      complement: data.address.complement,
+      district: data.address.district,
+      city: data.address.city,
+      state: data.address.state,
+    });
+    if (data.registrationStatus && data.registrationStatus !== 'ATIVA') {
+      setLookupNotice(`Atenção: este CNPJ consta como ${data.registrationStatus} na Receita Federal.`);
+    }
+  };
+
+  const handleCepBlur = async () => {
+    if (form.zipCode.replace(/\D/g, '').length !== 8) return;
+    setIsLookingUp(true);
+    setLookupNotice(null);
+    const address = await fetchAddressByCep(form.zipCode);
+    setIsLookingUp(false);
+    if (!address) {
+      setLookupNotice('Não encontramos este CEP, preencha o endereço manualmente.');
+      return;
+    }
+    fillIfEmpty({ street: address.street, district: address.district, city: address.city, state: address.state });
+  };
+
+  const handlePersonTypeChange = (t: PersonType) => {
+    setForm((f) => ({ ...f, personType: t, document: '' }));
+    setErrors({});
+    setLookupNotice(null);
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    const companyNameErr = companyName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined;
-    const emailErr = email && !isValidEmail(email) ? 'E-mail inválido' : undefined;
-    const passwordErr = password.length > 0 && password.length < 8 ? 'Senha deve ter pelo menos 8 caracteres' : undefined;
-    setCompanyNameError(companyNameErr);
-    setEmailError(emailErr);
-    setPasswordError(passwordErr);
-    if (companyNameErr || emailErr || passwordErr) return;
-
+    if (step < 2) return goNext();
+    const stepErrors = validateStep(2, form);
+    setErrors(stepErrors);
+    if (Object.keys(stepErrors).length) return;
     setError(null);
     setIsSubmitting(true);
     try {
-      await register(companyName, email, password);
-      navigate('/app');
+      const payload: RegisterPayload = {
+        personType: form.personType,
+        document: form.document,
+        legalName: form.legalName.trim(),
+        tradeName: form.tradeName.trim() || undefined,
+        phone: form.phone,
+        zipCode: form.zipCode,
+        street: form.street.trim(),
+        number: form.number.trim(),
+        complement: form.complement.trim() || undefined,
+        district: form.district.trim(),
+        city: form.city.trim(),
+        state: form.state,
+        name: form.name.trim(),
+        email: form.email.trim(),
+        password: form.password,
+      };
+      await register(payload);
+      // Decisão de produto: depois do cadastro NÃO entra direto no sistema — volta pro site já
+      // logado; a Navbar mostra "Entrar no sistema" (Task 9) e a LandingPage mostra "Conta criada!".
+      navigate('/', { state: { registered: true } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível criar a conta.');
+      const message = err instanceof Error ? err.message : 'Não foi possível criar a conta.';
+      setError(message);
+      // Documento duplicado é erro da etapa 1 — leva o usuário de volta pra lá.
+      if (/CNPJ|CPF/.test(message)) setStep(0);
     } finally {
       setIsSubmitting(false);
     }
@@ -59,6 +215,8 @@ const Register = () => {
     setMousePos({ x: e.clientX, y: e.clientY });
   };
 
+  const isPJ = form.personType === 'PJ';
+
   return (
     <div
       className="relative min-h-screen bg-background overflow-hidden flex items-center justify-center transition-colors duration-300 py-12"
@@ -66,7 +224,7 @@ const Register = () => {
     >
       <FlowBackground />
 
-      <div className="relative z-10 w-full max-w-md px-6 pointer-events-auto">
+      <div className="relative z-10 w-full max-w-lg px-6 pointer-events-auto">
         <Link to="/" className="inline-flex items-center text-foreground/60 hover:text-foreground mb-8 transition-colors">
           <ArrowLeft size={16} className="mr-2" />
           Voltar para Home
@@ -91,62 +249,271 @@ const Register = () => {
             )}
           </div>
 
+          <div className="flex items-center justify-center gap-2 mb-6">
+            {STEP_TITLES.map((title, i) => (
+              <React.Fragment key={title}>
+                {i > 0 && <div className="h-px w-8 bg-border" />}
+                <div className="flex flex-col items-center gap-1">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+                      i <= step ? 'bg-primary text-white' : 'bg-secondary text-muted'
+                    }`}
+                  >
+                    {i < step ? <Check size={14} /> : i + 1}
+                  </div>
+                  <span className={`text-[11px] ${i === step ? 'text-foreground font-medium' : 'text-muted'}`}>{title}</span>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+          <p className="text-center text-xs text-muted mb-6">Etapa {step + 1} de 3</p>
+
           {error && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
               {error}
             </div>
           )}
 
+          {lookupNotice && (
+            <div className="rounded-xl border border-border bg-secondary/30 text-sm text-foreground/70 p-3 mb-6">
+              {lookupNotice}
+            </div>
+          )}
+
           <form className="space-y-4" onSubmit={handleRegister}>
-            <FormField label="Nome da Empresa" required error={companyNameError}>
-              <input
-                type="text"
-                required
-                maxLength={NAME_MAX_LENGTH}
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                onBlur={() => setCompanyNameError(companyName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
-                className={`w-full bg-background border ${inputBorderClass(!!companyNameError)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                placeholder="Nome da sua empresa"
-                onFocus={() => setIsCovering(false)}
-              />
-            </FormField>
+            {step === 0 && (
+              <>
+                <div className="flex gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePersonTypeChange('PJ')}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                      isPJ ? 'bg-primary text-white' : 'bg-secondary/50 text-foreground/70'
+                    }`}
+                  >
+                    Pessoa Jurídica
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePersonTypeChange('PF')}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                      !isPJ ? 'bg-primary text-white' : 'bg-secondary/50 text-foreground/70'
+                    }`}
+                  >
+                    Pessoa Física
+                  </button>
+                </div>
 
-            <FormField label="E-mail Corporativo" required error={emailError}>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onBlur={() => setEmailError(email && !isValidEmail(email) ? 'E-mail inválido' : undefined)}
-                className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                placeholder="nome@empresa.com"
-                onFocus={() => setIsCovering(false)}
-              />
-            </FormField>
+                <FormField label={isPJ ? 'CNPJ' : 'CPF'} required error={errors.document}>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={form.document}
+                      onChange={(e) => set('document', isPJ ? formatCnpjInput(e.target.value) : formatCpfInput(e.target.value))}
+                      onBlur={handleDocumentBlur}
+                      className={`w-full bg-background border ${inputBorderClass(!!errors.document)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                      placeholder={isPJ ? '00.000.000/0000-00' : '000.000.000-00'}
+                      onFocus={() => setIsCovering(false)}
+                    />
+                    {isLookingUp && isPJ && (
+                      <Loader2 size={16} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
+                    )}
+                  </div>
+                </FormField>
 
-            <FormField label="Senha" required error={passwordError}>
-              <input
-                type="password"
-                required
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onBlur={() => setPasswordError(password.length > 0 && password.length < 8 ? 'Senha deve ter pelo menos 8 caracteres' : undefined)}
-                className={`w-full bg-background border ${inputBorderClass(!!passwordError)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                placeholder="Crie uma senha forte (mín. 8 caracteres)"
-                onFocus={() => setIsCovering(true)}
-                onBlurCapture={() => setIsCovering(false)}
-              />
-            </FormField>
+                <FormField label={isPJ ? 'Razão Social' : 'Nome Completo'} required error={errors.legalName}>
+                  <input
+                    type="text"
+                    maxLength={NAME_MAX_LENGTH}
+                    value={form.legalName}
+                    onChange={(e) => set('legalName', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.legalName)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder={isPJ ? 'Razão social da empresa' : 'Seu nome completo'}
+                    onFocus={() => setIsCovering(false)}
+                  />
+                </FormField>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 mt-4 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isSubmitting ? 'Criando conta...' : 'Criar Conta'}
-            </button>
+                <FormField label={`Nome Fantasia${!isPJ ? ' (opcional)' : ''}`} required={isPJ} error={errors.tradeName}>
+                  <input
+                    type="text"
+                    maxLength={NAME_MAX_LENGTH}
+                    value={form.tradeName}
+                    onChange={(e) => set('tradeName', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.tradeName)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="Nome fantasia"
+                    onFocus={() => setIsCovering(false)}
+                  />
+                </FormField>
+
+                <FormField label="Telefone" required error={errors.phone}>
+                  <input
+                    type="text"
+                    value={form.phone}
+                    onChange={(e) => set('phone', formatPhoneInput(e.target.value))}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.phone)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="(00) 00000-0000"
+                    onFocus={() => setIsCovering(false)}
+                  />
+                </FormField>
+              </>
+            )}
+
+            {step === 1 && (
+              <>
+                <FormField label="CEP" required error={errors.zipCode}>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={form.zipCode}
+                      onChange={(e) => set('zipCode', formatCepInput(e.target.value))}
+                      onBlur={handleCepBlur}
+                      className={`w-full bg-background border ${inputBorderClass(!!errors.zipCode)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                      placeholder="00000-000"
+                      onFocus={() => setIsCovering(false)}
+                    />
+                    {isLookingUp && (
+                      <Loader2 size={16} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
+                    )}
+                  </div>
+                </FormField>
+
+                <FormField label="Logradouro" required error={errors.street}>
+                  <input
+                    type="text"
+                    maxLength={NAME_MAX_LENGTH}
+                    value={form.street}
+                    onChange={(e) => set('street', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.street)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="Rua, avenida..."
+                    onFocus={() => setIsCovering(false)}
+                  />
+                </FormField>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField label="Número" required error={errors.number}>
+                    <input
+                      type="text"
+                      maxLength={NAME_MAX_LENGTH}
+                      value={form.number}
+                      onChange={(e) => set('number', e.target.value)}
+                      className={`w-full bg-background border ${inputBorderClass(!!errors.number)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                      placeholder="123"
+                      onFocus={() => setIsCovering(false)}
+                    />
+                  </FormField>
+                  <FormField label="Complemento" error={errors.complement}>
+                    <input
+                      type="text"
+                      maxLength={NAME_MAX_LENGTH}
+                      value={form.complement}
+                      onChange={(e) => set('complement', e.target.value)}
+                      className={`w-full bg-background border ${inputBorderClass(!!errors.complement)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                      placeholder="Sala, bloco..."
+                      onFocus={() => setIsCovering(false)}
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="Bairro" required error={errors.district}>
+                  <input
+                    type="text"
+                    maxLength={NAME_MAX_LENGTH}
+                    value={form.district}
+                    onChange={(e) => set('district', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.district)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="Bairro"
+                    onFocus={() => setIsCovering(false)}
+                  />
+                </FormField>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField label="Cidade" required error={errors.city}>
+                    <input
+                      type="text"
+                      maxLength={NAME_MAX_LENGTH}
+                      value={form.city}
+                      onChange={(e) => set('city', e.target.value)}
+                      className={`w-full bg-background border ${inputBorderClass(!!errors.city)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                      placeholder="Cidade"
+                      onFocus={() => setIsCovering(false)}
+                    />
+                  </FormField>
+                  <FormField label="UF" required error={errors.state}>
+                    <select
+                      value={form.state}
+                      onChange={(e) => set('state', e.target.value)}
+                      onFocus={() => setIsCovering(false)}
+                      className={`w-full bg-background border ${inputBorderClass(!!errors.state)} rounded-xl px-4 py-3 text-foreground focus:outline-none focus:ring-2 transition-all`}
+                    >
+                      <option value="">Selecione</option>
+                      {BRAZILIAN_STATES.map((uf) => (
+                        <option key={uf} value={uf}>{uf}</option>
+                      ))}
+                    </select>
+                  </FormField>
+                </div>
+              </>
+            )}
+
+            {step === 2 && (
+              <>
+                <FormField label="Seu Nome" required error={errors.name}>
+                  <input
+                    type="text"
+                    maxLength={NAME_MAX_LENGTH}
+                    value={form.name}
+                    onChange={(e) => set('name', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.name)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="Como devemos te chamar"
+                    onFocus={() => setIsCovering(false)}
+                  />
+                </FormField>
+
+                <FormField label="E-mail" required error={errors.email}>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => set('email', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.email)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="nome@empresa.com"
+                    onFocus={() => setIsCovering(false)}
+                  />
+                </FormField>
+
+                <FormField label="Senha" required error={errors.password}>
+                  <input
+                    type="password"
+                    minLength={8}
+                    value={form.password}
+                    onChange={(e) => set('password', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.password)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="Crie uma senha forte (mín. 8 caracteres)"
+                    onFocus={() => setIsCovering(true)}
+                    onBlurCapture={() => setIsCovering(false)}
+                  />
+                </FormField>
+              </>
+            )}
+
+            <div className="flex items-center gap-3 mt-6">
+              {step > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setErrors({}); setStep((s) => (s - 1) as Step); }}
+                  className="flex-1 bg-secondary/50 hover:bg-secondary text-foreground font-medium py-3 rounded-xl transition-colors"
+                >
+                  Voltar
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-1 bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {step < 2 ? 'Próximo' : isSubmitting ? 'Criando conta...' : 'Criar Conta'}
+              </button>
+            </div>
           </form>
 
           <div className="mt-6 text-center text-sm text-foreground/60">
