@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
@@ -19,6 +19,7 @@ import {
   isValidEmail,
   isValidPhone,
   NAME_MAX_LENGTH,
+  stripCnpj,
 } from '../lib/validation';
 
 type Step = 0 | 1 | 2;
@@ -71,7 +72,9 @@ function validateStep(step: Step, f: FormState): Errors {
   } else if (step === 1) {
     e.zipCode = f.zipCode.replace(/\D/g, '').length === 8 ? undefined : 'CEP deve ter 8 dígitos';
     e.street = required(f.street, 'Logradouro');
-    e.number = required(f.number, 'Número');
+    e.number = !f.number.trim()
+      ? 'Número é obrigatório'
+      : f.number.length > 20 ? 'Número deve ter no máximo 20 caracteres' : undefined;
     e.district = required(f.district, 'Bairro');
     e.city = required(f.city, 'Cidade');
     e.state = (BRAZILIAN_STATES as readonly string[]).includes(f.state) ? undefined : 'Selecione a UF';
@@ -100,6 +103,24 @@ const Register = () => {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Espelha `form` num ref pra poder ler o valor MAIS RECENTE dentro de um `await` já em voo — os
+  // handlers de lookup abaixo são recriados a cada render com o `form` daquele render preso no
+  // closure, então sem isso não teríamos como saber, depois do `await`, se o usuário já mudou o
+  // campo enquanto a resposta ainda não tinha chegado.
+  const formRef = useRef(form);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
+
+  // Contadores de sequência por campo — cada chamada de lookup incrementa o seu antes do fetch;
+  // se, quando a resposta chegar, o contador já tiver avançado de novo (outro blur disparou uma
+  // busca mais nova), a resposta é obsoleta e é descartada (a busca mais nova é quem manda no
+  // spinner/nos dados a partir daí). Evita que, ao editar o CNPJ/CEP e sair do campo de novo antes
+  // da primeira resposta voltar (até 5s/3s), a resposta mais LENTA vença e preencha os campos com
+  // dado de outra empresa/endereço.
+  const cnpjLookupSeq = useRef(0);
+  const cepLookupSeq = useRef(0);
+
   useEffect(() => {
     const plan = searchParams.get('plan');
     if (plan) {
@@ -127,10 +148,19 @@ const Register = () => {
 
   const handleDocumentBlur = async () => {
     if (form.personType !== 'PJ' || !isValidCnpj(form.document)) return;
+    const requestedDocument = form.document;
+    const seq = ++cnpjLookupSeq.current;
     setIsLookingUp(true);
     setLookupNotice(null);
-    const data = await fetchCnpjData(form.document);
+    const data = await fetchCnpjData(requestedDocument);
+    // Resposta obsoleta: uma busca mais nova já foi disparada (outro blur) — ela é quem controla
+    // o spinner/os dados a partir daqui, não aplicamos nada desta.
+    if (seq !== cnpjLookupSeq.current) return;
     setIsLookingUp(false);
+    // Nenhuma busca mais nova em voo, mas o usuário já editou o CNPJ de novo antes desta resposta
+    // chegar (sem ainda ter saído do campo) — o valor buscado não corresponde mais ao que está
+    // digitado, então descartamos pra não preencher com dado de outro CNPJ.
+    if (stripCnpj(formRef.current.document) !== stripCnpj(requestedDocument)) return;
     if (!data) {
       setLookupNotice('Não conseguimos buscar os dados deste CNPJ, preencha manualmente.');
       return;
@@ -154,10 +184,16 @@ const Register = () => {
 
   const handleCepBlur = async () => {
     if (form.zipCode.replace(/\D/g, '').length !== 8) return;
+    const requestedZip = form.zipCode;
+    const seq = ++cepLookupSeq.current;
     setIsLookingUp(true);
     setLookupNotice(null);
-    const address = await fetchAddressByCep(form.zipCode);
+    const address = await fetchAddressByCep(requestedZip);
+    // Mesma proteção contra resposta obsoleta do CNPJ acima, aplicada ao CEP: descarta se uma
+    // busca mais nova já está em voo, ou se o CEP digitado já mudou antes desta resposta chegar.
+    if (seq !== cepLookupSeq.current) return;
     setIsLookingUp(false);
+    if (formRef.current.zipCode.replace(/\D/g, '') !== requestedZip.replace(/\D/g, '')) return;
     if (!address) {
       setLookupNotice('Não encontramos este CEP, preencha o endereço manualmente.');
       return;
@@ -394,7 +430,7 @@ const Register = () => {
                   <FormField label="Número" required error={errors.number}>
                     <input
                       type="text"
-                      maxLength={NAME_MAX_LENGTH}
+                      maxLength={20}
                       value={form.number}
                       onChange={(e) => set('number', e.target.value)}
                       className={`w-full bg-background border ${inputBorderClass(!!errors.number)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
