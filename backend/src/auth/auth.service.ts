@@ -8,9 +8,13 @@ import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { listMigrationNames } from '../prisma/migration-files.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { getTenantCompanyId, runAsSystem, runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
-import { assertValidSchemaName, buildTenantSchemaName, generateCompanyId } from '../prisma/tenant-schema.util';
+import { assertValidSchemaName } from '../prisma/tenant-schema.util';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { applyMigrations } from '../prisma/tenant-migration.util';
+import { normalizePhone } from '../common/phone.util';
+import { maskDocument, normalizeDocument, PersonType } from './document.util';
+import { pickCompanyIdentity } from './schema-name-picker.util';
+import { RegisterDto } from './dto/register.dto';
 import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
@@ -22,6 +26,12 @@ const ALL_MODULES: AppModuleEnum[] = [
   'DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS', 'PONTO_REGISTRO', 'PONTO_ADMINISTRACAO',
   'COMERCIAL', 'OPERACOES', 'FINANCAS',
 ];
+// Campos de Company devolvidos em todo `user` público (login/register/refresh/me). Documento vai
+// só mascarado (maskDocument) — o valor cru nunca sai numa resposta.
+const PUBLIC_COMPANY_SELECT = {
+  name: true, planTier: true, maxEmployeeLogins: true,
+  personType: true, document: true, legalName: true, tradeName: true,
+} as const;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
 const REFRESH_COOKIE_NAME = 'rt';
 // Achado durante a auditoria de segurança (17/09/2026): testar manualmente confirmou que o
@@ -102,7 +112,11 @@ export class AuthService {
     mustChangePassword: boolean;
     employeeId: string | null;
     hasFullPontoAccess: boolean;
-    company?: { name: string; planTier: string; maxEmployeeLogins: number } | null;
+    name?: string | null;
+    company?: {
+      name: string; planTier: string; maxEmployeeLogins: number;
+      personType: PersonType | null; document: string | null; legalName: string | null; tradeName: string | null;
+    } | null;
   }, permissions: Record<string, string | null>) {
     return {
       id: user.id,
@@ -116,6 +130,11 @@ export class AuthService {
       companyName: user.company?.name ?? null,
       planTier: user.company?.planTier ?? null,
       maxEmployeeLogins: user.company?.maxEmployeeLogins ?? null,
+      name: user.name ?? null,
+      personType: user.company?.personType ?? null,
+      documentMasked: maskDocument(user.company?.personType ?? null, user.company?.document ?? null),
+      legalName: user.company?.legalName ?? null,
+      tradeName: user.company?.tradeName ?? null,
     };
   }
 
@@ -140,11 +159,21 @@ export class AuthService {
     });
   }
 
-  async register(dto: { companyName: string; email: string; password: string }, res: Response) {
+  async register(dto: RegisterDto, res: Response) {
+    // Normaliza/valida ANTES da transação: erro de documento/telefone nunca chega a pegar o lock
+    // global de provisionamento.
+    const document = normalizeDocument(dto.personType, dto.document);
+    const phone = normalizePhone(dto.phone);
+    const tradeName = dto.tradeName?.trim() || null;
+    const legalName = dto.legalName.trim();
+    const displayName = tradeName ?? legalName;
     const passwordHash = await hashPassword(dto.password);
     let result: {
-      user: { id: string; companyId: string; email: string; role: string; modules: string[]; mustChangePassword: boolean; employeeId: string | null; hasFullPontoAccess: boolean };
-      company: { name: string; planTier: string; maxEmployeeLogins: number };
+      user: { id: string; companyId: string; email: string; role: string; modules: string[]; mustChangePassword: boolean; employeeId: string | null; hasFullPontoAccess: boolean; name: string | null };
+      company: {
+        name: string; planTier: string; maxEmployeeLogins: number;
+        personType: PersonType | null; document: string | null; legalName: string | null; tradeName: string | null;
+      };
     };
     try {
       // runAsSystem: this is THE call site that creates a brand new tenant —
@@ -174,9 +203,27 @@ export class AuthService {
           // tenant. Provisionar uma empresa é raro e nunca um caminho quente, então serializar
           // globalmente aqui não tem custo de throughput relevante.
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tenant_provisioning')::bigint)`;
-          const newCompanyId = generateCompanyId();
-          const schemaName = buildTenantSchemaName(dto.companyName, newCompanyId);
-          const company = await tx.company.create({ data: { id: newCompanyId, name: dto.companyName, schemaName } });
+          const { companyId, schemaName } = await pickCompanyIdentity(tx, displayName);
+          const company = await tx.company.create({
+            data: {
+              // id gerado na aplicação: o sufixo do schema são os 8 finais dele (ver tenant-schema.util.ts).
+              id: companyId,
+              name: displayName,
+              schemaName,
+              personType: dto.personType,
+              document,
+              legalName,
+              tradeName,
+              phone,
+              zipCode: dto.zipCode.replace(/\D/g, ''),
+              street: dto.street.trim(),
+              number: dto.number.trim(),
+              complement: dto.complement?.trim() || null,
+              district: dto.district.trim(),
+              city: dto.city.trim(),
+              state: dto.state,
+            },
+          });
           // "Administrador Geral": perfil protegido do fundador, com TODAS as permissões do
           // catálogo concedidas incondicionalmente (não só as que ALL_MODULES implicaria sob o
           // sistema antigo) — mesmo padrão/nome já usado por scripts/backfill-profiles.ts pra
@@ -216,17 +263,24 @@ export class AuthService {
               role: 'ADMIN',
               modules: ALL_MODULES,
               profileId: profile.id,
+              name: dto.name.trim(),
             },
           });
           return { user: createdUser, company };
         }),
       );
     } catch (err) {
-      // P2002 = unique constraint violation on User.email. Sem isso, um
-      // e-mail duplicado (retry do usuário, ou dois cadastros concorrentes)
-      // vazava como 500 opaco em vez de um erro de negócio claro.
+      // P2002 = unique constraint violation on User.email OU Company.document. Sem isso, um
+      // e-mail/documento duplicado (retry do usuário, ou dois cadastros concorrentes) vazava como
+      // 500 opaco em vez de um erro de negócio claro. Colisão de `schemaName` não é mapeada de
+      // propósito: pickCompanyIdentity roda sob o lock, então nunca deve acontecer — se acontecer,
+      // é bug e deve aparecer como 500 logado.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new ConflictException('Este e-mail já está cadastrado');
+        const target = JSON.stringify(err.meta?.target ?? '');
+        if (target.includes('document')) {
+          throw new ConflictException(`Já existe uma conta com este ${dto.personType === 'PJ' ? 'CNPJ' : 'CPF'}`);
+        }
+        if (target.includes('email')) throw new ConflictException('Este e-mail já está cadastrado');
       }
       throw err;
     }
@@ -253,7 +307,7 @@ export class AuthService {
     const user = await runAsSystem(() =>
       this.prisma.user.findUnique({
         where: { email: dto.email },
-        include: { company: { select: { name: true, planTier: true, maxEmployeeLogins: true } } },
+        include: { company: { select: PUBLIC_COMPANY_SELECT } },
       }),
     );
     if (!user) throw new UnauthorizedException('E-mail ou senha inválidos');
@@ -416,7 +470,7 @@ export class AuthService {
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      include: { company: { select: { name: true, planTier: true, maxEmployeeLogins: true } } },
+      include: { company: { select: PUBLIC_COMPANY_SELECT } },
     });
     const permissions = await this.getEffectivePermissionsAsSystem(userId);
     return this.toPublicUser(user, permissions);

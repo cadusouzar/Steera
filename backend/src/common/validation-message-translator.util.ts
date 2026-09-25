@@ -51,6 +51,17 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   exceptionAuthorized: 'Exceção autorizada',
   defaultValue: 'Valor padrão',
   displayOrder: 'Ordem de exibição',
+  personType: 'Tipo de conta',
+  document: 'CPF/CNPJ',
+  legalName: 'Razão social / nome completo',
+  tradeName: 'Nome fantasia',
+  zipCode: 'CEP',
+  street: 'Logradouro',
+  number: 'Número',
+  complement: 'Complemento',
+  district: 'Bairro',
+  city: 'Cidade',
+  state: 'UF',
 };
 
 function labelFor(property: string): string {

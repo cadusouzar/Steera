@@ -15,6 +15,27 @@ describe('AuthService', () => {
   let authorization: any;
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
 
+  // Cadastro ampliado (Task 5): shape completo do novo RegisterDto, usado como base por TODA
+  // chamada de service.register(...) deste arquivo (a antiga { companyName, email, password } não
+  // valida mais). CNPJ/telefone/CEP com máscara de propósito — normalizeDocument/normalizePhone
+  // fazem a normalização dentro do service, não o DTO/mock.
+  const baseRegisterDto = {
+    personType: 'PJ' as const,
+    document: '11.222.333/0001-81',
+    legalName: 'Padaria Central Comércio de Alimentos Ltda',
+    tradeName: 'Padaria Central',
+    phone: '(11) 98765-4321',
+    zipCode: '01310-100',
+    street: 'Avenida Paulista',
+    number: '1000',
+    district: 'Bela Vista',
+    city: 'São Paulo',
+    state: 'SP',
+    name: 'Carlos Eduardo',
+    email: 'a@b.com',
+    password: 'senha12345678',
+  };
+
   beforeEach(async () => {
     prisma = {
       user: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(), create: jest.fn() },
@@ -34,8 +55,13 @@ describe('AuthService', () => {
       // reads real files from disk even in this unit test — only the actual SQL
       // execution and the TenantMigration bookkeeping row are mocked here).
       $executeRawUnsafe: jest.fn().mockResolvedValue(0),
+      // Task 5 (cadastro ampliado): pickCompanyIdentity confere disponibilidade do schemaName via
+      // company.findUnique (Company já cadastrada) e $queryRaw (schema órfão no Postgres) — ambos
+      // livres por padrão nestes testes, que não exercitam colisão (coberta em
+      // schema-name-picker.util.spec.ts).
+      $queryRaw: jest.fn().mockResolvedValue([]),
       tenantMigration: { create: jest.fn().mockResolvedValue({}) },
-      company: { create: jest.fn() },
+      company: { create: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
       employee: { findFirst: jest.fn() },
       // Task 7: Profile do fundador ("Administrador Geral") criado dentro da mesma transação de
       // register(), antes de tx.user.create().
@@ -264,7 +290,7 @@ describe('AuthService', () => {
       }),
     );
     await expect(
-      service.register({ companyName: 'Empresa Duplicada', email: 'ja-existe@test.com', password: 'senha12345' }, fakeRes),
+      service.register({ ...baseRegisterDto, email: 'ja-existe@test.com' }, fakeRes),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -278,7 +304,7 @@ describe('AuthService', () => {
     prisma.profile.create.mockResolvedValue({ id: 'profile-1' });
     prisma.user.create.mockResolvedValue({ id: 'user-1', companyId, email: 'a@b.com', role: 'ADMIN', modules: [], mustChangePassword: false, employeeId: null, hasFullPontoAccess: true, profileId: 'profile-1' });
 
-    await service.register({ companyName: 'Empresa Teste', email: 'a@b.com', password: 'senha12345678' }, fakeRes);
+    await service.register({ ...baseRegisterDto }, fakeRes);
 
     expect(prisma.profile.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ companyId, name: 'Administrador Geral', isProtected: true }),
@@ -294,7 +320,7 @@ describe('AuthService', () => {
     prisma.profile.create.mockResolvedValue({ id: 'profile-1' });
     prisma.user.create.mockResolvedValue({ id: 'user-1', companyId, email: 'a@b.com', role: 'ADMIN', modules: [], mustChangePassword: false, employeeId: null, hasFullPontoAccess: true, profileId: 'profile-1' });
 
-    await service.register({ companyName: 'Empresa Teste', email: 'a@b.com', password: 'senha12345678' }, fakeRes);
+    await service.register({ ...baseRegisterDto }, fakeRes);
 
     const call = prisma.profile.create.mock.calls[0][0];
     const grants = call.data.permissions.create;
@@ -319,10 +345,10 @@ describe('AuthService', () => {
         mustChangePassword: false, employeeId: null, hasFullPontoAccess: true,
       });
 
-      await service.register({ companyName: 'Acme', email: 'a@b.com', password: 'senha123456' }, fakeRes);
+      await service.register({ ...baseRegisterDto }, fakeRes);
 
       expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
-        expect.stringMatching(/^CREATE SCHEMA "acme_[a-z0-9]{8}"$/),
+        expect.stringMatching(/^CREATE SCHEMA "padaria_central_[a-z0-9]{8}"$/),
       );
       const callOrder = prisma.$executeRawUnsafe.mock.invocationCallOrder;
       const userCreateOrder = prisma.user.create.mock.invocationCallOrder[0];
@@ -342,6 +368,80 @@ describe('AuthService', () => {
       const lockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[lockCallIndex];
       const companyCreateOrder = prisma.company.create.mock.invocationCallOrder[0];
       expect(lockCallOrder).toBeLessThan(companyCreateOrder);
+    });
+  });
+
+  describe('register — dados cadastrais', () => {
+    beforeEach(() => {
+      prisma.company.create.mockImplementation(async ({ data }: any) => ({ id: 'companyreg1234567890123456', planTier: 'BASICO', maxEmployeeLogins: 10, ...data }));
+      prisma.profile.create.mockResolvedValue({ id: 'p1' });
+      prisma.user.create.mockImplementation(async ({ data }: any) => ({ id: 'u1', employeeId: null, mustChangePassword: false, hasFullPontoAccess: true, ...data }));
+    });
+
+    it('grava documento normalizado, endereço, nome de exibição = fantasia e schemaName legível', async () => {
+      await service.register({ ...baseRegisterDto }, fakeRes);
+      const data = prisma.company.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        name: 'Padaria Central',
+        personType: 'PJ',
+        document: '11222333000181',
+        legalName: 'Padaria Central Comércio de Alimentos Ltda',
+        tradeName: 'Padaria Central',
+        phone: '11987654321',
+        zipCode: '01310100',
+        state: 'SP',
+      });
+      expect(data.id).toMatch(/^c[a-z0-9]{24}$/);
+      expect(data.schemaName).toBe(`padaria_central_${data.id.slice(-8)}`);
+      expect(prisma.user.create.mock.calls[0][0].data.name).toBe('Carlos Eduardo');
+    });
+
+    it('PF sem fantasia usa o nome completo como nome de exibição e fonte do schema', async () => {
+      await service.register(
+        { ...baseRegisterDto, personType: 'PF', document: '529.982.247-25', legalName: 'Ana Souza', tradeName: undefined },
+        fakeRes,
+      );
+      const data = prisma.company.create.mock.calls[0][0].data;
+      expect(data.name).toBe('Ana Souza');
+      expect(data.tradeName).toBeNull();
+      expect(data.schemaName).toBe(`ana_souza_${data.id.slice(-8)}`);
+    });
+
+    it('devolve documento mascarado e nome do usuário na resposta pública', async () => {
+      const result = await service.register({ ...baseRegisterDto }, fakeRes);
+      expect(result.user).toMatchObject({
+        name: 'Carlos Eduardo',
+        personType: 'PJ',
+        documentMasked: '11.222.***/0001-**',
+        legalName: 'Padaria Central Comércio de Alimentos Ltda',
+        tradeName: 'Padaria Central',
+        companyName: 'Padaria Central',
+      });
+      expect(JSON.stringify(result.user)).not.toContain('11222333000181');
+    });
+
+    it('CNPJ inválido é recusado antes de abrir a transação', async () => {
+      await expect(service.register({ ...baseRegisterDto, document: '11.222.333/0001-82' }, fakeRes)).rejects.toThrow('CNPJ inválido');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [['email'], 'Este e-mail já está cadastrado'],
+      [['document'], 'Já existe uma conta com este CNPJ'],
+    ])('P2002 em %j vira 409 com mensagem própria', async (target, message) => {
+      prisma.$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x', meta: { target } }),
+      );
+      await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow(new ConflictException(message));
+    });
+
+    it('P2002 de documento em PF fala CPF', async () => {
+      prisma.$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x', meta: { target: ['document'] } }),
+      );
+      await expect(
+        service.register({ ...baseRegisterDto, personType: 'PF', document: '529.982.247-25', tradeName: undefined }, fakeRes),
+      ).rejects.toThrow('Já existe uma conta com este CPF');
     });
   });
 
