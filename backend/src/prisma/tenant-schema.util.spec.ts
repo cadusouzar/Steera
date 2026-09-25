@@ -16,7 +16,7 @@ describe('slugifyForSchema', () => {
     ['PG Soluções', 'emp_pg_solucoes'],
     ['pg_admin', 'emp_pg_admin'],
     ['PG', 'emp_pg'],
-    ['P.G', 'emp_pg'],
+    ['P.G', 'p_g'],
   ])('%j → %j', (input, expected) => {
     expect(slugifyForSchema(input)).toBe(expected);
   });

@@ -24,13 +24,8 @@ export function slugifyForSchema(name: string): string {
     .slice(0, SLUG_MAX_LENGTH)
     .replace(/_+$/g, '');
   if (!slug) slug = 'empresa';
-  // Protect bare 'pg' slug (including variants like "P.G" which normalize to "p_g")
-  const slugWithoutUnderscores = slug.replace(/_/g, '');
-  if (slugWithoutUnderscores === 'pg') {
-    slug = 'emp_pg';
-  } else if (slug.startsWith('pg_')) {
-    slug = `emp_${slug}`;
-  }
+  // 'pg' sozinho viraria 'pg_<sufixo>' — mesmo problema do prefixo pg_ reservado pelo Postgres.
+  if (slug === 'pg' || slug.startsWith('pg_')) slug = `emp_${slug}`;
   return slug;
 }
 
