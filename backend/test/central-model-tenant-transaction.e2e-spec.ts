@@ -5,6 +5,8 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -47,7 +49,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Central Tx Co', email: adminEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Central Tx Co', email: adminEmail, password: 'senha-de-teste-12345' }))
       .expect(201);
     adminToken = `Bearer ${registerRes.body.accessToken}`;
 
@@ -61,7 +63,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
   });
 
   afterAll(async () => {
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
     await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
     await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
     await sys(() => prisma.refreshToken.deleteMany({ where: { user: { companyId } } }));

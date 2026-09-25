@@ -6,6 +6,8 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema, selectBypassingRls } from './tenant-physical-read.util';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -16,6 +18,8 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
   let prisma: PrismaService;
   let companyAId: string;
   let companyBId: string;
+  let schemaAName: string;
+  let schemaBName: string;
   let tokenA: string;
   let tokenB: string;
   let clientBId: string;
@@ -42,14 +46,14 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
     const registerA = await request(server)
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Schema Isolation Co A', email: emailA, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Schema Isolation Co A', email: emailA, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenA = `Bearer ${registerA.body.accessToken}`;
 
     const registerB = await request(server)
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Schema Isolation Co B', email: emailB, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Schema Isolation Co B', email: emailB, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenB = `Bearer ${registerB.body.accessToken}`;
 
@@ -57,6 +61,8 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
     const userB = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: emailB } }));
     companyAId = userA.companyId;
     companyBId = userB.companyId;
+    schemaAName = await getTenantSchemaName(prisma, companyAId);
+    schemaBName = await getTenantSchemaName(prisma, companyBId);
 
     await request(server)
       .post('/clients')
@@ -73,8 +79,7 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
   });
 
   afterAll(async () => {
-    for (const companyId of [companyAId, companyBId]) {
-      const schemaName = `tenant_${companyId}`;
+    for (const [companyId, schemaName] of [[companyAId, schemaAName], [companyBId, schemaBName]] as const) {
       await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
       await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
       await sys(() => prisma.user.deleteMany({ where: { companyId } }));
@@ -86,7 +91,7 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
   it('cada empresa tem um schema PostgreSQL físico distinto', async () => {
     const schemas = await sys(() =>
       prisma.$queryRawUnsafe<{ schema_name: string }[]>(
-        `SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('tenant_${companyAId}', 'tenant_${companyBId}')`,
+        `SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('${schemaAName}', '${schemaBName}')`,
       ),
     );
     expect(schemas.length).toBe(2);
@@ -112,7 +117,7 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
   it('o Cliente criado no beforeAll está fisicamente dentro do schema da Empresa A, nunca em public', async () => {
     const [client] = await selectBypassingRls<{ id: string }[]>(
       prisma,
-      `SELECT id FROM "tenant_${companyAId}"."Client" WHERE name = 'Cliente João (A)'`,
+      `SELECT id FROM "${schemaAName}"."Client" WHERE name = 'Cliente João (A)'`,
     );
     await assertRowExistsInTenantSchema(prisma, companyAId, 'Client', { id: client.id });
     await assertRowAbsentFromPublicSchema(prisma, 'Client', { id: client.id });

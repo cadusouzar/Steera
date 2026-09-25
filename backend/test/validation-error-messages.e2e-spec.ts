@@ -4,6 +4,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { translateValidationErrors } from '../src/common/validation-message-translator.util';
+import { buildRegisterBody } from './register-body.util';
 
 describe('Mensagens de validação traduzidas (e2e)', () => {
   let app: INestApplication;
@@ -29,7 +30,7 @@ describe('Mensagens de validação traduzidas (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: '', email: 'not-an-email', password: '123' })
+      .send(buildRegisterBody({ email: 'not-an-email', password: '123' }))
       .expect(400);
 
     expect(typeof res.body.message).toBe('string');

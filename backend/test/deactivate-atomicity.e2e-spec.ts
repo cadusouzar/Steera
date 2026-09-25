@@ -6,6 +6,8 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { selectBypassingRls } from './tenant-physical-read.util';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -35,7 +37,7 @@ describe('Atomicidade de deactivate() após a migração pra forma interativa (e
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Deactivate Atomicity Co', email, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Deactivate Atomicity Co', email, password: 'senha-de-teste-12345' }))
       .expect(201);
     token = `Bearer ${registerRes.body.accessToken}`;
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }));
@@ -43,7 +45,7 @@ describe('Atomicidade de deactivate() após a migração pra forma interativa (e
   });
 
   afterAll(async () => {
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
     await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
     await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
     await sys(() => prisma.user.deleteMany({ where: { companyId } }));
@@ -67,7 +69,7 @@ describe('Atomicidade de deactivate() após a migração pra forma interativa (e
       .send({})
       .expect(400);
 
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
     const [row] = await selectBypassingRls<{ status: string }[]>(
       prisma,
       `SELECT status FROM "${schemaName}"."Client" WHERE id = '${clientId}'`,

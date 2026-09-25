@@ -8,6 +8,8 @@ import { getPermissionDefinition } from '../src/permissions/permission-catalog';
 import { MODULE_TO_PERMISSIONS } from '../src/permissions/profile-signature.util';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -48,7 +50,7 @@ async function setupFixture(companyName: string, adminEmail: string): Promise<Fi
   const registerRes = await request(app.getHttpServer())
     .post('/auth/register')
     .set('x-requested-with', 'XMLHttpRequest')
-    .send({ companyName, email: adminEmail, password: 'senha-de-teste-12345' })
+    .send(buildRegisterBody({ companyName, email: adminEmail, password: 'senha-de-teste-12345' }))
     .expect(201);
   const adminToken = `Bearer ${registerRes.body.accessToken}`;
 
@@ -77,7 +79,7 @@ async function setupFixture(companyName: string, adminEmail: string): Promise<Fi
 }
 
 async function teardownFixture(f: Fixture): Promise<void> {
-  const schemaName = `tenant_${f.companyId}`;
+  const schemaName = await getTenantSchemaName(f.prisma, f.companyId);
   await sys(() => f.prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
   await sys(() => f.prisma.tenantMigration.deleteMany({ where: { companyId: f.companyId } }));
   await sys(() => f.prisma.refreshToken.deleteMany({ where: { user: { companyId: f.companyId } } }));

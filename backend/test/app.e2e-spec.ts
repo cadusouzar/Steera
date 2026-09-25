@@ -17,6 +17,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 // `runWithTenant(e2eCompanyId, ...)` instead, since this suite already knows
 // which company it registered.
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -65,7 +67,7 @@ describe('QuickFlow backend (e2e)', () => {
       // AuthService (found while verifying the RLS migration didn't break
       // this suite; the header was simply missing here already).
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'E2E Test Co', email: e2eEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'E2E Test Co', email: e2eEmail, password: 'senha-de-teste-12345' }))
       .expect(201);
     authHeader = `Bearer ${registerRes.body.accessToken}`;
 
@@ -79,7 +81,8 @@ describe('QuickFlow backend (e2e)', () => {
     // the relational Company row (cascading to User/RefreshToken), it has no idea the physical
     // schema exists and never drops it. Without this line, every run of this suite would leak one
     // orphaned `tenant_*` schema into the test database forever.
-    await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${e2eCompanyId}" CASCADE`));
+    const e2eSchemaName = await getTenantSchemaName(prisma, e2eCompanyId);
+    await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${e2eSchemaName}" CASCADE`));
     // Mirrors the cleanup pattern every other test in this file already uses
     // in its own `finally` block — this suite creates its own tenant/admin
     // too, so it cleans up after itself the same way. Cascades to the User

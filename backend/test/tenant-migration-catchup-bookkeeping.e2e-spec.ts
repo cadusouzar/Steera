@@ -11,6 +11,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
 import { runTenantInteractiveTransaction } from '../src/prisma/tenant-rls.extension';
 import { selectBypassingRls } from './tenant-physical-read.util';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -55,7 +57,7 @@ describe('Catch-up de migration de tenant: bookkeeping sempre cai em public.Tena
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Migration Catchup Co', email, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Migration Catchup Co', email, password: 'senha-de-teste-12345' }))
       .expect(201);
     void registerRes;
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }));
@@ -73,7 +75,7 @@ describe('Catch-up de migration de tenant: bookkeeping sempre cai em public.Tena
 
   afterAll(async () => {
     rmSync(tempMigrationsDir, { recursive: true, force: true });
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
     await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
     await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
     await sys(() => prisma.user.deleteMany({ where: { companyId } }));
@@ -82,7 +84,7 @@ describe('Catch-up de migration de tenant: bookkeeping sempre cai em public.Tena
   });
 
   it('applyMigrations, chamado via runTenantInteractiveTransaction (o mesmo caminho do catch-up real), grava o bookkeeping em public.TenantMigration, nunca no schema do tenant', async () => {
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
 
     // Mesmo caminho exato que TenantMigrationManagerService.applyPendingMigrationsToAllTenants usa:
     // contexto de tenant real (runWithTenant) + runTenantInteractiveTransaction, resolvendo pro

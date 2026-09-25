@@ -6,6 +6,8 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { selectBypassingRls } from './tenant-physical-read.util';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -35,7 +37,7 @@ describe('Roteamento físico real — dado criado pela API cai no schema do tena
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Routing Fix Co', email, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Routing Fix Co', email, password: 'senha-de-teste-12345' }))
       .expect(201);
     token = `Bearer ${registerRes.body.accessToken}`;
 
@@ -44,7 +46,7 @@ describe('Roteamento físico real — dado criado pela API cai no schema do tena
   });
 
   afterAll(async () => {
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
     await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
     await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
     await sys(() => prisma.user.deleteMany({ where: { companyId } }));
@@ -60,7 +62,7 @@ describe('Roteamento físico real — dado criado pela API cai no schema do tena
       .expect(201);
     const clientId = createRes.body.id;
 
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
     const rowsInTenantSchema = await selectBypassingRls<{ id: string }[]>(
       prisma,
       `SELECT id FROM "${schemaName}"."Client" WHERE id = '${clientId}'`,

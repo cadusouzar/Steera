@@ -5,6 +5,8 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -33,7 +35,7 @@ describe('Núcleo de autorização — Permission/Profile (e2e)', () => {
 
   afterAll(async () => {
     if (companyId) {
-      const schemaName = `tenant_${companyId}`;
+      const schemaName = await getTenantSchemaName(prisma, companyId);
       await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
       await sys(() => prisma.profilePermission.deleteMany({ where: { companyId } }));
       await sys(() => prisma.profile.deleteMany({ where: { companyId } }));
@@ -49,7 +51,7 @@ describe('Núcleo de autorização — Permission/Profile (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Authz Core Co', email: adminEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Authz Core Co', email: adminEmail, password: 'senha-de-teste-12345' }))
       .expect(201);
 
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));

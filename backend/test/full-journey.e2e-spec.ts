@@ -6,6 +6,8 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { assertRowExistsInTenantSchema, selectBypassingRls } from './tenant-physical-read.util';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -15,6 +17,7 @@ describe('Percurso completo — login, criar, listar, editar, desativar (e2e, se
   let app: INestApplication;
   let prisma: PrismaService;
   let companyId: string;
+  let schemaName: string;
   let token: string;
 
   const runId = Date.now();
@@ -35,15 +38,15 @@ describe('Percurso completo — login, criar, listar, editar, desativar (e2e, se
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Full Journey Co', email, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Full Journey Co', email, password: 'senha-de-teste-12345' }))
       .expect(201);
     token = `Bearer ${registerRes.body.accessToken}`;
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }));
     companyId = user.companyId;
+    schemaName = await getTenantSchemaName(prisma, companyId);
   });
 
   afterAll(async () => {
-    const schemaName = `tenant_${companyId}`;
     await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
     await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
     await sys(() => prisma.user.deleteMany({ where: { companyId } }));
@@ -84,7 +87,7 @@ describe('Percurso completo — login, criar, listar, editar, desativar (e2e, se
       .expect(200);
     const [row] = await selectBypassingRls<{ status: string }[]>(
       prisma,
-      `SELECT status FROM "tenant_${companyId}"."Client" WHERE id = '${clientId}'`,
+      `SELECT status FROM "${schemaName}"."Client" WHERE id = '${clientId}'`,
     );
     expect(row.status).toBe('INACTIVE');
   });
@@ -138,7 +141,7 @@ describe('Percurso completo — login, criar, listar, editar, desativar (e2e, se
       .expect(200);
     const [row] = await selectBypassingRls<{ status: string }[]>(
       prisma,
-      `SELECT status FROM "tenant_${companyId}"."Employee" WHERE id = '${employeeId}'`,
+      `SELECT status FROM "${schemaName}"."Employee" WHERE id = '${employeeId}'`,
     );
     expect(row.status).toBe('INACTIVE');
   });

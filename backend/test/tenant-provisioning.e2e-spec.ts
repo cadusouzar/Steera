@@ -6,6 +6,8 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema } from './tenant-physical-read.util';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -33,7 +35,7 @@ describe('Provisionamento de tenant novo (e2e)', () => {
 
   afterAll(async () => {
     if (companyId) {
-      const schemaName = `tenant_${companyId}`;
+      const schemaName = await getTenantSchemaName(prisma, companyId);
       await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
       await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
       await sys(() => prisma.user.deleteMany({ where: { companyId } }));
@@ -48,12 +50,13 @@ describe('Provisionamento de tenant novo (e2e)', () => {
     const registerRes = await request(server)
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Provisioning Test Co', email, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Provisioning Test Co', email, password: 'senha-de-teste-12345' }))
       .expect(201);
 
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }));
     companyId = user.companyId;
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
+    expect(schemaName).toBe(`provisioning_test_co_${companyId.slice(-8)}`);
 
     const tables = await sys(() =>
       prisma.$queryRawUnsafe<{ table_name: string }[]>(
@@ -90,17 +93,17 @@ describe('Provisionamento de tenant novo (e2e)', () => {
     await request(server)
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Dup Co', email: dupEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Dup Co', email: dupEmail, password: 'senha-de-teste-12345' }))
       .expect(201);
 
     await request(server)
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Dup Co 2', email: dupEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Dup Co 2', email: dupEmail, password: 'senha-de-teste-12345' }))
       .expect(409);
 
     const dupUser = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: dupEmail } }));
-    const schemaName = `tenant_${dupUser.companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, dupUser.companyId);
 
     // Prova ativa de "zero sujeira", não apenas presumida pela semântica de transação: a segunda
     // tentativa (que falhou dentro da MESMA transação interativa, depois de já ter rodado CREATE
@@ -134,7 +137,7 @@ describe('Provisionamento de tenant novo (e2e)', () => {
     const registerRes = await request(server)
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Provisioning Ponto Co', email: pontoEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Provisioning Ponto Co', email: pontoEmail, password: 'senha-de-teste-12345' }))
       .expect(201);
     const tokenA = `Bearer ${registerRes.body.accessToken}`;
     const pontoUser = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: pontoEmail } }));
@@ -190,7 +193,7 @@ describe('Provisionamento de tenant novo (e2e)', () => {
       await assertRowExistsInTenantSchema(prisma, pontoCompanyId, 'TimeEvent', { id: timeEventId });
       await assertRowAbsentFromPublicSchema(prisma, 'TimeEvent', { id: timeEventId });
     } finally {
-      const schemaName = `tenant_${pontoCompanyId}`;
+      const schemaName = await getTenantSchemaName(prisma, pontoCompanyId);
       await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
       await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId: pontoCompanyId } }));
       await sys(() => prisma.user.deleteMany({ where: { companyId: pontoCompanyId } }));

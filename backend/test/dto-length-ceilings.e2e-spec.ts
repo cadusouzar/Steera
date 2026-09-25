@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { buildRegisterBody } from './register-body.util';
 
 describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
   let app: INestApplication;
@@ -24,7 +25,13 @@ describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
     await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'A'.repeat(256), email: `len-${runId}@test.com`, password: 'senha-de-teste-12345' })
+      .send(
+        buildRegisterBody({
+          email: `len-${runId}@test.com`,
+          password: 'senha-de-teste-12345',
+          overrides: { tradeName: 'A'.repeat(256), legalName: 'A'.repeat(256) },
+        }),
+      )
       .expect(400);
   });
 
@@ -32,7 +39,13 @@ describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'A'.repeat(255), email: `len-ok-${runId}@test.com`, password: 'senha-de-teste-12345' });
+      .send(
+        buildRegisterBody({
+          email: `len-ok-${runId}@test.com`,
+          password: 'senha-de-teste-12345',
+          overrides: { tradeName: 'A'.repeat(255), legalName: 'A'.repeat(255) },
+        }),
+      );
     expect(res.status).toBe(201);
   });
 
@@ -40,7 +53,7 @@ describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
     const reg = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Long Text Co', email: `longtext-${runId}@test.com`, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Long Text Co', email: `longtext-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     const token = `Bearer ${reg.body.accessToken}`;
 
@@ -61,7 +74,7 @@ describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
     const reg = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Big Amount Co', email: `bigamount-${runId}@test.com`, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Big Amount Co', email: `bigamount-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     const token = `Bearer ${reg.body.accessToken}`;
 

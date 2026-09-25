@@ -5,6 +5,8 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -53,7 +55,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
     const registerRes = await request(apps[0].getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Users Mgmt Co', email: adminEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Users Mgmt Co', email: adminEmail, password: 'senha-de-teste-12345' }))
       .expect(201);
     adminToken = `Bearer ${registerRes.body.accessToken}`;
 
@@ -66,7 +68,7 @@ describe('Edição/exclusão/reset de senha de login e bloqueio por tentativas (
   });
 
   afterEach(async () => {
-    const schemaName = `tenant_${companyId}`;
+    const schemaName = await getTenantSchemaName(prisma, companyId);
     await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
     await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
     await sys(() => prisma.refreshToken.deleteMany({ where: { user: { companyId } } }));

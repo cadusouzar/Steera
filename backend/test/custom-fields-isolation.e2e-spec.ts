@@ -6,6 +6,8 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { selectBypassingRls } from './tenant-physical-read.util';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -33,14 +35,14 @@ describe('Campos personalizados: isolamento entre empresas em Clientes (e2e)', (
     const regA = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Custom Fields Co A', email: `cf-a-${runId}@test.com`, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Custom Fields Co A', email: `cf-a-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenA = `Bearer ${regA.body.accessToken}`;
 
     const regB = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Custom Fields Co B', email: `cf-b-${runId}@test.com`, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Custom Fields Co B', email: `cf-b-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenB = `Bearer ${regB.body.accessToken}`;
 
@@ -52,7 +54,8 @@ describe('Campos personalizados: isolamento entre empresas em Clientes (e2e)', (
 
   afterAll(async () => {
     for (const companyId of [companyAId, companyBId]) {
-      await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${companyId}" CASCADE`));
+      const schemaNameToDrop = await getTenantSchemaName(prisma, companyId);
+      await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaNameToDrop}" CASCADE`));
       await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
       await sys(() => prisma.user.deleteMany({ where: { companyId } }));
       await sys(() => prisma.company.delete({ where: { id: companyId } }));
@@ -73,8 +76,8 @@ describe('Campos personalizados: isolamento entre empresas em Clientes (e2e)', (
       .send({ entity: 'client', displayName: 'Região', type: 'TEXT' })
       .expect(201);
 
-    const schemaA = `tenant_${companyAId}`;
-    const schemaB = `tenant_${companyBId}`;
+    const schemaA = await getTenantSchemaName(prisma, companyAId);
+    const schemaB = await getTenantSchemaName(prisma, companyBId);
 
     const colsInA = await selectBypassingRls<{ column_name: string }[]>(
       prisma,

@@ -1,5 +1,6 @@
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -39,7 +40,7 @@ export async function assertRowExistsInTenantSchema(
   tableName: string,
   where: Record<string, string>,
 ): Promise<void> {
-  const schemaName = `tenant_${companyId}`;
+  const schemaName = await getTenantSchemaName(prisma, companyId);
   const rows = await selectBypassingRls<{ count: bigint }[]>(
     prisma,
     `SELECT count(*) as count FROM "${schemaName}"."${tableName}" WHERE ${buildWhereClause(where)}`,

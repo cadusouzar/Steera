@@ -5,6 +5,8 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -58,14 +60,14 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
       // AntiCsrfHeaderGuard requires this on POST /auth/register — see
       // anti-csrf-header.guard.ts.
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'RLS Isolation Co A', email: emailA, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'RLS Isolation Co A', email: emailA, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenA = `Bearer ${registerA.body.accessToken}`;
 
     const registerB = await request(server)
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'RLS Isolation Co B', email: emailB, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'RLS Isolation Co B', email: emailB, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenB = `Bearer ${registerB.body.accessToken}`;
 
@@ -98,14 +100,16 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
   });
 
   afterAll(async () => {
+    const schemaNameA = await getTenantSchemaName(prisma, companyAId);
+    const schemaNameB = await getTenantSchemaName(prisma, companyBId);
     await sys(async () => {
       // Task 7 (schema-per-tenant): POST /auth/register now provisions a real physical Postgres
       // schema per company (see AuthService.register) — dropping the Company row below never drops
       // this, since the schema is a separate DDL object, not a relational child of Company. Without
       // this, every run of this suite (it registers TWO companies) would leak two orphaned
       // `tenant_*` schemas into the test database forever.
-      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${companyAId}" CASCADE`);
-      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${companyBId}" CASCADE`);
+      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaNameA}" CASCADE`);
+      await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaNameB}" CASCADE`);
       await prisma.receivable.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
       await prisma.subscription.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
       await prisma.company.delete({ where: { id: companyAId } });

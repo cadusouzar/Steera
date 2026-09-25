@@ -6,6 +6,8 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 import { ProfilesService } from '../src/profiles/profiles.service';
 import { TimeManagementAuthService } from '../src/time-management/time-management-auth.service';
 import { AuthenticatedUser } from '../src/auth/decorators/current-user.decorator';
@@ -85,7 +87,7 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Profiles Reassign Co', email: adminEmail, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Profiles Reassign Co', email: adminEmail, password: 'senha-de-teste-12345' }))
       .expect(201);
     adminToken = `Bearer ${registerRes.body.accessToken}`;
 
@@ -105,7 +107,7 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
 
   afterAll(async () => {
     if (companyId) {
-      const schemaName = `tenant_${companyId}`;
+      const schemaName = await getTenantSchemaName(prisma, companyId);
       await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`));
       await sys(() => prisma.profilePermission.deleteMany({ where: { companyId } }));
       await sys(() => prisma.profile.deleteMany({ where: { companyId } }));

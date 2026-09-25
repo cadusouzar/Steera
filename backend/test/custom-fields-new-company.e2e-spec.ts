@@ -5,6 +5,8 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { buildRegisterBody } from './register-body.util';
+import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
   return runAsSystem(fn);
@@ -31,7 +33,7 @@ describe('Empresa nova nunca herda campos personalizados de outra empresa (e2e)'
     const regOld = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Empresa Já Customizada', email: `cf-old-${runId}@test.com`, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Empresa Já Customizada', email: `cf-old-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenOld = `Bearer ${regOld.body.accessToken}`;
     const userOld = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: `cf-old-${runId}@test.com` } }));
@@ -49,7 +51,8 @@ describe('Empresa nova nunca herda campos personalizados de outra empresa (e2e)'
 
   afterAll(async () => {
     for (const companyId of [companyOldId, companyNewId]) {
-      await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "tenant_${companyId}" CASCADE`));
+      const schemaNameToDrop = await getTenantSchemaName(prisma, companyId);
+      await sys(() => prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaNameToDrop}" CASCADE`));
       await sys(() => prisma.tenantMigration.deleteMany({ where: { companyId } }));
       await sys(() => prisma.user.deleteMany({ where: { companyId } }));
       await sys(() => prisma.company.delete({ where: { id: companyId } }));
@@ -61,7 +64,7 @@ describe('Empresa nova nunca herda campos personalizados de outra empresa (e2e)'
     const regNew = await request(app.getHttpServer())
       .post('/auth/register')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ companyName: 'Empresa Nova', email: `cf-new-${runId}@test.com`, password: 'senha-de-teste-12345' })
+      .send(buildRegisterBody({ companyName: 'Empresa Nova', email: `cf-new-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     tokenNew = `Bearer ${regNew.body.accessToken}`;
     const userNew = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: `cf-new-${runId}@test.com` } }));
