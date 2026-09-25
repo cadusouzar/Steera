@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
-import { CheckCircle2, CreditCard, LogIn, Pencil, Shield, User } from 'lucide-react';
+import { CheckCircle2, CreditCard, Info, LogIn, Pencil, Shield, User } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import AccountProfileDetails from '../components/account/AccountProfileDetails';
 import AccountProfileEditForm from '../components/account/AccountProfileEditForm';
@@ -104,14 +104,20 @@ const Account = () => {
               />
             ) : (
               <>
-                <div className="flex justify-end mb-4">
+                <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                  <p className="flex items-start gap-2 text-sm text-muted">
+                    <Info size={16} className="shrink-0 mt-0.5 text-primary" aria-hidden="true" />
+                    {user?.role === 'admin'
+                      ? 'A edição dos dados da empresa é liberada apenas para administradores — como administrador, você pode alterá-los.'
+                      : 'A edição dos dados da empresa é liberada apenas para administradores. Você pode alterar só o seu nome.'}
+                  </p>
                   <button
                     type="button"
                     onClick={() => {
                       setSavedNotice(false);
                       setIsEditing(true);
                     }}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-foreground border border-border hover:bg-secondary/50 transition-colors"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-foreground border border-border hover:bg-secondary/50 transition-colors self-end sm:self-auto shrink-0"
                   >
                     <Pencil size={16} aria-hidden="true" /> Editar
                   </button>

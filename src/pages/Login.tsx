@@ -6,10 +6,13 @@ import Mascot from '../components/Mascot';
 import FlowBackground from '../components/FlowBackground';
 import { login } from '../lib/auth';
 
+// Depois de entrar, a pessoa vai pra página inicial do site (de lá entra no sistema pelo botão
+// "Entrar no sistema") — decisão de produto de 25/09/2026. Exceção: se ela foi mandada pro login ao
+// tentar abrir uma página protegida (RequireAuth guarda o caminho em `state.from`), volta pra ela.
 // Só aceita um caminho interno (começa com "/" mas não "//", que seria outro host) — o valor vem do
 // state de navegação, mas a checagem evita virar um redirecionamento aberto se algum dia vier de fora.
 function safeRedirectPath(from: unknown): string {
-  return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/app';
+  return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/';
 }
 
 const Login = () => {
@@ -106,7 +109,7 @@ const Login = () => {
               disabled={isSubmitting}
               className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? 'Entrando...' : 'Entrar no Sistema'}
+              {isSubmitting ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
 
