@@ -17,14 +17,20 @@ const SUFFIX_LENGTH = 8;
 export function slugifyForSchema(name: string): string {
   let slug = name
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036F]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, SLUG_MAX_LENGTH)
     .replace(/_+$/g, '');
   if (!slug) slug = 'empresa';
-  if (slug.startsWith('pg_')) slug = `emp_${slug}`;
+  // Protect bare 'pg' slug (including variants like "P.G" which normalize to "p_g")
+  const slugWithoutUnderscores = slug.replace(/_/g, '');
+  if (slugWithoutUnderscores === 'pg') {
+    slug = 'emp_pg';
+  } else if (slug.startsWith('pg_')) {
+    slug = `emp_${slug}`;
+  }
   return slug;
 }
 

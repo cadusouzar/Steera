@@ -15,6 +15,8 @@ describe('slugifyForSchema', () => {
     ['', 'empresa'],
     ['PG Soluções', 'emp_pg_solucoes'],
     ['pg_admin', 'emp_pg_admin'],
+    ['PG', 'emp_pg'],
+    ['P.G', 'emp_pg'],
   ])('%j → %j', (input, expected) => {
     expect(slugifyForSchema(input)).toBe(expected);
   });
@@ -49,6 +51,14 @@ describe('buildTenantSchemaName', () => {
 
   it('produz sempre um nome válido', () => {
     expect(() => assertValidSchemaName(buildTenantSchemaName('PG ' + 'y'.repeat(200), generateCompanyId()))).not.toThrow();
+  });
+
+  it('protege slug bare "pg" com prefixo emp_', () => {
+    expect(buildTenantSchemaName('PG', 'c000000000000000000aaaaaaaa')).toBe('emp_pg_aaaaaaaa');
+  });
+
+  it('slug bare "pg" produz nome sempre válido', () => {
+    expect(() => assertValidSchemaName(buildTenantSchemaName('PG', generateCompanyId()))).not.toThrow();
   });
 });
 
