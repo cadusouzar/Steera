@@ -35,6 +35,19 @@ export const NOOP_WHEN_REPLAYED_FROM_EMPTY = [
 // pertencem a quais models — cada enum novo genuinamente central precisa ser adicionado aqui à mão.
 export const CENTRAL_ONLY_ENUM_NAMES = ['AppModule', 'UserStatus'];
 
+// Views que existem só sobre tabelas CENTRAIS (nunca sobre nenhuma tabela de tenant) — achado em
+// 25/09/2026 ao gerar a migration que cria `tenant_directory` (lê "Company"/"User", as duas
+// centrais): `CREATE VIEW`/`DROP VIEW` não batiam em nenhum padrão do classificador abaixo, caindo
+// no branch "mantém por segurança com aviso". Diferente de `CREATE TYPE` (sempre inofensivo, cria um
+// tipo novo sem uso), replayar `CREATE VIEW "tenant_directory"` dentro de um schema de tenant
+// funcionaria (o search_path resolve "Company"/"User" via fallthrough pro `public`), mas daria a
+// CADA empresa sua própria cópia da MESMA view listando TODAS as empresas do sistema — o oposto do
+// que ela existe pra fazer (um diretório único, central, pro N1/dev; "Company" não tem RLS). Mesma
+// lista manual de `CENTRAL_ONLY_ENUM_NAMES`, pelo mesmo motivo: o gerador só processa texto SQL, sem
+// saber quais views pertencem a quais tabelas — cada view nova genuinamente central precisa entrar
+// aqui à mão.
+export const CENTRAL_ONLY_VIEW_NAMES = ['tenant_directory'];
+
 // Classifica cada comando SQL de uma migration como "de uma tabela de tenant" (mantido) ou "de uma
 // tabela central" (removido). Olha só pra tabela PRINCIPAL de cada comando (a que está sendo
 // criada/alterada/indexada) — uma referência de FK a uma tabela central dentro de um comando de
@@ -75,6 +88,17 @@ export function splitMigrationSqlByTenant(sql: string, tenantTableNames: readonl
     const alterTypeMatch = statement.match(/^ALTER TYPE\s+"(\w+)"/i);
     if (alterTypeMatch) {
       if (!CENTRAL_ONLY_ENUM_NAMES.includes(alterTypeMatch[1])) kept.push(statement);
+      continue;
+    }
+
+    // CREATE [OR REPLACE] VIEW / DROP VIEW [IF EXISTS] — só removido quando o nome está na lista
+    // manual `CENTRAL_ONLY_VIEW_NAMES` (ver comentário lá). Uma view não listada é mantida (mesmo
+    // espírito conservador do branch "desconhecido" abaixo, só que já classificado — sem aviso).
+    const viewMatch =
+      statement.match(/^CREATE(?:\s+OR\s+REPLACE)?\s+VIEW\s+"(\w+)"/i) ||
+      statement.match(/^DROP VIEW\s+(?:IF EXISTS\s+)?"(\w+)"/i);
+    if (viewMatch) {
+      if (!CENTRAL_ONLY_VIEW_NAMES.includes(viewMatch[1])) kept.push(statement);
       continue;
     }
 

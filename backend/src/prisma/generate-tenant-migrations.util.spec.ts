@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { CENTRAL_ONLY_ENUM_NAMES, NOOP_WHEN_REPLAYED_FROM_EMPTY, splitMigrationSqlByTenant } from '../../scripts/generate-tenant-migrations';
+import { CENTRAL_ONLY_ENUM_NAMES, CENTRAL_ONLY_VIEW_NAMES, NOOP_WHEN_REPLAYED_FROM_EMPTY, splitMigrationSqlByTenant } from '../../scripts/generate-tenant-migrations';
 
 const TENANT_TABLES = ['Client', 'Employee'] as const;
 
@@ -118,6 +118,73 @@ describe('splitMigrationSqlByTenant', () => {
     expect(result.trim()).toBe('');
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  // Achado em 25/09/2026 (Task 3 do plano de cadastro-ampliado-e-schema-legivel): `tenant_directory`
+  // é uma VIEW central (lê "Company"/"User", nenhuma tabela de tenant) que a migration original
+  // criou junto de `Company.schemaName`. `CREATE VIEW`/`DROP VIEW` não batiam em nenhum padrão do
+  // classificador acima, então caíam no branch "desconhecido, mantém com aviso" — replayada dentro
+  // de um schema de tenant (search_path `tenant_x, public`), a view resolveria "Company"/"User" via
+  // fallthrough pro schema `public` normalmente, então cada empresa ganharia sua PRÓPRIA cópia da
+  // MESMA view listando TODAS as empresas do sistema ("Company" não tem RLS) — o oposto do que a
+  // view existe pra fazer (um diretório único, central, pro N1/dev). Mesmo padrão de
+  // `CENTRAL_ONLY_ENUM_NAMES`: lista manual, porque o gerador só processa texto SQL, sem saber quais
+  // views são central-only.
+  it('remove CREATE VIEW de uma view central-only (tenant_directory) — sem aviso', () => {
+    const sql = 'CREATE VIEW "tenant_directory" AS\nSELECT c."name" AS empresa\nFROM "Company" c;';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result.trim()).toBe('');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('remove CREATE OR REPLACE VIEW de uma view central-only — sem aviso', () => {
+    const sql = 'CREATE OR REPLACE VIEW "tenant_directory" AS\nSELECT c."name" AS empresa\nFROM "Company" c;';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result.trim()).toBe('');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('remove DROP VIEW de uma view central-only — sem aviso', () => {
+    const sql = 'DROP VIEW IF EXISTS "tenant_directory";';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result.trim()).toBe('');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('remove DROP VIEW (sem IF EXISTS) de uma view central-only — sem aviso', () => {
+    const sql = 'DROP VIEW "tenant_directory";';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result.trim()).toBe('');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('mantém CREATE TYPE "CompanyPersonType" na mesma migration que também cria a view tenant_directory', () => {
+    const sql = [
+      'CREATE TYPE "CompanyPersonType" AS ENUM (\'PJ\', \'PF\');',
+      'CREATE VIEW "tenant_directory" AS\nSELECT c."name" AS empresa\nFROM "Company" c;',
+    ].join('\n\n');
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result).toContain('CREATE TYPE "CompanyPersonType"');
+    expect(result).not.toContain('tenant_directory');
+  });
+
+  it('mantém CREATE VIEW de uma view que não está na lista de views centrais conhecidas', () => {
+    const sql = 'CREATE VIEW "algum_relatorio" AS\nSELECT 1;';
+    expect(splitMigrationSqlByTenant(sql, TENANT_TABLES)).toContain('algum_relatorio');
+  });
+});
+
+describe('CENTRAL_ONLY_VIEW_NAMES', () => {
+  it('contém tenant_directory, a única view central-only conhecida hoje', () => {
+    expect(CENTRAL_ONLY_VIEW_NAMES).toEqual(['tenant_directory']);
   });
 });
 
