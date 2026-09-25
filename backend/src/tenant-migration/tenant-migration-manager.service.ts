@@ -4,7 +4,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { runWithTenant } from '../prisma/tenant-context';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
-import { assertValidSchemaName, tenantSchemaName } from '../prisma/tenant-schema.util';
+import { assertValidSchemaName } from '../prisma/tenant-schema.util';
 import { listMigrationNames } from '../prisma/migration-files.util';
 import { applyMigrations } from '../prisma/tenant-migration.util';
 
@@ -34,7 +34,7 @@ export class TenantMigrationManagerService implements OnApplicationBootstrap {
 
   async applyPendingMigrationsToAllTenants(): Promise<void> {
     const allMigrations = listMigrationNames(TENANT_MIGRATIONS_DIR);
-    const companies = await this.prisma.company.findMany({ select: { id: true } });
+    const companies = await this.prisma.company.findMany({ select: { id: true, schemaName: true } });
 
     for (const company of companies) {
       try {
@@ -47,7 +47,7 @@ export class TenantMigrationManagerService implements OnApplicationBootstrap {
           const pending = allMigrations.filter((name) => !appliedSet.has(name));
           if (pending.length === 0) return;
 
-          const schemaName = tenantSchemaName(company.id);
+          const schemaName = company.schemaName;
           assertValidSchemaName(schemaName);
           // runTenantInteractiveTransaction (não um `this.prisma.$transaction` cru) é obrigatório
           // aqui: ele lê o companyId já ativo no AsyncLocalStorage (posto pelo `runWithTenant`

@@ -10,7 +10,12 @@ jest.mock('@prisma/client', () => {
 });
 
 import { runAsSystem, runWithTenant } from './tenant-context';
+import { registerTenantSchemaNameResolver, TenantSchemaNameResolver } from './tenant-schema-name-resolver';
 import { runTenantInteractiveTransaction, runTenantTransaction, tenantRlsExtension } from './tenant-rls.extension';
+
+beforeAll(() => {
+  registerTenantSchemaNameResolver(new TenantSchemaNameResolver(async (companyId) => `tenant_${companyId}`));
+});
 
 interface FakeBase {
   executedRawUnsafe: string[];
@@ -244,4 +249,20 @@ describe('runTenantTransaction — forma array (mantida por completude, sem call
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(registry.release).toHaveBeenCalledWith('companyabc123456789012345');
   });
+});
+
+it('usa o nome vindo do resolver (Company.schemaName), não um cálculo a partir do id', async () => {
+  registerTenantSchemaNameResolver(new TenantSchemaNameResolver(async () => 'padaria_central_x7k2m9qa'));
+  const tenantExecuted: string[] = [];
+  const fakeTenantClient = {
+    $transaction: jest.fn(async (fn: any) =>
+      fn({ $executeRawUnsafe: jest.fn((sql: string) => { tenantExecuted.push(sql); }), $executeRaw: jest.fn() }),
+    ),
+  };
+  const registry = makeFakeRegistry(fakeTenantClient);
+  await runWithTenant('companyabc123456789012345', () =>
+    runTenantInteractiveTransaction({ $transaction: jest.fn() } as any, async () => 'ok', registry as any),
+  );
+  expect(tenantExecuted[0]).toBe('SET LOCAL search_path TO "padaria_central_x7k2m9qa", public');
+  registerTenantSchemaNameResolver(new TenantSchemaNameResolver(async (companyId) => `tenant_${companyId}`));
 });

@@ -5,7 +5,6 @@
 // verdade — mais fácil de testar isoladamente (Step 1 abaixo nunca precisa de uma URL real).
 import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { assertValidSchemaName, tenantSchemaName } from './tenant-schema.util';
 
 const logger = new Logger('TenantPrismaClientRegistry');
 
@@ -37,8 +36,9 @@ export interface TenantPrismaClientRegistryOptions {
   maxSize: number;
   evictionTimeoutMs: number;
   // Injetável pra testes (Task 2 nunca cria um PrismaClient de verdade) — em produção, a Task 3
-  // passa uma factory que constrói um PrismaClient real com a extensão de RLS aplicada.
-  createClient: (companyId: string, schemaName: string) => Promise<{ $disconnect(): Promise<void> }>;
+  // passa uma factory que constrói um PrismaClient real com a extensão de RLS aplicada. A factory
+  // resolve sozinha o nome do schema (Company.schemaName) — o registry só cacheia/expulsa.
+  createClient: (companyId: string) => Promise<{ $disconnect(): Promise<void> }>;
 }
 
 /**
@@ -128,9 +128,7 @@ export class TenantPrismaClientRegistry implements OnApplicationShutdown {
       await this.evictLeastRecentlyUsedIfNeeded();
     }
 
-    const schemaName = tenantSchemaName(companyId);
-    assertValidSchemaName(schemaName);
-    const client = (await this.opts.createClient(companyId, schemaName)) as PrismaClient;
+    const client = (await this.opts.createClient(companyId)) as PrismaClient;
 
     this.cache.set(companyId, {
       client,

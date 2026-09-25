@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
+import { registerTenantSchemaNameResolver, TenantSchemaNameResolver } from '../prisma/tenant-schema-name-resolver';
 import { TenantMigrationManagerService } from './tenant-migration-manager.service';
 // Import (não `require` dentro de cada teste, como o texto original desta task descrevia) da
 // função já mockada abaixo — `@typescript-eslint/no-var-requires` (`--max-warnings 0` neste
@@ -16,6 +17,10 @@ jest.mock('../prisma/tenant-migration.util', () => ({
 }));
 
 describe('TenantMigrationManagerService', () => {
+  beforeAll(() => {
+    registerTenantSchemaNameResolver(new TenantSchemaNameResolver(async (companyId) => `tenant_${companyId}`));
+  });
+
   let service: TenantMigrationManagerService;
   let prisma: {
     company: { findMany: jest.Mock };
@@ -59,7 +64,10 @@ describe('TenantMigrationManagerService', () => {
   const companyId2 = 'company2cuidlikeid1234567';
 
   it('aplica só as migrations pendentes de cada empresa, pulando quem já está em dia', async () => {
-    prisma.company.findMany.mockResolvedValue([{ id: companyId1 }, { id: companyId2 }]);
+    prisma.company.findMany.mockResolvedValue([
+      { id: companyId1, schemaName: `tenant_${companyId1}` },
+      { id: companyId2, schemaName: 'legivel_abcdefgh' },
+    ]);
     prisma.tenantMigration.findMany.mockImplementation(({ where }: any) =>
       where.companyId === companyId1
         ? [{ migrationName: '20260101000000_a' }, { migrationName: '20260102000000_b' }]
@@ -72,14 +80,14 @@ describe('TenantMigrationManagerService', () => {
     expect(applyMigrations).toHaveBeenCalledWith(
       expect.anything(),
       companyId2,
-      `tenant_${companyId2}`,
+      'legivel_abcdefgh',
       expect.any(String),
       ['20260102000000_b'],
     );
   });
 
   it('não chama applyMigrations quando toda empresa já está em dia', async () => {
-    prisma.company.findMany.mockResolvedValue([{ id: companyId1 }]);
+    prisma.company.findMany.mockResolvedValue([{ id: companyId1, schemaName: `tenant_${companyId1}` }]);
     prisma.tenantMigration.findMany.mockResolvedValue([
       { migrationName: '20260101000000_a' },
       { migrationName: '20260102000000_b' },

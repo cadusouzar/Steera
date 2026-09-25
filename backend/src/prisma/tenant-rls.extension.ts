@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getTenantStore, runInsideExplicitTenantTransaction } from './tenant-context';
-import { assertValidSchemaName, tenantSchemaName } from './tenant-schema.util';
+import { assertValidSchemaName } from './tenant-schema.util';
+import { resolveTenantSchemaName } from './tenant-schema-name-resolver';
 import { TENANT_TABLE_NAMES } from './tenant-table-names';
 
 /**
@@ -115,12 +116,12 @@ function buildSetupStatements(
   prisma: { $executeRaw: PrismaClient['$executeRaw']; $executeRawUnsafe: PrismaClient['$executeRawUnsafe'] },
   companyId: string | undefined,
   bypass: boolean | undefined,
+  schemaName: string | undefined,
 ): Prisma.PrismaPromise<unknown>[] {
   if (bypass) {
     return [prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`];
   }
-  const schemaName = tenantSchemaName(companyId!);
-  assertValidSchemaName(schemaName);
+  assertValidSchemaName(schemaName!);
   return [
     prisma.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}", public`),
     prisma.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`,
@@ -143,7 +144,7 @@ export function getRegisteredTenantClientResolver(): TenantClientResolver | unde
   return registeredResolver;
 }
 
-export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unknown>[]>(
+export async function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unknown>[]>(
   prisma: {
     $transaction: PrismaClient['$transaction'];
     $executeRaw: PrismaClient['$executeRaw'];
@@ -167,8 +168,12 @@ export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unk
     }>;
   }
 
+  // Nome do schema vem de Company.schemaName (cache em memória, ver tenant-schema-name-resolver.ts)
+  // — resolvido ANTES de abrir a transação, nunca dentro dela.
+  const schemaName = store.bypass ? undefined : await resolveTenantSchemaName(store.companyId!);
+
   if (store.bypass || !registry) {
-    const setupStatements = buildSetupStatements(prisma, store.companyId, store.bypass);
+    const setupStatements = buildSetupStatements(prisma, store.companyId, store.bypass, schemaName);
     const transact = prisma.$transaction.bind(prisma) as (
       ops: Prisma.PrismaPromise<unknown>[],
     ) => Promise<unknown[]>;
@@ -185,7 +190,7 @@ export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unk
   // branch (`!isTenantModel` sempre roda no client base pra eles) e não têm motivo pra migrar.
   // Este branch fica aqui por completude/simetria da API, não por ter um chamador real hoje.
   return registry.withClient(store.companyId!, (tenantClient) => {
-    const setupStatements = buildSetupStatements(tenantClient, store.companyId, false);
+    const setupStatements = buildSetupStatements(tenantClient, store.companyId, false, schemaName);
     return runInsideExplicitTenantTransaction(async () => {
       const results = await tenantClient.$transaction([...setupStatements, ...(ops as unknown as Prisma.PrismaPromise<unknown>[])]);
       return results.slice(setupStatements.length) as unknown as { [K in keyof T]: Awaited<T[K]> };
@@ -193,7 +198,7 @@ export function runTenantTransaction<T extends readonly Prisma.PrismaPromise<unk
   }) as unknown as Promise<{ [K in keyof T]: Awaited<T[K]> }>;
 }
 
-export function runTenantInteractiveTransaction<T>(
+export async function runTenantInteractiveTransaction<T>(
   prisma: { $transaction: PrismaClient['$transaction'] },
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
   registryOverride?: TenantClientResolver,
@@ -205,9 +210,13 @@ export function runTenantInteractiveTransaction<T>(
     return prisma.$transaction(fn);
   }
 
+  // Nome do schema vem de Company.schemaName (cache em memória, ver tenant-schema-name-resolver.ts)
+  // — resolvido ANTES de abrir a transação, nunca dentro dela.
+  const schemaName = store.bypass ? undefined : await resolveTenantSchemaName(store.companyId!);
+
   if (store.bypass || !registry) {
     return prisma.$transaction(async (tx) => {
-      const setupStatements = buildSetupStatements(tx, store.companyId, store.bypass);
+      const setupStatements = buildSetupStatements(tx, store.companyId, store.bypass, schemaName);
       for (const stmt of setupStatements) await stmt;
       return runInsideExplicitTenantTransaction(() => fn(tx));
     });
@@ -215,7 +224,7 @@ export function runTenantInteractiveTransaction<T>(
 
   return registry.withClient(store.companyId!, (tenantClient) =>
     (tenantClient as unknown as { $transaction: PrismaClient['$transaction'] }).$transaction(async (tx) => {
-      const setupStatements = buildSetupStatements(tx, store.companyId, false);
+      const setupStatements = buildSetupStatements(tx, store.companyId, false, schemaName);
       for (const stmt of setupStatements) await stmt;
       return runInsideExplicitTenantTransaction(() => fn(tx));
     }),

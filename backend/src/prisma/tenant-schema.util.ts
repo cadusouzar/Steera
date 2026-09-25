@@ -43,11 +43,6 @@ export function buildTenantSchemaName(sourceName: string, companyId: string): st
   return `${slugifyForSchema(sourceName)}_${companyId.slice(-SUFFIX_LENGTH)}`;
 }
 
-/** @deprecated Removido na Task 4 — só existe até os call sites migrarem pro resolver. */
-export function tenantSchemaName(companyId: string): string {
-  return `tenant_${companyId}`;
-}
-
 export function assertValidSchemaName(schemaName: string): void {
   if (!SCHEMA_NAME_REGEX.test(schemaName) || schemaName.startsWith('pg_')) {
     throw new Error(`Nome de schema de tenant inválido: ${JSON.stringify(schemaName)}`);
