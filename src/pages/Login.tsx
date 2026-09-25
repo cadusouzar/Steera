@@ -1,13 +1,20 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import FlowBackground from '../components/FlowBackground';
 import { login } from '../lib/auth';
 
+// Só aceita um caminho interno (começa com "/" mas não "//", que seria outro host) — o valor vem do
+// state de navegação, mas a checagem evita virar um redirecionamento aberto se algum dia vier de fora.
+function safeRedirectPath(from: unknown): string {
+  return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/app';
+}
+
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isCovering, setIsCovering] = useState(false);
   const [email, setEmail] = useState('');
@@ -21,7 +28,7 @@ const Login = () => {
     setIsSubmitting(true);
     try {
       await login(email, password);
-      navigate('/app');
+      navigate(safeRedirectPath((location.state as { from?: unknown } | null)?.from), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível entrar.');
     } finally {

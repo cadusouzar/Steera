@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { getCurrentUser, restoreSession } from '../lib/auth';
 import ForcedPasswordChange from './ForcedPasswordChange';
 
@@ -10,6 +10,7 @@ import ForcedPasswordChange from './ForcedPasswordChange';
 // `<Outlet />` de jeito nenhum — nem por um instante — pra nunca vazar
 // conteúdo protegido antes de saber se o usuário está autenticado.
 const RequireAuth = () => {
+  const location = useLocation();
   const [checked, setChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(!!getCurrentUser());
   // Espelha `currentUser.mustChangePassword` (login criado por um admin com
@@ -46,7 +47,9 @@ const RequireAuth = () => {
   }, []);
 
   if (!checked) return null;
-  if (!authenticated) return <Navigate to="/login" replace />;
+  // Guarda pra onde a pessoa ia (ex.: /conta) — o Login devolve pra lá depois de entrar, em vez
+  // de sempre cair no ERP.
+  if (!authenticated) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   if (mustChangePassword) {
     return <ForcedPasswordChange onDone={() => setMustChangePassword(false)} />;
   }

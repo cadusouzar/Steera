@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import AppLayout from './layouts/AppLayout';
 import RequireAuth from './components/RequireAuth';
+import Account from './pages/Account';
 import Overview from './pages/app/Overview';
 import Roles from './pages/app/Roles';
 import EmployeesList from './pages/app/EmployeesList';
@@ -34,6 +35,9 @@ function App() {
           <Route path="/register" element={<Register />} />
           
           <Route element={<RequireAuth />}>
+            {/* Área "Minha conta" do site (fora do ERP/AppLayout) — só leitura. */}
+            <Route path="/conta" element={<Account />} />
+            <Route path="/conta/assinatura" element={<Account />} />
             <Route path="/app" element={<AppLayout />}>
               <Route index element={<Overview />} />
               <Route path="cargos" element={<Roles />} />

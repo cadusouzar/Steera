@@ -22,6 +22,13 @@ const LandingPage = () => {
     }
   }, [location.state, navigate]);
 
+  // Links da barra são "/#secao" (funcionam de qualquer página do site); o React Router não rola
+  // até o hash sozinho, então rola aqui quando o hash muda.
+  useEffect(() => {
+    if (!location.hash) return;
+    document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth' });
+  }, [location.hash]);
+
   return (
     <div className="relative min-h-screen bg-background transition-colors duration-300">
       <Navbar />
