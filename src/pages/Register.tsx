@@ -121,6 +121,12 @@ const Register = () => {
   const cnpjLookupSeq = useRef(0);
   const cepLookupSeq = useRef(0);
 
+  // Campos cujo valor atual veio de um autopreenchimento (BrasilAPI/ViaCEP), não da digitação do
+  // usuário. Uma busca mais nova bem-sucedida pode sobrescrever ESTES (ex.: corrigiu o CNPJ A → B,
+  // os dados de A não podem ficar ao lado do CNPJ de B); o que o usuário digitou nunca é tocado.
+  // Digitar num campo tira ele daqui.
+  const autofilledKeys = useRef<Set<keyof FormState>>(new Set());
+
   useEffect(() => {
     const plan = searchParams.get('plan');
     if (plan) {
@@ -128,23 +134,61 @@ const Register = () => {
     }
   }, [searchParams]);
 
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
+  // Erro de um campo some assim que o campo é escrito de novo (digitação ou autopreenchimento) —
+  // antes ficava "CNPJ inválido" embaixo de um CNPJ já corrigido até o próximo "Próximo".
+  const clearFieldErrors = (keys: (keyof FormState)[]) => {
+    if (keys.length === 0) return;
+    setErrors((prev) => {
+      if (!keys.some((k) => k in prev)) return prev;
+      const next = { ...prev };
+      for (const k of keys) delete next[k];
+      return next;
+    });
+  };
+
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    autofilledKeys.current.delete(key);
+    setForm((f) => ({ ...f, [key]: value }));
+    clearFieldErrors([key]);
+  };
+
+  // Troca de etapa (nos dois sentidos) limpa avisos de busca e o banner de erro da etapa anterior:
+  // um aviso de outra etapa sumindo depois (no blur do CEP, por exemplo) empurrava os botões entre
+  // o mousedown e o click, e o primeiro "Próximo" se perdia.
+  const changeStep = (next: Step) => {
+    setLookupNotice(null);
+    setError(null);
+    setStep(next);
+  };
 
   const goNext = () => {
     const stepErrors = validateStep(step, form);
     setErrors(stepErrors);
-    if (Object.keys(stepErrors).length === 0) setStep((s) => (s + 1) as Step);
+    if (Object.keys(stepErrors).length === 0) changeStep((step + 1) as Step);
   };
 
-  // Só preenche campos ainda vazios — nunca sobrescreve o que o usuário já digitou.
-  const fillIfEmpty = (patch: Partial<FormState>) =>
+  // Preenche campos vazios ou que vieram de um autopreenchimento anterior — nunca sobrescreve o que
+  // o usuário digitou. Um campo antes autopreenchido que a busca nova não traz é esvaziado (dado da
+  // busca anterior não corresponde mais ao documento/CEP atual).
+  const fillFromLookup = (patch: Partial<FormState>) => {
+    const current = formRef.current;
+    const keys = (Object.keys(patch) as (keyof FormState)[]).filter((k) => {
+      const value = patch[k] ?? '';
+      if (autofilledKeys.current.has(k)) return true;
+      return value !== '' && !current[k].trim();
+    });
+    if (keys.length === 0) return;
+    for (const k of keys) {
+      if (patch[k]) autofilledKeys.current.add(k);
+      else autofilledKeys.current.delete(k);
+    }
     setForm((f) => {
       const next = { ...f };
-      for (const [k, v] of Object.entries(patch) as [keyof FormState, string][]) {
-        if (v && !f[k].trim()) next[k] = v as never;
-      }
+      for (const k of keys) next[k] = (patch[k] ?? '') as never;
       return next;
     });
+    clearFieldErrors(keys.filter((k) => patch[k]));
+  };
 
   const handleDocumentBlur = async () => {
     if (form.personType !== 'PJ' || !isValidCnpj(form.document)) return;
@@ -165,7 +209,7 @@ const Register = () => {
       setLookupNotice('Não conseguimos buscar os dados deste CNPJ, preencha manualmente.');
       return;
     }
-    fillIfEmpty({
+    fillFromLookup({
       legalName: data.legalName,
       tradeName: data.tradeName,
       phone: data.phone ? formatPhoneInput(data.phone) : '',
@@ -198,13 +242,14 @@ const Register = () => {
       setLookupNotice('Não encontramos este CEP, preencha o endereço manualmente.');
       return;
     }
-    fillIfEmpty({ street: address.street, district: address.district, city: address.city, state: address.state });
+    fillFromLookup({ street: address.street, district: address.district, city: address.city, state: address.state });
   };
 
   const handlePersonTypeChange = (t: PersonType) => {
     setForm((f) => ({ ...f, personType: t, document: '' }));
     setErrors({});
     setLookupNotice(null);
+    setError(null);
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -307,12 +352,6 @@ const Register = () => {
           {error && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
               {error}
-            </div>
-          )}
-
-          {lookupNotice && (
-            <div className="rounded-xl border border-border bg-secondary/30 text-sm text-foreground/70 p-3 mb-6">
-              {lookupNotice}
             </div>
           )}
 
@@ -536,7 +575,7 @@ const Register = () => {
               {step > 0 && (
                 <button
                   type="button"
-                  onClick={() => { setErrors({}); setStep((s) => (s - 1) as Step); }}
+                  onClick={() => { setErrors({}); changeStep((step - 1) as Step); }}
                   className="flex-1 bg-secondary/50 hover:bg-secondary text-foreground font-medium py-3 rounded-xl transition-colors"
                 >
                   Voltar
@@ -550,6 +589,14 @@ const Register = () => {
                 {step < 2 ? 'Próximo' : isSubmitting ? 'Criando conta...' : 'Criar Conta'}
               </button>
             </div>
+
+            {/* Aviso de busca (CNPJ/CEP) fica ABAIXO dos botões: aparecer/sumir aqui nunca desloca
+                "Próximo"/"Voltar" no meio de um clique. */}
+            {lookupNotice && (
+              <div role="status" className="rounded-xl border border-border bg-secondary/30 text-sm text-foreground/70 p-3">
+                {lookupNotice}
+              </div>
+            )}
           </form>
 
           <div className="mt-6 text-center text-sm text-foreground/60">
