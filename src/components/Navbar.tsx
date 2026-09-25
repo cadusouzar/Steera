@@ -25,7 +25,7 @@ const Navbar = () => {
 
   return (
     <nav className="absolute top-0 w-full z-50">
-      <div className="container mx-auto px-6 py-6 flex items-center justify-between">
+      <div className="container mx-auto px-4 sm:px-6 py-6 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center font-heading font-bold text-white shadow-lg shadow-primary/20">
             Q
@@ -39,16 +39,21 @@ const Navbar = () => {
           <a href="#pricing" className="hover:text-foreground transition-colors">Planos</a>
         </div>
         
-        <div className="flex items-center gap-4">
+        {/* gap/padding menores abaixo de `sm`: em 360px, toggle de tema + "Entrar no sistema" +
+            "Assinar" estouravam a largura (rolagem horizontal). No celular o link logado vira só o
+            ícone, com aria-label pro leitor de tela. */}
+        <div className="flex items-center gap-2 sm:gap-4">
           <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
-          
+
           {isLoggedIn ? (
             <Link
               to="/app"
-              className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary transition-colors"
+              aria-label="Entrar no sistema"
+              title="Entrar no sistema"
+              className="inline-flex items-center gap-2 -m-1 p-1 sm:m-0 sm:p-0 text-sm font-medium text-foreground hover:text-primary transition-colors"
             >
-              <LogIn size={16} />
-              Entrar no sistema
+              <LogIn size={16} aria-hidden="true" />
+              <span className="hidden sm:inline">Entrar no sistema</span>
             </Link>
           ) : (
             <Link to="/login" className="text-sm font-medium text-foreground hover:text-primary transition-colors hidden sm:block">
