@@ -27,15 +27,19 @@ const LandingPage = () => {
       <Navbar />
 
       {showRegisteredNotice && (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-40 rounded-xl border border-primary/30 bg-panel px-5 py-3 text-sm text-foreground shadow-lg flex items-center gap-3">
-          <CheckCircle2 size={18} className="text-primary shrink-0" />
-          <span>
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-24 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-md rounded-xl border border-primary/30 bg-panel px-5 py-3 text-sm text-foreground shadow-lg flex items-start gap-3"
+        >
+          <CheckCircle2 size={18} className="text-primary shrink-0 mt-0.5" />
+          <span className="flex-1 min-w-0">
             Conta criada! Use <strong>Entrar no sistema</strong> no topo da página para acessar.
           </span>
           <button
             type="button"
             onClick={() => setShowRegisteredNotice(false)}
-            className="text-muted hover:text-foreground transition-colors"
+            className="text-muted hover:text-foreground transition-colors shrink-0"
             aria-label="Fechar aviso"
           >
             <X size={16} />
