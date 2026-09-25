@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { CustomFieldDefinition, CustomFieldType, Prisma } from '@prisma/client';
 import { isEmail } from 'class-validator';
-import { isValidCnpjChecksum } from '../common/cnpj.util';
+import { isValidCnpjChecksum, stripCnpj } from '../common/cnpj.util';
 import { isValidCpfChecksum } from '../common/cpf.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -202,7 +202,7 @@ export class CustomFieldValuesService {
         return digits;
       }
       case CustomFieldType.CNPJ: {
-        const digits = String(value).replace(/\D/g, '');
+        const digits = stripCnpj(String(value));
         if (!isValidCnpjChecksum(digits)) {
           throw new BadRequestException(`O campo "${definition.displayName}" precisa ser um CNPJ válido`);
         }

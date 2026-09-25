@@ -5,12 +5,19 @@
 
 const REPEATED_DIGIT_CPFS = new Set(Array.from({ length: 10 }, (_, d) => String(d).repeat(11)));
 const REPEATED_DIGIT_CNPJS = new Set(Array.from({ length: 10 }, (_, d) => String(d).repeat(14)));
+const CNPJ_SHAPE = /^[0-9A-Z]{12}[0-9]{2}$/;
 
+// Valor do caractere = ASCII − 48 (regra oficial do CNPJ alfanumérico; pra dígitos é o próprio
+// dígito, então CPF e CNPJ numérico continuam calculando igual a antes).
 function checkDigit(base: string, weights: number[]): number {
   let sum = 0;
-  for (let i = 0; i < base.length; i++) sum += Number(base[i]) * weights[i];
+  for (let i = 0; i < base.length; i++) sum += (base.charCodeAt(i) - 48) * weights[i];
   const rest = sum % 11;
   return rest < 2 ? 0 : 11 - rest;
+}
+
+export function stripCnpj(value: string): string {
+  return value.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
 }
 
 export function isValidCpf(value: string): boolean {
@@ -23,12 +30,13 @@ export function isValidCpf(value: string): boolean {
   return digits[9] === String(d1) && digits[10] === String(d2);
 }
 
+// CNPJ alfanumérico (emitido pela Receita desde julho/2026) aceito — espelha backend/src/common/cnpj.util.ts.
 export function isValidCnpj(value: string): boolean {
-  const digits = value.replace(/\D/g, '');
-  if (digits.length !== 14 || REPEATED_DIGIT_CNPJS.has(digits)) return false;
-  const d1 = checkDigit(digits.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  const d2 = checkDigit(digits.slice(0, 12) + d1, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  return digits[12] === String(d1) && digits[13] === String(d2);
+  const v = stripCnpj(value);
+  if (!CNPJ_SHAPE.test(v) || REPEATED_DIGIT_CNPJS.has(v)) return false;
+  const d1 = checkDigit(v.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const d2 = checkDigit(v.slice(0, 12) + d1, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return v[12] === String(d1) && v[13] === String(d2);
 }
 
 // Só DDD (2 dígitos) + 8 (fixo) ou 9 (celular) dígitos — sem checar a lista exata de DDDs válidos,
@@ -54,12 +62,12 @@ export function formatCpfInput(raw: string): string {
 }
 
 export function formatCnpjInput(raw: string): string {
-  const digits = raw.replace(/\D/g, '').slice(0, 14);
-  if (digits.length > 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
-  if (digits.length > 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
-  if (digits.length > 5) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
-  if (digits.length > 2) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
-  return digits;
+  const v = stripCnpj(raw).slice(0, 14);
+  if (v.length > 12) return `${v.slice(0, 2)}.${v.slice(2, 5)}.${v.slice(5, 8)}/${v.slice(8, 12)}-${v.slice(12)}`;
+  if (v.length > 8) return `${v.slice(0, 2)}.${v.slice(2, 5)}.${v.slice(5, 8)}/${v.slice(8)}`;
+  if (v.length > 5) return `${v.slice(0, 2)}.${v.slice(2, 5)}.${v.slice(5)}`;
+  if (v.length > 2) return `${v.slice(0, 2)}.${v.slice(2)}`;
+  return v;
 }
 
 export function formatPhoneInput(raw: string): string {

@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { isValidCnpjChecksum, normalizeCnpj } from './cnpj.util';
+import { isValidCnpjChecksum, maskCnpj, normalizeCnpj, stripCnpj } from './cnpj.util';
 
 describe('cnpj.util', () => {
   describe('normalizeCnpj', () => {
@@ -33,6 +33,36 @@ describe('cnpj.util', () => {
 
     it('rejects the all-zeros sequence despite a mathematically matching checksum', () => {
       expect(isValidCnpjChecksum('00000000000000')).toBe(false);
+    });
+  });
+
+  describe('CNPJ alfanumérico (IN RFB 2.229/2024, emitido desde julho/2026)', () => {
+    it('aceita o exemplo oficial da Receita, com e sem máscara, em minúsculas também', () => {
+      expect(isValidCnpjChecksum('12ABC34501DE35')).toBe(true);
+      expect(normalizeCnpj('12.ABC.345/01DE-35')).toBe('12ABC34501DE35');
+      expect(normalizeCnpj('12.abc.345/01de-35')).toBe('12ABC34501DE35');
+    });
+
+    it('rejeita dígito verificador errado num CNPJ alfanumérico', () => {
+      expect(isValidCnpjChecksum('12ABC34501DE36')).toBe(false);
+      expect(() => normalizeCnpj('12.ABC.345/01DE-36')).toThrow('CNPJ inválido');
+    });
+
+    it('rejeita letra nas duas posições de dígito verificador', () => {
+      expect(isValidCnpjChecksum('12ABC34501DE3A')).toBe(false);
+    });
+  });
+
+  describe('stripCnpj', () => {
+    it('remove pontuação e deixa maiúsculo', () => {
+      expect(stripCnpj('12.abc.345/01de-35')).toBe('12ABC34501DE35');
+    });
+  });
+
+  describe('maskCnpj', () => {
+    it('mantém raiz parcial e filial, mascara o meio e os verificadores', () => {
+      expect(maskCnpj('11222333000181')).toBe('11.222.***/0001-**');
+      expect(maskCnpj('12ABC34501DE35')).toBe('12.ABC.***/01DE-**');
     });
   });
 });
