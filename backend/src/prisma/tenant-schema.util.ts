@@ -1,19 +1,54 @@
-// Nome do schema de uma empresa é uma função pura e determinística do seu id — nunca armazenado
-// em coluna nenhuma (evitaria uma segunda fonte de verdade que poderia dessincronizar) e nunca
-// aceito de requisição nenhuma (só calculado a partir do companyId já validado pelo JWT). O
-// alfabeto do cuid() do Prisma é minúsculo alfanumérico (ex.: "cm2x9f8j40000abc123defg") — o regex
-// abaixo é deliberadamente mais permissivo em tamanho (20-30) do que restrito ao formato exato do
-// cuid(), pra não quebrar se o formato de id mudar de leve no futuro, mas continua rejeitando
-// qualquer caractere fora de [a-z0-9] — o suficiente pra nunca permitir um nome de schema que
-// escape das aspas duplas quando interpolado em SQL bruto.
-const SCHEMA_NAME_REGEX = /^tenant_[a-z0-9]{20,30}$/;
+import { randomInt } from 'crypto';
 
+// Nome de schema de uma empresa: `<slug do nome>_<8 últimos caracteres do id>` pra empresas criadas
+// a partir de 25/09/2026 (ex.: "padaria_central_x7k2m9qa") — o id aparece em logs/AuditLog/JWT,
+// então quem investiga um log reconhece o schema de cara; empresas anteriores continuam com
+// `tenant_<companyId>`. Em ambos os casos o nome fica gravado em `Company.schemaName` — gerado UMA
+// vez no cadastro, nunca alterado, nunca aceito de requisição nenhuma (ver
+// tenant-schema-name-resolver.ts pra como o roteamento o lê). O alfabeto fechado [a-z0-9_]
+// garante que nenhum nome escapa das aspas duplas quando interpolado em SQL bruto; o prefixo pg_
+// é reservado pelo Postgres (CREATE SCHEMA recusa).
+const SCHEMA_NAME_REGEX = /^[a-z0-9_]{1,63}$/;
+const SLUG_MAX_LENGTH = 40;
+const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const ID_RANDOM_LENGTH = 24;
+const SUFFIX_LENGTH = 8;
+
+export function slugifyForSchema(name: string): string {
+  let slug = name
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, SLUG_MAX_LENGTH)
+    .replace(/_+$/g, '');
+  if (!slug) slug = 'empresa';
+  if (slug.startsWith('pg_')) slug = `emp_${slug}`;
+  return slug;
+}
+
+// Id de Company gerado na APLICAÇÃO (não pelo @default(cuid()) do banco) só no register(), porque o
+// nome do schema — gravado no mesmo INSERT — depende dele. Mesmo formato do cuid() atual (c + 24
+// caracteres [a-z0-9]); sem dependência nova (@paralleldrive/cuid2 v3 é ESM-only, incompatível com
+// este backend CommonJS). crypto.randomInt, não Math.random: os 8 finais separam homônimas.
+export function generateCompanyId(): string {
+  let id = 'c';
+  for (let i = 0; i < ID_RANDOM_LENGTH; i++) id += ID_ALPHABET[randomInt(ID_ALPHABET.length)];
+  return id;
+}
+
+export function buildTenantSchemaName(sourceName: string, companyId: string): string {
+  return `${slugifyForSchema(sourceName)}_${companyId.slice(-SUFFIX_LENGTH)}`;
+}
+
+/** @deprecated Removido na Task 4 — só existe até os call sites migrarem pro resolver. */
 export function tenantSchemaName(companyId: string): string {
   return `tenant_${companyId}`;
 }
 
 export function assertValidSchemaName(schemaName: string): void {
-  if (!SCHEMA_NAME_REGEX.test(schemaName)) {
+  if (!SCHEMA_NAME_REGEX.test(schemaName) || schemaName.startsWith('pg_')) {
     throw new Error(`Nome de schema de tenant inválido: ${JSON.stringify(schemaName)}`);
   }
 }
