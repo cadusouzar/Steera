@@ -6,6 +6,10 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { LinkEmployeeDto } from './dto/link-employee.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
+import { Roles } from './decorators/roles.decorator';
+import { RolesGuard } from './guards/roles.guard';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
 import { AllowDuringForcedPasswordChange } from './decorators/allow-during-forced-password-change.decorator';
 import { Public } from './decorators/public.decorator';
@@ -133,6 +137,23 @@ export class AuthController {
   @Patch('me/password')
   changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
     return this.auth.changePassword(user.userId, dto);
+  }
+
+  // Área "Minha conta" do site: o próprio login edita o nome. Identidade só de req.user (nunca do
+  // body); e-mail não é editável.
+  @UseGuards(JwtAuthGuard)
+  @Patch('me')
+  updateMe(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateMeDto) {
+    return this.auth.updateMe(user.userId, dto);
+  }
+
+  // Dados cadastrais da empresa (razão social, fantasia, telefone, endereço) — só ADMIN; documento
+  // e tipo de pessoa nunca mudam por aqui. companyId vem do JWT, nunca do body.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch('me/company')
+  updateCompany(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateCompanyDto) {
+    return this.auth.updateCompany(user.userId, user.companyId, dto);
   }
 
   // Auto-vínculo admin<->funcionário (Task 4 do plano de Controle de Ponto):

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, CreditCard, LogOut, User } from 'lucide-react';
+import { ChevronDown, CreditCard, LogOut, Shield, User } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { logout, type CurrentUser } from '../lib/auth';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -79,6 +79,9 @@ const SiteAccountMenu: React.FC<SiteAccountMenuProps> = ({ user, onLoggedOut }) 
             <div className="p-2 space-y-1">
               <Link to="/conta" role="menuitem" onClick={close} className={itemClass}>
                 <User size={16} className="text-muted" aria-hidden="true" /> Minha conta
+              </Link>
+              <Link to="/conta/seguranca" role="menuitem" onClick={close} className={itemClass}>
+                <Shield size={16} className="text-muted" aria-hidden="true" /> Segurança
               </Link>
               <Link to="/conta/assinatura" role="menuitem" onClick={close} className={itemClass}>
                 <CreditCard size={16} className="text-muted" aria-hidden="true" /> Assinatura

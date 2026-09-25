@@ -1,5 +1,15 @@
 import React from 'react';
-import type { CurrentUser } from '../../lib/auth';
+import type { CompanyAddress, CurrentUser } from '../../lib/auth';
+import { formatCepInput, formatPhoneInput } from '../../lib/validation';
+
+// "Av. Paulista, 1000 - Sala 10 · Bela Vista, São Paulo/SP · CEP 01310-100" — só com as partes que existem.
+function formatAddress(a: CompanyAddress | null): string | null {
+  if (!a) return null;
+  const line1 = [a.street, a.number].filter(Boolean).join(', ') + (a.complement ? ` - ${a.complement}` : '');
+  const cityState = [a.city, a.state].filter(Boolean).join('/');
+  const line2 = [a.district, cityState].filter(Boolean).join(', ');
+  return [line1, line2, `CEP ${formatCepInput(a.zipCode)}`].filter(Boolean).join(' · ');
+}
 
 interface AccountProfileDetailsProps {
   user: CurrentUser | null;
@@ -14,6 +24,7 @@ const AccountProfileDetails: React.FC<AccountProfileDetailsProps> = ({ user }) =
   const displayName = user?.name?.trim() || email;
   const avatarInitial = displayName.charAt(0).toUpperCase() || '?';
   const roleLabel = user?.role === 'admin' ? 'Administrador' : 'Funcionário';
+  const address = formatAddress(user?.companyAddress ?? null);
 
   return (
     <div className="space-y-8">
@@ -54,6 +65,18 @@ const AccountProfileDetails: React.FC<AccountProfileDetailsProps> = ({ user }) =
             <span className="text-sm font-bold text-foreground text-right">{user.tradeName}</span>
           </div>
         )}
+        {user?.companyPhone && (
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <span className="text-sm font-medium text-muted">Telefone</span>
+            <span className="text-sm font-bold text-foreground">{formatPhoneInput(user.companyPhone)}</span>
+          </div>
+        )}
+        {address && (
+          <div className="flex items-start justify-between gap-4 px-5 py-4">
+            <span className="text-sm font-medium text-muted">Endereço</span>
+            <span className="text-sm font-bold text-foreground text-right">{address}</span>
+          </div>
+        )}
         {user?.documentMasked && (
           <div className="flex items-center justify-between gap-4 px-5 py-4">
             <span className="text-sm font-medium text-muted">{user.personType === 'PF' ? 'CPF' : 'CNPJ'}</span>
@@ -63,9 +86,10 @@ const AccountProfileDetails: React.FC<AccountProfileDetailsProps> = ({ user }) =
       </div>
 
       <p className="text-xs text-muted">
-        O e-mail é a identidade deste login e não pode ser alterado por aqui. Os dados cadastrais da
-        empresa ainda não podem ser editados pelo sistema. Dados de funcionário (nome, CPF, telefone,
-        etc.), quando aplicável, são gerenciados na tela de Funcionários.
+        O e-mail é a identidade deste login e não pode ser alterado, nem o CPF/CNPJ da empresa. O seu
+        nome e, para administradores, os dados da empresa podem ser editados em "Minha conta", no site.
+        Dados de funcionário (nome, CPF, telefone, etc.), quando aplicável, são gerenciados na tela de
+        Funcionários.
       </p>
     </div>
   );

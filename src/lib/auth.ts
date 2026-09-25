@@ -43,6 +43,20 @@ export interface CurrentUser {
   documentMasked: string | null;
   legalName: string | null;
   tradeName: string | null;
+  // Telefone/endereço da empresa (só dígitos em telefone/CEP) — pra área "Minha conta" mostrar e
+  // editar. companyAddress é null em empresas anteriores ao cadastro ampliado.
+  companyPhone: string | null;
+  companyAddress: CompanyAddress | null;
+}
+
+export interface CompanyAddress {
+  zipCode: string;
+  street: string | null;
+  number: string | null;
+  complement: string | null;
+  district: string | null;
+  city: string | null;
+  state: string | null;
 }
 
 interface ApiUser {
@@ -61,6 +75,8 @@ interface ApiUser {
   documentMasked: string | null;
   legalName: string | null;
   tradeName: string | null;
+  companyPhone?: string | null;
+  companyAddress?: CompanyAddress | null;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -68,6 +84,23 @@ interface ApiUser {
 // recarregar a página perde o token e precisa de restoreSession().
 let accessToken: string | null = null;
 let currentUser: CurrentUser | null = null;
+
+// Quem precisa refletir mudanças do usuário atual sem recarregar (ex.: a barra do site depois de
+// editar o nome em "Minha conta", ou de sair em outro componente). Toda gravação passa por aqui.
+type CurrentUserListener = (user: CurrentUser | null) => void;
+const currentUserListeners = new Set<CurrentUserListener>();
+
+function setCurrentUser(user: CurrentUser | null): void {
+  currentUser = user;
+  currentUserListeners.forEach((listener) => listener(user));
+}
+
+export function subscribeCurrentUser(listener: CurrentUserListener): () => void {
+  currentUserListeners.add(listener);
+  return () => {
+    currentUserListeners.delete(listener);
+  };
+}
 
 export function getAccessToken(): string | null {
   return accessToken;
@@ -94,18 +127,20 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     documentMasked: user.documentMasked ?? null,
     legalName: user.legalName ?? null,
     tradeName: user.tradeName ?? null,
+    companyPhone: user.companyPhone ?? null,
+    companyAddress: user.companyAddress ?? null,
   };
 }
 
 function applySession(data: { accessToken: string; user: ApiUser }): CurrentUser {
   accessToken = data.accessToken;
-  currentUser = toCurrentUser(data.user);
-  return currentUser;
+  setCurrentUser(toCurrentUser(data.user));
+  return currentUser!;
 }
 
 function clearSession(): void {
   accessToken = null;
-  currentUser = null;
+  setCurrentUser(null);
 }
 
 export async function login(email: string, password: string): Promise<CurrentUser> {
@@ -196,7 +231,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
   const data = (await res.json()) as { accessToken: string };
   accessToken = data.accessToken;
   if (currentUser) {
-    currentUser = { ...currentUser, mustChangePassword: false };
+    setCurrentUser({ ...currentUser, mustChangePassword: false });
   }
 }
 
@@ -283,8 +318,9 @@ export async function restoreSessionDetailed(): Promise<RestoreResult> {
       }
       return { status: 'unavailable' };
     }
-    currentUser = toCurrentUser(await meRes.json());
-    return { status: 'authenticated', user: currentUser };
+    const restored = toCurrentUser(await meRes.json());
+    setCurrentUser(restored);
+    return { status: 'authenticated', user: restored };
   } catch {
     return { status: 'unavailable' };
   }
@@ -310,6 +346,57 @@ export async function refreshCurrentUser(): Promise<CurrentUser> {
     credentials: 'include',
   });
   if (!meRes.ok) throw new Error('Não foi possível atualizar os dados do usuário');
-  currentUser = toCurrentUser(await meRes.json());
-  return currentUser;
+  const refreshed = toCurrentUser(await meRes.json());
+  setCurrentUser(refreshed);
+  return refreshed;
+}
+
+// PATCH autenticado com UMA renovação silenciosa em caso de 401 (access token de 15min expirado) —
+// mesmo comportamento de request() em api.ts, que não dá pra usar aqui (api.ts importa este módulo).
+async function authedPatch(path: string, body: unknown, isRetry = false): Promise<Response> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401 && !isRetry && (await refreshOnce())) return authedPatch(path, body, true);
+  return res;
+}
+
+async function applyProfileResponse(res: Response, fallbackMessage: string): Promise<CurrentUser> {
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string | string[] });
+    const message = Array.isArray(body.message) ? body.message.join('; ') : body.message;
+    throw new Error(res.status >= 500 ? 'Não foi possível salvar agora. Tente novamente em instantes.' : message || fallbackMessage);
+  }
+  const updated = toCurrentUser(await res.json());
+  setCurrentUser(updated);
+  return updated;
+}
+
+// Área "Minha conta": nome do próprio login (qualquer papel).
+export async function updateMyName(name: string): Promise<CurrentUser> {
+  return applyProfileResponse(await authedPatch('/auth/me', { name }), 'Não foi possível salvar o nome');
+}
+
+export interface CompanyProfilePayload {
+  legalName: string;
+  tradeName?: string;
+  phone: string;
+  zipCode: string;
+  street: string;
+  number: string;
+  complement?: string;
+  district: string;
+  city: string;
+  state: string;
+}
+
+// Área "Minha conta": dados cadastrais da empresa — o backend só aceita de um ADMIN (403 pro resto).
+export async function updateMyCompany(payload: CompanyProfilePayload): Promise<CurrentUser> {
+  return applyProfileResponse(await authedPatch('/auth/me/company', payload), 'Não foi possível salvar os dados da empresa');
 }

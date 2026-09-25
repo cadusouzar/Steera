@@ -38,6 +38,7 @@ function App() {
             {/* Área "Minha conta" do site (fora do ERP/AppLayout) — só leitura. */}
             <Route path="/conta" element={<Account />} />
             <Route path="/conta/assinatura" element={<Account />} />
+            <Route path="/conta/seguranca" element={<Account />} />
             <Route path="/app" element={<AppLayout />}>
               <Route index element={<Overview />} />
               <Route path="cargos" element={<Roles />} />

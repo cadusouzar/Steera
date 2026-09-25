@@ -61,7 +61,7 @@ describe('AuthService', () => {
       // schema-name-picker.util.spec.ts).
       $queryRaw: jest.fn().mockResolvedValue([]),
       tenantMigration: { create: jest.fn().mockResolvedValue({}) },
-      company: { create: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
+      company: { create: jest.fn(), findUnique: jest.fn().mockResolvedValue(null), findUniqueOrThrow: jest.fn(), update: jest.fn() },
       employee: { findFirst: jest.fn() },
       // Task 7: Profile do fundador ("Administrador Geral") criado dentro da mesma transação de
       // register(), antes de tx.user.create().
@@ -598,6 +598,78 @@ describe('AuthService', () => {
       await expect(
         service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2'),
       ).rejects.toThrow('Este funcionário já está vinculado a outro login');
+    });
+  });
+
+  describe('edição da própria conta (Minha conta)', () => {
+    const profileRow = {
+      id: 'u1', email: 'a@b.com', role: 'ADMIN', modules: [], mustChangePassword: false, employeeId: null,
+      hasFullPontoAccess: true, name: 'Nome Novo',
+      company: {
+        name: 'Loja Nova', planTier: 'BASICO', maxEmployeeLogins: 10, personType: 'PJ', document: '11222333000181',
+        legalName: 'Razao Nova Ltda', tradeName: 'Loja Nova', phone: '11987654321', zipCode: '01310100',
+        street: 'Avenida Paulista', number: '1000', complement: null, district: 'Bela Vista', city: 'São Paulo', state: 'SP',
+      },
+    };
+
+    beforeEach(() => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue(profileRow);
+      prisma.user.update.mockResolvedValue({});
+      prisma.company.update.mockResolvedValue({});
+    });
+
+    it('updateMe grava só o nome do próprio usuário e devolve o perfil atualizado', async () => {
+      const result = await service.updateMe('u1', { name: 'Nome Novo' });
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { name: 'Nome Novo' } });
+      expect(result).toMatchObject({ name: 'Nome Novo', companyName: 'Loja Nova' });
+    });
+
+    const companyDto = {
+      legalName: 'Razao Nova Ltda', tradeName: 'Loja Nova', phone: '(11) 98765-4321', zipCode: '01310-100',
+      street: 'Avenida Paulista', number: '1000', district: 'Bela Vista', city: 'São Paulo', state: 'SP',
+    };
+
+    it('updateCompany normaliza telefone/CEP, usa a fantasia como nome de exibição e devolve o perfil com endereço', async () => {
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ personType: 'PJ' });
+      const result = await service.updateCompany('u1', 'c1', { ...companyDto });
+      expect(prisma.company.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: {
+          name: 'Loja Nova', legalName: 'Razao Nova Ltda', tradeName: 'Loja Nova', phone: '11987654321',
+          zipCode: '01310100', street: 'Avenida Paulista', number: '1000', complement: null,
+          district: 'Bela Vista', city: 'São Paulo', state: 'SP',
+        },
+      });
+      expect(result).toMatchObject({
+        companyPhone: '11987654321',
+        companyAddress: { zipCode: '01310100', street: 'Avenida Paulista', number: '1000', complement: null, district: 'Bela Vista', city: 'São Paulo', state: 'SP' },
+      });
+    });
+
+    it('updateCompany nunca altera documento, tipo de pessoa nem schemaName', async () => {
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ personType: 'PJ' });
+      await service.updateCompany('u1', 'c1', { ...companyDto });
+      const data = prisma.company.update.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('document');
+      expect(data).not.toHaveProperty('personType');
+      expect(data).not.toHaveProperty('schemaName');
+    });
+
+    it('PJ sem nome fantasia é recusado', async () => {
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ personType: 'PJ' });
+      await expect(service.updateCompany('u1', 'c1', { ...companyDto, tradeName: '' })).rejects.toThrow(BadRequestException);
+      expect(prisma.company.update).not.toHaveBeenCalled();
+    });
+
+    it('PF sem nome fantasia usa o nome completo como nome de exibição', async () => {
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ personType: 'PF' });
+      await service.updateCompany('u1', 'c1', { ...companyDto, legalName: 'Ana Souza', tradeName: undefined });
+      expect(prisma.company.update.mock.calls[0][0].data).toMatchObject({ name: 'Ana Souza', tradeName: null });
+    });
+
+    it('telefone inválido é recusado', async () => {
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ personType: 'PJ' });
+      await expect(service.updateCompany('u1', 'c1', { ...companyDto, phone: '123' })).rejects.toThrow(BadRequestException);
     });
   });
 });

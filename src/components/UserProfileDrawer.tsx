@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, User, Shield, CreditCard, CheckCircle2, Loader2 } from 'lucide-react';
+import { X, User, Shield, CreditCard } from 'lucide-react';
 import AccountProfileDetails from './account/AccountProfileDetails';
 import AccountSubscriptionDetails from './account/AccountSubscriptionDetails';
-import { changePassword, getCurrentUser } from '../lib/auth';
-import FormField from './FormField';
-import { inputBorderClass } from '../lib/validation';
+import AccountPasswordForm from './account/AccountPasswordForm';
+import { getCurrentUser } from '../lib/auth';
 
 interface UserProfileDrawerProps {
   onClose: () => void;
@@ -14,42 +13,6 @@ interface UserProfileDrawerProps {
 const UserProfileDrawer: React.FC<UserProfileDrawerProps> = ({ onClose }) => {
   const [activeTab, setActiveTab] = useState<'geral' | 'seguranca' | 'assinatura'>('geral');
   const currentUser = getCurrentUser();
-
-  // Segurança — troca de senha real (PATCH /auth/me/password via changePassword() em lib/auth.ts).
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [confirmError, setConfirmError] = useState('');
-  const [isSavingPassword, setIsSavingPassword] = useState(false);
-  const [passwordSaved, setPasswordSaved] = useState(false);
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError('');
-    setConfirmError('');
-    if (newPassword.length < 8) {
-      setPasswordError('A nova senha precisa ter pelo menos 8 caracteres.');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setConfirmError('As senhas não coincidem.');
-      return;
-    }
-    setIsSavingPassword(true);
-    try {
-      await changePassword(currentPassword, newPassword);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setPasswordSaved(true);
-      setTimeout(() => setPasswordSaved(false), 3000);
-    } catch (err) {
-      setPasswordError(err instanceof Error ? err.message : 'Não foi possível trocar a senha');
-    } finally {
-      setIsSavingPassword(false);
-    }
-  };
 
   return (
     <AnimatePresence>
@@ -125,63 +88,7 @@ const UserProfileDrawer: React.FC<UserProfileDrawerProps> = ({ onClose }) => {
                   exit={{ opacity: 0, y: -10 }}
                   className="space-y-6"
                 >
-                  <div className="bg-secondary/20 border border-border/60 p-6 rounded-2xl">
-                    <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2"><Shield size={20} className="text-primary"/> Alterar Senha</h3>
-                    <form onSubmit={handleChangePassword} className="space-y-4">
-                      {passwordError && (
-                        <p className="text-sm text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-2.5">
-                          {passwordError}
-                        </p>
-                      )}
-                      <FormField label="Senha Atual" htmlFor="current-password">
-                        <input
-                          id="current-password"
-                          type="password"
-                          value={currentPassword}
-                          onChange={(e) => setCurrentPassword(e.target.value)}
-                          placeholder="••••••••"
-                          autoComplete="current-password"
-                          required
-                          className="w-full bg-background border border-border/80 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-                        />
-                      </FormField>
-                      <FormField label="Nova Senha" htmlFor="new-password" hint="Mínimo de 8 caracteres.">
-                        <input
-                          id="new-password"
-                          type="password"
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="••••••••"
-                          autoComplete="new-password"
-                          required
-                          className="w-full bg-background border border-border/80 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
-                        />
-                      </FormField>
-                      <FormField label="Confirmar Nova Senha" htmlFor="confirm-password" error={confirmError}>
-                        <input
-                          id="confirm-password"
-                          type="password"
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="••••••••"
-                          autoComplete="new-password"
-                          required
-                          className={`w-full bg-background border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 transition-shadow ${inputBorderClass(!!confirmError)}`}
-                        />
-                      </FormField>
-                      <div className="pt-2 flex items-center justify-end gap-3">
-                        {passwordSaved && <span className="text-green-500 text-sm font-bold flex items-center gap-1"><CheckCircle2 size={16}/> Senha atualizada!</span>}
-                        <button
-                          type="submit"
-                          disabled={isSavingPassword}
-                          className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center gap-2"
-                        >
-                          {isSavingPassword && <Loader2 size={16} className="animate-spin" />}
-                          Atualizar Senha
-                        </button>
-                      </div>
-                    </form>
-                  </div>
+                  <AccountPasswordForm />
                 </motion.div>
               )}
 

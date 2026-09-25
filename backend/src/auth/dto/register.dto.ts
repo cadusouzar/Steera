@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Trim } from '../../common/trim.transform';
 import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 export const BRAZILIAN_STATES = [
@@ -9,10 +9,6 @@ export const BRAZILIAN_STATES = [
 // CPF/CNPJ/telefone: formato conferido aqui; checksum/normalização em AuthService.register
 // (normalizeDocument/normalizePhone), mesmo padrão do resto do projeto.
 
-// Trim na fronteira do DTO (o ValidationPipe global tem `transform: true`, então isto roda ANTES
-// das validações): sem ele, "   " passava pelo @MinLength(1) e o trim do service transformava em
-// '' — razão social/endereço/nome vazios no banco e PJ sem fantasia driblando a obrigatoriedade.
-const Trim = () => Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
 
 export class RegisterDto {
   @IsIn(['PJ', 'PF']) personType!: 'PJ' | 'PF';

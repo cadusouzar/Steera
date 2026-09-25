@@ -4,7 +4,7 @@ import { LogIn } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 import ThemeToggle from './ThemeToggle';
 import SiteAccountMenu from './SiteAccountMenu';
-import { getCurrentUser, restoreSession, type CurrentUser } from '../lib/auth';
+import { getCurrentUser, restoreSession, subscribeCurrentUser, type CurrentUser } from '../lib/auth';
 
 const Navbar = () => {
   const { theme, toggleTheme } = useTheme();
@@ -25,6 +25,9 @@ const Navbar = () => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+
+  // Reflete na hora mudanças feitas em outro lugar (nome editado em "Minha conta", sair).
+  useEffect(() => subscribeCurrentUser(setUser), []);
 
   useEffect(() => {
     if (user || restoreAttempted.current) return;

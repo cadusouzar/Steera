@@ -15,6 +15,8 @@ import { normalizePhone } from '../common/phone.util';
 import { maskDocument, normalizeDocument, PersonType } from './document.util';
 import { pickCompanyIdentity } from './schema-name-picker.util';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
@@ -31,6 +33,8 @@ const ALL_MODULES: AppModuleEnum[] = [
 const PUBLIC_COMPANY_SELECT = {
   name: true, planTier: true, maxEmployeeLogins: true,
   personType: true, document: true, legalName: true, tradeName: true,
+  // Telefone/endereço: pra área "Minha conta" do site poder mostrar e editar (PATCH /auth/me/company).
+  phone: true, zipCode: true, street: true, number: true, complement: true, district: true, city: true, state: true,
 } as const;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
 const REFRESH_COOKIE_NAME = 'rt';
@@ -116,8 +120,11 @@ export class AuthService {
     company?: {
       name: string; planTier: string; maxEmployeeLogins: number;
       personType: PersonType | null; document: string | null; legalName: string | null; tradeName: string | null;
+      phone?: string | null; zipCode?: string | null; street?: string | null; number?: string | null;
+      complement?: string | null; district?: string | null; city?: string | null; state?: string | null;
     } | null;
   }, permissions: Record<string, string | null>) {
+    const company = user.company;
     return {
       id: user.id,
       email: user.email,
@@ -135,6 +142,19 @@ export class AuthService {
       documentMasked: maskDocument(user.company?.personType ?? null, user.company?.document ?? null),
       legalName: user.company?.legalName ?? null,
       tradeName: user.company?.tradeName ?? null,
+      companyPhone: company?.phone ?? null,
+      // null pra empresas anteriores ao cadastro ampliado (sem endereço gravado).
+      companyAddress: company?.zipCode
+        ? {
+            zipCode: company.zipCode,
+            street: company.street ?? null,
+            number: company.number ?? null,
+            complement: company.complement ?? null,
+            district: company.district ?? null,
+            city: company.city ?? null,
+            state: company.state ?? null,
+          }
+        : null,
     };
   }
 
@@ -499,6 +519,43 @@ export class AuthService {
   // `email`/`mustChangePassword`). Mantém o frontend com um único formato de
   // perfil pra lidar, venha ele de login ou de uma renovação de sessão após
   // reload.
+  // PATCH /auth/me — nome do próprio login (User é central; o contexto de tenant da requisição já
+  // restringe a RLS à empresa do próprio usuário).
+  async updateMe(userId: string, dto: UpdateMeDto) {
+    await this.prisma.user.update({ where: { id: userId }, data: { name: dto.name } });
+    return this.getProfile(userId);
+  }
+
+  // PATCH /auth/me/company (só ADMIN, ver controller) — dados cadastrais da empresa. Nunca mexe em
+  // `document`/`personType` (não fazem parte do DTO) nem em `schemaName` (imutável, protegido por
+  // trigger): mudar o nome fantasia muda o nome de EXIBIÇÃO (`name`), não o schema físico.
+  async updateCompany(userId: string, companyId: string, dto: UpdateCompanyDto) {
+    const phone = normalizePhone(dto.phone);
+    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { personType: true } });
+    const tradeName = dto.tradeName?.trim() || null;
+    if (company.personType === 'PJ' && !tradeName) {
+      throw new BadRequestException('Nome fantasia é obrigatório para Pessoa Jurídica');
+    }
+    const legalName = dto.legalName.trim();
+    await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        name: tradeName ?? legalName,
+        legalName,
+        tradeName,
+        phone,
+        zipCode: dto.zipCode.replace(/\D/g, ''),
+        street: dto.street.trim(),
+        number: dto.number.trim(),
+        complement: dto.complement?.trim() || null,
+        district: dto.district.trim(),
+        city: dto.city.trim(),
+        state: dto.state,
+      },
+    });
+    return this.getProfile(userId);
+  }
+
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
