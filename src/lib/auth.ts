@@ -210,38 +210,38 @@ export async function changePassword(currentPassword: string, newPassword: strin
 // sessão à toa. Isso NÃO cobre concorrência entre abas diferentes (cada
 // aba tem sua própria memória JS, sem nada em comum pra compartilhar essa
 // promise) — limitação aceita, fora do escopo deste guard.
-let refreshInFlight: Promise<boolean> | null = null;
+// Resultado de uma tentativa de renovação/restauração. A distinção que importa (bug de 25/09/2026:
+// "dou F5 e às vezes desloga") é entre a sessão ter ACABADO (`invalid`: 401/403 do servidor) e o
+// servidor simplesmente não ter podido responder AGORA (`unavailable`: falha de rede — ex. o
+// backend reiniciando no `nest --watch` —, 429 do limite de /auth/refresh, ou 5xx). Antes, qualquer
+// falha virava "sem sessão" e o RequireAuth mandava pro login com o cookie de 30 dias ainda válido.
+export type RefreshOutcome = 'ok' | 'invalid' | 'unavailable';
 
-// Uma única tentativa de renovação silenciosa por chamada de API que falhe
-// com 401 — evita loop infinito se o refresh também falhar. Chamadas
-// concorrentes compartilham a mesma promise em voo (ver refreshInFlight
-// acima) em vez de disparar múltiplos POST /auth/refresh.
-export async function refreshOnce(): Promise<boolean> {
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+function isSessionRejected(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
+// Só `invalid` limpa a sessão; `unavailable` preserva tudo (inclusive o access token em memória,
+// que pode continuar válido) pra quem chamou decidir tentar de novo.
+export async function refreshSession(): Promise<RefreshOutcome> {
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
+  refreshInFlight = (async (): Promise<RefreshOutcome> => {
     try {
       const res = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' });
       if (!res.ok) {
-        // 429 (rate limit) NÃO é prova de que a sessão é inválida — é só
-        // "tente de novo mais tarde". Sem essa distinção, um usuário que
-        // recarrega a página várias vezes seguidas em pouco tempo (cada
-        // reload chama refreshOnce() via RequireAuth) esgotava o bucket de
-        // /auth/refresh e era deslogado à força por um 429, mesmo com uma
-        // sessão perfeitamente válida — aí recarregava de novo, batia no
-        // mesmo bucket ainda esgotado, e ficava preso nesse loop. Qualquer
-        // outro !res.ok (401/403 de sessão expirada/revogada de verdade)
-        // continua limpando a sessão normalmente.
-        if (res.status !== 429) {
+        if (isSessionRejected(res.status)) {
           clearSession();
+          return 'invalid';
         }
-        return false;
+        return 'unavailable';
       }
       const data = await res.json();
       accessToken = data.accessToken;
-      return true;
+      return 'ok';
     } catch {
-      clearSession();
-      return false;
+      return 'unavailable';
     } finally {
       refreshInFlight = null;
     }
@@ -249,35 +249,52 @@ export async function refreshOnce(): Promise<boolean> {
   return refreshInFlight;
 }
 
-// Chamado uma vez ao carregar o app (ex.: F5) — tenta renovar usando o
-// cookie httpOnly, que sobrevive a um reload mesmo sem o token em memória,
-// depois busca o perfil via GET /auth/me (POST /auth/refresh só devolve o
-// accessToken, não quem é o usuário). Nunca lança — se não houver sessão
-// válida (sem cookie, expirada ou revogada), resolve para null em vez de
-// quebrar a inicialização do app. Delega a renovação em si a refreshOnce()
-// pra compartilhar o mesmo guard de concorrência (ver refreshInFlight)
-// caso restoreSession() seja chamada ao mesmo tempo que outra renovação.
-export async function restoreSession(): Promise<CurrentUser | null> {
-  try {
-    const renewed = await refreshOnce();
-    if (!renewed) return null;
+// Uma única tentativa de renovação silenciosa por chamada de API que falhe
+// com 401 — evita loop infinito se o refresh também falhar. Chamadas
+// concorrentes compartilham a mesma promise em voo (ver refreshInFlight
+// acima) em vez de disparar múltiplos POST /auth/refresh.
+export async function refreshOnce(): Promise<boolean> {
+  return (await refreshSession()) === 'ok';
+}
 
+export type RestoreResult =
+  | { status: 'authenticated'; user: CurrentUser }
+  | { status: 'unauthenticated' }
+  | { status: 'unavailable' };
+
+// Chamado ao carregar o app (ex.: F5) — tenta renovar usando o cookie
+// httpOnly, que sobrevive a um reload mesmo sem o token em memória, depois
+// busca o perfil via GET /auth/me (POST /auth/refresh só devolve o
+// accessToken, não quem é o usuário). Nunca lança. `unavailable` significa
+// "não deu pra confirmar agora" — NÃO é logout (ver RefreshOutcome acima).
+export async function restoreSessionDetailed(): Promise<RestoreResult> {
+  const outcome = await refreshSession();
+  if (outcome === 'invalid') return { status: 'unauthenticated' };
+  if (outcome === 'unavailable') return { status: 'unavailable' };
+  try {
     const meRes = await fetch(`${API_URL}/auth/me`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       credentials: 'include',
     });
     if (!meRes.ok) {
-      clearSession();
-      return null;
+      if (isSessionRejected(meRes.status)) {
+        clearSession();
+        return { status: 'unauthenticated' };
+      }
+      return { status: 'unavailable' };
     }
     currentUser = toCurrentUser(await meRes.json());
-    return currentUser;
+    return { status: 'authenticated', user: currentUser };
   } catch {
-    // Falha de rede (backend fora do ar, offline, etc.) — trata como "sem
-    // sessão" em vez de propagar um erro não tratado na inicialização.
-    clearSession();
-    return null;
+    return { status: 'unavailable' };
   }
+}
+
+// Versão simples pra quem só quer "tem usuário ou não" (ex.: a barra do site, que num
+// `unavailable` só continua mostrando "Entrar" — sem risco, nada é apagado).
+export async function restoreSession(): Promise<CurrentUser | null> {
+  const result = await restoreSessionDetailed();
+  return result.status === 'authenticated' ? result.user : null;
 }
 
 // Rebusca só o perfil (GET /auth/me), sem forçar uma renovação de refresh

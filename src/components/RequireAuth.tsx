@@ -1,55 +1,100 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { getCurrentUser, restoreSession } from '../lib/auth';
+import { Loader2, WifiOff } from 'lucide-react';
+import { getCurrentUser, restoreSessionDetailed } from '../lib/auth';
 import ForcedPasswordChange from './ForcedPasswordChange';
 
-// Guarda de rota para tudo sob /app/*: no mount, se já não houver um
+// Intervalos entre novas tentativas quando o servidor não pôde responder (o último se repete).
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+
+type AuthState = 'checking' | 'authenticated' | 'unauthenticated' | 'unavailable';
+
+// Guarda de rota para /app/* e /conta*: no mount, se já não houver um
 // usuário em memória (ex.: acabou de logar nesta mesma carga de página),
-// tenta restaurar a sessão via cookie httpOnly (restoreSession -> refresh +
-// /auth/me). Enquanto a checagem não resolve, não renderiza `children`/
-// `<Outlet />` de jeito nenhum — nem por um instante — pra nunca vazar
-// conteúdo protegido antes de saber se o usuário está autenticado.
+// tenta restaurar a sessão via cookie httpOnly (refresh + /auth/me).
+// Enquanto a checagem não resolve, não renderiza `<Outlet />` de jeito
+// nenhum — nem por um instante — pra nunca vazar conteúdo protegido antes
+// de saber se o usuário está autenticado.
+//
+// Só manda pro login quando o servidor REJEITA a sessão (401/403). Se ele
+// não pôde responder (backend reiniciando, sem rede, 429, 5xx), mostra
+// "Reconectando…" e tenta de novo sozinho — antes disso, um F5 no momento
+// errado deslogava a pessoa com a sessão ainda válida (bug de 25/09/2026).
 const RequireAuth = () => {
   const location = useLocation();
-  const [checked, setChecked] = useState(false);
-  const [authenticated, setAuthenticated] = useState(!!getCurrentUser());
+  const [authState, setAuthState] = useState<AuthState>(() => (getCurrentUser() ? 'authenticated' : 'checking'));
+  const [attempt, setAttempt] = useState(0);
   // Espelha `currentUser.mustChangePassword` (login criado por um admin com
-  // senha temporária, ver UsersService.create()/Fix 6) — enquanto true,
-  // RequireAuth mostra ForcedPasswordChange no lugar do app inteiro, mesmo
-  // com `authenticated` true.
+  // senha temporária, ver UsersService.create()) — enquanto true, mostra
+  // ForcedPasswordChange no lugar do app inteiro.
   const [mustChangePassword, setMustChangePassword] = useState(!!getCurrentUser()?.mustChangePassword);
-  // Em dev, o React.StrictMode invoca este efeito duas vezes por mount
-  // (monta -> limpa -> monta de novo), o que dispararia duas chamadas
-  // concorrentes de restoreSession() usando o MESMO cookie de refresh
-  // ainda não rotacionado. O backend rotaciona o refresh token a cada uso
-  // e trata a reapresentação do token já rotacionado como replay,
-  // revogando a família inteira — ou seja, a segunda chamada derrubaria a
-  // sessão que a primeira acabou de validar. Esse ref garante que só uma
-  // chamada real de rede aconteça por mount, mesmo sob StrictMode; em
-  // produção (sem StrictMode) o efeito já roda uma única vez de qualquer
-  // forma, então esse guard não muda nada lá.
-  const restoreAttempted = useRef(false);
+  // Uma restauração de cada vez. Em dev, o React.StrictMode invoca o efeito
+  // de mount duas vezes; duas chamadas concorrentes usariam o MESMO cookie de
+  // refresh ainda não rotacionado, e o backend trata a reapresentação de um
+  // token já rotacionado como replay (revoga a família inteira).
+  const inFlight = useRef(false);
+
+  const tryRestore = useCallback(() => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    restoreSessionDetailed().then((result) => {
+      inFlight.current = false;
+      if (result.status === 'authenticated') {
+        setMustChangePassword(result.user.mustChangePassword);
+        setAuthState('authenticated');
+      } else if (result.status === 'unauthenticated') {
+        setAuthState('unauthenticated');
+      } else {
+        setAuthState('unavailable');
+        setAttempt((a) => a + 1);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const existing = getCurrentUser();
     if (existing) {
       setMustChangePassword(existing.mustChangePassword);
-      setChecked(true);
+      setAuthState('authenticated');
       return;
     }
-    if (restoreAttempted.current) return;
-    restoreAttempted.current = true;
-    restoreSession().then((user) => {
-      setAuthenticated(!!user);
-      setMustChangePassword(!!user?.mustChangePassword);
-      setChecked(true);
-    });
-  }, []);
+    tryRestore();
+  }, [tryRestore]);
 
-  if (!checked) return null;
-  // Guarda pra onde a pessoa ia (ex.: /conta) — o Login devolve pra lá depois de entrar, em vez
-  // de sempre cair no ERP.
-  if (!authenticated) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  useEffect(() => {
+    if (authState !== 'unavailable') return;
+    const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+    const timer = setTimeout(tryRestore, delay);
+    return () => clearTimeout(timer);
+  }, [authState, attempt, tryRestore]);
+
+  if (authState === 'checking') return null;
+  if (authState === 'unauthenticated') {
+    // Guarda pra onde a pessoa ia (ex.: /conta) — o Login devolve pra lá depois de entrar.
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  }
+  if (authState === 'unavailable') {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div role="status" aria-live="polite" className="w-full max-w-sm bg-panel border border-border rounded-3xl p-8 text-center shadow-lg">
+          <WifiOff size={32} className="mx-auto text-muted mb-4" aria-hidden="true" />
+          <h1 className="text-lg font-heading font-bold text-foreground">Reconectando ao servidor…</h1>
+          <p className="text-sm text-muted mt-2">
+            Não conseguimos falar com o servidor agora. Sua sessão continua ativa — estamos tentando de novo
+            automaticamente.
+          </p>
+          <button
+            type="button"
+            onClick={tryRestore}
+            className="mt-6 inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm"
+          >
+            <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+            Tentar agora
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (mustChangePassword) {
     return <ForcedPasswordChange onDone={() => setMustChangePassword(false)} />;
   }
