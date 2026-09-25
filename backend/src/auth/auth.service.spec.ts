@@ -425,6 +425,37 @@ describe('AuthService', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
+    // Pré-checagem barata ANTES do lock global de provisionamento: um e-mail/documento já
+    // cadastrado nunca chega a pegar pg_advisory_xact_lock('tenant_provisioning') nem montar schema.
+    it('e-mail já cadastrado é recusado antes de abrir a transação', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({ id: 'existing-user' });
+      await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow(
+        new ConflictException('Este e-mail já está cadastrado'),
+      );
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: baseRegisterDto.email } });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('documento já cadastrado é recusado antes de abrir a transação (CNPJ normalizado)', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(null);
+      prisma.company.findUnique.mockResolvedValueOnce({ id: 'existing-company' });
+      await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow(
+        new ConflictException('Já existe uma conta com este CNPJ'),
+      );
+      expect(prisma.company.findUnique).toHaveBeenCalledWith({ where: { document: '11222333000181' } });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('CPF já cadastrado é recusado antes de abrir a transação, falando CPF', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce(null);
+      prisma.company.findUnique.mockResolvedValueOnce({ id: 'existing-company' });
+      await expect(
+        service.register({ ...baseRegisterDto, personType: 'PF', document: '529.982.247-25', tradeName: undefined }, fakeRes),
+      ).rejects.toThrow('Já existe uma conta com este CPF');
+      expect(prisma.company.findUnique).toHaveBeenCalledWith({ where: { document: '52998224725' } });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
     it.each([
       [['email'], 'Este e-mail já está cadastrado'],
       [['document'], 'Já existe uma conta com este CNPJ'],
@@ -453,8 +484,10 @@ describe('AuthService', () => {
         prisma.$transaction.mockRejectedValueOnce(
           new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x', meta: {} }),
         );
-        prisma.user.findUnique.mockResolvedValueOnce({ id: 'existing-user' });
+        // 1ª consulta = pré-checagem (livre: a corrida acontece depois dela); 2ª = desambiguação.
+        prisma.user.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'existing-user' });
         await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow('Este e-mail já está cadastrado');
+        expect(prisma.$transaction).toHaveBeenCalled();
         expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: baseRegisterDto.email } });
       });
 
@@ -462,9 +495,10 @@ describe('AuthService', () => {
         prisma.$transaction.mockRejectedValueOnce(
           new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x', meta: {} }),
         );
-        prisma.user.findUnique.mockResolvedValueOnce(null);
-        prisma.company.findUnique.mockResolvedValueOnce({ id: 'existing-company' });
+        prisma.user.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+        prisma.company.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'existing-company' });
         await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow('Já existe uma conta com este CNPJ');
+        expect(prisma.$transaction).toHaveBeenCalled();
         expect(prisma.company.findUnique).toHaveBeenCalledWith({ where: { document: '11222333000181' } });
       });
 

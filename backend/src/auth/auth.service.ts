@@ -181,14 +181,23 @@ export class AuthService {
       }
       if (target.includes('email')) throw new ConflictException('Este e-mail já está cadastrado');
 
-      const existingUser = await runAsSystem(() => this.prisma.user.findUnique({ where: { email: dto.email } }));
-      if (existingUser) throw new ConflictException('Este e-mail já está cadastrado');
-      const existingCompany = await runAsSystem(() => this.prisma.company.findUnique({ where: { document } }));
-      if (existingCompany) {
-        throw new ConflictException(`Já existe uma conta com este ${dto.personType === 'PJ' ? 'CNPJ' : 'CPF'}`);
-      }
+      await this.assertRegisterIdentityAvailable(dto, document);
     }
     throw err;
+  }
+
+  // Pré-checagem barata, ANTES do lock global de provisionamento: o caso comum (e-mail/documento já
+  // cadastrado) é recusado sem serializar outros cadastros nem montar schema pra nada. Não é a
+  // garantia real — dois cadastros simultâneos com o mesmo dado passam os dois por aqui; quem
+  // decide é a unique constraint (P2002 → resolveRegisterConflict). runAsSystem: rota @Public(),
+  // nenhum tenant no contexto (mesmo padrão de login()).
+  private async assertRegisterIdentityAvailable(dto: RegisterDto, document: string): Promise<void> {
+    const existingUser = await runAsSystem(() => this.prisma.user.findUnique({ where: { email: dto.email } }));
+    if (existingUser) throw new ConflictException('Este e-mail já está cadastrado');
+    const existingCompany = await runAsSystem(() => this.prisma.company.findUnique({ where: { document } }));
+    if (existingCompany) {
+      throw new ConflictException(`Já existe uma conta com este ${dto.personType === 'PJ' ? 'CNPJ' : 'CPF'}`);
+    }
   }
 
   async register(dto: RegisterDto, res: Response) {
@@ -199,6 +208,7 @@ export class AuthService {
     const tradeName = dto.tradeName?.trim() || null;
     const legalName = dto.legalName.trim();
     const displayName = tradeName ?? legalName;
+    await this.assertRegisterIdentityAvailable(dto, document);
     const passwordHash = await hashPassword(dto.password);
     let result: {
       user: { id: string; companyId: string; email: string; role: string; modules: string[]; mustChangePassword: boolean; employeeId: string | null; hasFullPontoAccess: boolean; name: string | null };
