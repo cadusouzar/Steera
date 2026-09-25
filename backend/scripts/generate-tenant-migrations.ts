@@ -48,6 +48,60 @@ export const CENTRAL_ONLY_ENUM_NAMES = ['AppModule', 'UserStatus'];
 // aqui à mão.
 export const CENTRAL_ONLY_VIEW_NAMES = ['tenant_directory'];
 
+// Funções que existem só pra objetos CENTRAIS — achado em 25/09/2026 com a trigger que impede
+// alterar `Company.schemaName` depois do cadastro. Replayar `CREATE FUNCTION` num schema de tenant
+// criaria uma cópia inútil da função em cada empresa (a `CREATE TRIGGER` correspondente, em
+// "Company", já é descartada pela classificação por tabela). Mesma lista manual das outras acima.
+export const CENTRAL_ONLY_FUNCTION_NAMES = ['company_schema_name_immutable'];
+
+// Divide o SQL de uma migration em statements num `;` seguido de quebra de linha — o mesmo critério
+// de sempre — mas NUNCA dentro de um bloco dollar-quoted (`$$ ... $$` ou `$tag$ ... $tag$`): o corpo
+// de uma função plpgsql tem vários `;` + quebra de linha que não encerram o comando. Antes disto, o
+// split por regex cortava a função em pedaços, cada um caindo no branch "não classificado, mantido
+// por padrão" — SQL quebrado replicado em cada schema de tenant.
+// Limitação conhecida: strings entre aspas simples não são tratadas (nenhuma migration do projeto
+// tem `;` + quebra de linha ou `$` dentro de uma string literal).
+export function splitSqlStatements(sql: string): string[] {
+  const pieces: string[] = [];
+  let start = 0;
+  let i = 0;
+  let dollarTag: string | null = null;
+  while (i < sql.length) {
+    if (dollarTag) {
+      if (sql.startsWith(dollarTag, i)) {
+        i += dollarTag.length;
+        dollarTag = null;
+      } else {
+        i++;
+      }
+      continue;
+    }
+    if (sql[i] === '$') {
+      const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+      if (tag) {
+        dollarTag = tag[0];
+        i += tag[0].length;
+        continue;
+      }
+    }
+    if (sql[i] === ';') {
+      const terminator = /^;\s*\n/.exec(sql.slice(i));
+      if (terminator) {
+        pieces.push(sql.slice(start, i));
+        i += terminator[0].length;
+        start = i;
+        continue;
+      }
+    }
+    i++;
+  }
+  pieces.push(sql.slice(start));
+  return pieces
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => (s.endsWith(';') ? s : `${s};`));
+}
+
 // Classifica cada comando SQL de uma migration como "de uma tabela de tenant" (mantido) ou "de uma
 // tabela central" (removido). Olha só pra tabela PRINCIPAL de cada comando (a que está sendo
 // criada/alterada/indexada) — uma referência de FK a uma tabela central dentro de um comando de
@@ -67,11 +121,7 @@ export function splitMigrationSqlByTenant(sql: string, tenantTableNames: readonl
     .filter((line) => !line.trim().startsWith('--'))
     .join('\n');
 
-  const statements = withoutComments
-    .split(/;\s*\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-    .map((s) => (s.endsWith(';') ? s : `${s};`));
+  const statements = splitSqlStatements(withoutComments);
 
   const kept: string[] = [];
 
@@ -91,14 +141,26 @@ export function splitMigrationSqlByTenant(sql: string, tenantTableNames: readonl
       continue;
     }
 
-    // CREATE [OR REPLACE] VIEW / DROP VIEW [IF EXISTS] — só removido quando o nome está na lista
-    // manual `CENTRAL_ONLY_VIEW_NAMES` (ver comentário lá). Uma view não listada é mantida (mesmo
-    // espírito conservador do branch "desconhecido" abaixo, só que já classificado — sem aviso).
+    // CREATE [OR REPLACE] VIEW / ALTER VIEW / DROP VIEW [IF EXISTS] — só removido quando o nome está
+    // na lista manual `CENTRAL_ONLY_VIEW_NAMES` (ver comentário lá). Uma view não listada é mantida
+    // (mesmo espírito conservador do branch "desconhecido" abaixo, só que já classificado — sem aviso).
     const viewMatch =
       statement.match(/^CREATE(?:\s+OR\s+REPLACE)?\s+VIEW\s+"(\w+)"/i) ||
+      statement.match(/^ALTER VIEW\s+(?:IF EXISTS\s+)?"(\w+)"/i) ||
       statement.match(/^DROP VIEW\s+(?:IF EXISTS\s+)?"(\w+)"/i);
     if (viewMatch) {
       if (!CENTRAL_ONLY_VIEW_NAMES.includes(viewMatch[1])) kept.push(statement);
+      continue;
+    }
+
+    // CREATE [OR REPLACE] FUNCTION / DROP FUNCTION [IF EXISTS] — mesma regra das views: só removida
+    // quando o nome está em `CENTRAL_ONLY_FUNCTION_NAMES`; o corpo inteiro chega aqui como um único
+    // statement (ver splitSqlStatements).
+    const functionMatch =
+      statement.match(/^CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+"?(\w+)"?/i) ||
+      statement.match(/^DROP FUNCTION\s+(?:IF EXISTS\s+)?"?(\w+)"?/i);
+    if (functionMatch) {
+      if (!CENTRAL_ONLY_FUNCTION_NAMES.includes(functionMatch[1])) kept.push(statement);
       continue;
     }
 
@@ -117,6 +179,9 @@ export function splitMigrationSqlByTenant(sql: string, tenantTableNames: readonl
       statement.match(/^ALTER TABLE\s+"(\w+)"/i) ||
       statement.match(/^CREATE(?:\s+UNIQUE)?\s+INDEX\s+"[^"]+"\s+ON\s+"(\w+)"/i) ||
       statement.match(/^CREATE POLICY\s+\S+\s+ON\s+"(\w+)"/i) ||
+      // Trigger pertence à tabela em que está (central → removida, tenant → mantida).
+      statement.match(/^CREATE(?:\s+OR\s+REPLACE)?(?:\s+CONSTRAINT)?\s+TRIGGER\s+\S+[\s\S]*?\sON\s+"(\w+)"/i) ||
+      statement.match(/^DROP TRIGGER\s+(?:IF EXISTS\s+)?\S+\s+ON\s+"(\w+)"/i) ||
       statement.match(/^DROP INDEX\s+"(\w+?)_/i) ||
       statement.match(/^UPDATE\s+"(\w+)"/i);
 

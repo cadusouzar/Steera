@@ -150,7 +150,17 @@ describe('Cadastro ampliado + schema legível (e2e)', () => {
     // Simula uma empresa anterior à feature: nenhuma requisição autenticada dela rodou ainda, então
     // o cache do resolver está vazio pra ela.
     await sys(() => prisma.$executeRawUnsafe(`ALTER SCHEMA "${readable}" RENAME TO "${legacy}"`));
-    await sys(() => prisma.company.update({ where: { id: companyId! }, data: { schemaName: legacy } }));
+    // Company.schemaName é imutável no banco (trigger company_schema_name_immutable) — só este teste,
+    // que SIMULA uma empresa antiga, precisa driblar isso: desliga/religa a trigger dentro da MESMA
+    // transação do UPDATE, então nenhuma outra sessão (outros specs em paralelo) chega a ver a
+    // trigger desligada.
+    await sys(() =>
+      prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe('ALTER TABLE public."Company" DISABLE TRIGGER company_schema_name_immutable');
+        await tx.$executeRawUnsafe('UPDATE public."Company" SET "schemaName" = $1 WHERE "id" = $2', legacy, companyId!);
+        await tx.$executeRawUnsafe('ALTER TABLE public."Company" ENABLE TRIGGER company_schema_name_immutable');
+      }),
+    );
 
     const login = await request(app.getHttpServer()).post('/auth/login').set('x-requested-with', 'XMLHttpRequest').send({ email, password: PASSWORD });
     const clientRes = await request(app.getHttpServer())
@@ -158,6 +168,15 @@ describe('Cadastro ampliado + schema legível (e2e)', () => {
       .send({ name: `Cliente Legado ${runId}`, contact: '(11) 90000-0000' });
     expect(clientRes.status).toBe(201);
     await assertRowExistsInTenantSchema(prisma, companyId!, 'Client', { id: clientRes.body.id });
+  });
+
+  it('o banco recusa alterar Company.schemaName depois do cadastro (trigger)', async () => {
+    const { companyId } = await register(buildRegisterBody({ email: `imutavel-${runId}@test.com`, password: PASSWORD, companyName: 'Imutável' }));
+    const before = await getTenantSchemaName(prisma, companyId!);
+    await expect(
+      sys(() => prisma.$executeRawUnsafe('UPDATE public."Company" SET "schemaName" = $1 WHERE "id" = $2', `outro_${runId}`, companyId!)),
+    ).rejects.toThrow(/schemaName não pode ser alterado/);
+    expect(await getTenantSchemaName(prisma, companyId!)).toBe(before);
   });
 
   it('tenant_directory lista empresa, documento, schema e e-mail do fundador', async () => {

@@ -1,6 +1,13 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { CENTRAL_ONLY_ENUM_NAMES, CENTRAL_ONLY_VIEW_NAMES, NOOP_WHEN_REPLAYED_FROM_EMPTY, splitMigrationSqlByTenant } from '../../scripts/generate-tenant-migrations';
+import { readFileSync } from 'fs';
+import {
+  CENTRAL_ONLY_ENUM_NAMES,
+  CENTRAL_ONLY_FUNCTION_NAMES,
+  CENTRAL_ONLY_VIEW_NAMES,
+  NOOP_WHEN_REPLAYED_FROM_EMPTY,
+  splitMigrationSqlByTenant,
+} from '../../scripts/generate-tenant-migrations';
 
 const TENANT_TABLES = ['Client', 'Employee'] as const;
 
@@ -179,6 +186,98 @@ describe('splitMigrationSqlByTenant', () => {
   it('mantém CREATE VIEW de uma view que não está na lista de views centrais conhecidas', () => {
     const sql = 'CREATE VIEW "algum_relatorio" AS\nSELECT 1;';
     expect(splitMigrationSqlByTenant(sql, TENANT_TABLES)).toContain('algum_relatorio');
+  });
+});
+
+// Revisão final do cadastro ampliado (25/09/2026): a migration que liga security_invoker na
+// tenant_directory e cria a trigger de imutabilidade de Company.schemaName só toca objetos
+// CENTRAIS — nada dela pode ir pra prisma/tenant-migrations/. O corpo plpgsql ($$ ... $$) tem `;`
+// seguido de quebra de linha: o splitter antigo (que dividia em todo `;` + quebra de linha) cortava
+// a função em pedaços, e cada pedaço caía no branch "não classificado, mantido por padrão" — SQL
+// quebrado replicado em cada schema de tenant novo.
+describe('splitMigrationSqlByTenant — funções, triggers e blocos $$', () => {
+  const functionSql = [
+    'CREATE FUNCTION company_schema_name_immutable() RETURNS trigger',
+    'LANGUAGE plpgsql AS $$',
+    'BEGIN',
+    '  IF NEW."schemaName" IS DISTINCT FROM OLD."schemaName" THEN',
+    "    RAISE EXCEPTION 'não pode';",
+    '  END IF;',
+    '  RETURN NEW;',
+    'END;',
+    '$$;',
+  ].join('\n');
+
+  const silently = (fn: () => string) => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      return { result: fn(), warned: warnSpy.mock.calls.length > 0 };
+    } finally {
+      warnSpy.mockRestore();
+    }
+  };
+
+  it('remove ALTER VIEW de uma view central-only — sem aviso', () => {
+    const { result, warned } = silently(() =>
+      splitMigrationSqlByTenant('ALTER VIEW "tenant_directory" SET (security_invoker = true);', TENANT_TABLES),
+    );
+    expect(result.trim()).toBe('');
+    expect(warned).toBe(false);
+  });
+
+  it('remove por inteiro uma CREATE FUNCTION central-only com corpo $$ multi-statement — sem aviso nem pedaços', () => {
+    const { result, warned } = silently(() => splitMigrationSqlByTenant(functionSql, TENANT_TABLES));
+    expect(result.trim()).toBe('');
+    expect(warned).toBe(false);
+  });
+
+  it('mantém inteira (um único statement) uma função não listada, sem partir o corpo $$', () => {
+    const sql = functionSql.replace(/company_schema_name_immutable/g, 'outra_funcao');
+    const { result } = silently(() => splitMigrationSqlByTenant(sql, TENANT_TABLES));
+    expect(result).toBe(sql);
+  });
+
+  it('não parte blocos com tag ($body$ ... $body$)', () => {
+    const sql = [
+      'CREATE OR REPLACE FUNCTION "outra"() RETURNS void LANGUAGE plpgsql AS $body$',
+      'BEGIN',
+      '  PERFORM 1;',
+      'END;',
+      '$body$;',
+    ].join('\n');
+    const { result } = silently(() => splitMigrationSqlByTenant(sql, TENANT_TABLES));
+    expect(result).toBe(sql);
+  });
+
+  it('remove CREATE TRIGGER numa tabela central e mantém numa tabela de tenant', () => {
+    const central = [
+      'CREATE TRIGGER company_schema_name_immutable',
+      'BEFORE UPDATE OF "schemaName" ON "Company"',
+      'FOR EACH ROW EXECUTE FUNCTION company_schema_name_immutable();',
+    ].join('\n');
+    const tenant = ['CREATE TRIGGER algum_gatilho', 'BEFORE UPDATE ON "Client"', 'FOR EACH ROW EXECUTE FUNCTION outra();'].join('\n');
+    const { result, warned } = silently(() => splitMigrationSqlByTenant(`${central}\n\n${tenant}`, TENANT_TABLES));
+    expect(result).toBe(tenant);
+    expect(warned).toBe(false);
+  });
+
+  it('a migration real 20260925150000 não gera nada pra tenant', () => {
+    const sql = readFileSync(
+      join(
+        __dirname, '..', '..', 'prisma', 'migrations',
+        '20260925150000_tenant_directory_invoker_and_immutable_schema_name', 'migration.sql',
+      ),
+      'utf8',
+    );
+    const { result, warned } = silently(() => splitMigrationSqlByTenant(sql, TENANT_TABLES));
+    expect(result.trim()).toBe('');
+    expect(warned).toBe(false);
+  });
+});
+
+describe('CENTRAL_ONLY_FUNCTION_NAMES', () => {
+  it('contém company_schema_name_immutable, a única função central-only conhecida hoje', () => {
+    expect(CENTRAL_ONLY_FUNCTION_NAMES).toEqual(['company_schema_name_immutable']);
   });
 });
 
