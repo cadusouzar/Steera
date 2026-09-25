@@ -135,6 +135,13 @@ describe('Cadastro ampliado + schema legível (e2e)', () => {
     expect(res.status).toBe(400);
   });
 
+  it('PJ com nome fantasia só com espaços é recusado com 400 (trim na fronteira do DTO)', async () => {
+    const { res } = await register(
+      buildRegisterBody({ email: `fantasiaespacos-${runId}@test.com`, password: PASSWORD, overrides: { tradeName: '   ' } }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it('empresa com schema no formato antigo tenant_<id> continua roteando', async () => {
     const email = `legacy-${runId}@test.com`;
     const { companyId } = await register(buildRegisterBody({ email, password: PASSWORD, companyName: 'Legada' }));
