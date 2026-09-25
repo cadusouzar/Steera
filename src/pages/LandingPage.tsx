@@ -1,13 +1,47 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Hero3DProduct from '../components/Hero3DProduct';
 import PricingCard from '../components/PricingCard';
-import { Users, Briefcase, BarChart3, TrendingUp, ArrowRight } from 'lucide-react';
+import { Users, Briefcase, BarChart3, TrendingUp, ArrowRight, CheckCircle2, X } from 'lucide-react';
 
 const LandingPage = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [showRegisteredNotice, setShowRegisteredNotice] = useState(
+    () => (location.state as { registered?: boolean } | null)?.registered === true,
+  );
+
+  // Limpa o state de navegação depois de copiar o valor pro state local — assim recarregar a
+  // página não mostra o aviso de novo (o state não sobrevive a um F5, mas sobrevive a navegações
+  // internas subsequentes até ser limpo explicitamente).
+  useEffect(() => {
+    if ((location.state as { registered?: boolean } | null)?.registered === true) {
+      navigate('.', { replace: true, state: null });
+    }
+  }, [location.state, navigate]);
+
   return (
     <div className="relative min-h-screen bg-background transition-colors duration-300">
       <Navbar />
+
+      {showRegisteredNotice && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-40 rounded-xl border border-primary/30 bg-panel px-5 py-3 text-sm text-foreground shadow-lg flex items-center gap-3">
+          <CheckCircle2 size={18} className="text-primary shrink-0" />
+          <span>
+            Conta criada! Use <strong>Entrar no sistema</strong> no topo da página para acessar.
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowRegisteredNotice(false)}
+            className="text-muted hover:text-foreground transition-colors"
+            aria-label="Fechar aviso"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Asymmetric Split Hero */}
       <main className="container mx-auto px-4 md:px-6 pt-32 pb-16 lg:pt-40 lg:pb-24">

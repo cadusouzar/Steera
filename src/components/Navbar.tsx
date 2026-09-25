@@ -1,9 +1,27 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { LogIn } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 import ThemeToggle from './ThemeToggle';
+import { getCurrentUser, restoreSession } from '../lib/auth';
 
 const Navbar = () => {
   const { theme, toggleTheme } = useTheme();
+
+  // Sessão só em memória (access token nunca vai pra storage): se não houver usuário carregado,
+  // tenta o mesmo restoreSession() do RequireAuth (refresh via cookie HttpOnly, com a deduplicação
+  // de chamadas concorrentes que já existe em auth.ts). Visitante anônimo recebe 401 e continua
+  // vendo "Entrar" — custo aceito: conta no limite de 60/15min por IP de /auth/refresh.
+  const [isLoggedIn, setIsLoggedIn] = useState(() => getCurrentUser() !== null);
+
+  useEffect(() => {
+    if (isLoggedIn) return;
+    let cancelled = false;
+    restoreSession()
+      .then((user) => { if (!cancelled && user) setIsLoggedIn(true); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isLoggedIn]);
 
   return (
     <nav className="absolute top-0 w-full z-50">
@@ -24,9 +42,19 @@ const Navbar = () => {
         <div className="flex items-center gap-4">
           <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
           
-          <Link to="/login" className="text-sm font-medium text-foreground hover:text-primary transition-colors hidden sm:block">
-            Entrar
-          </Link>
+          {isLoggedIn ? (
+            <Link
+              to="/app"
+              className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary transition-colors"
+            >
+              <LogIn size={16} />
+              Entrar no sistema
+            </Link>
+          ) : (
+            <Link to="/login" className="text-sm font-medium text-foreground hover:text-primary transition-colors hidden sm:block">
+              Entrar
+            </Link>
+          )}
           
           <a href="#pricing" className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm">
             Assinar

@@ -14,7 +14,9 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
   const email = currentUser?.email ?? '';
-  const avatarInitial = email.charAt(0).toUpperCase() || '?';
+  // Nome do responsável quando existir (fundador, desde o cadastro ampliado); senão o e-mail, como antes.
+  const displayName = currentUser?.name?.trim() || email;
+  const avatarInitial = displayName.charAt(0).toUpperCase() || '?';
   const roleLabel = currentUser?.role === 'admin' ? 'Administrador' : 'Funcionário';
 
   // Chama o logout real (POST /auth/logout, limpa a sessão em memória) e só
@@ -65,7 +67,8 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
             className="absolute right-0 mt-2 w-64 bg-background border border-border rounded-2xl shadow-xl overflow-hidden z-[100]"
           >
             <div className="p-4 border-b border-border/50 bg-secondary/10">
-              <p className="font-bold text-foreground text-sm truncate">{email}</p>
+              <p className="font-bold text-foreground text-sm truncate">{displayName}</p>
+              {currentUser?.name && <p className="text-xs text-muted truncate">{email}</p>}
               <p className="text-xs text-muted font-medium mt-0.5 truncate">
                 {roleLabel}
                 {currentUser?.companyName ? ` · ${currentUser.companyName}` : ''}

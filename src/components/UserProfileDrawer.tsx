@@ -72,7 +72,9 @@ const UserProfileDrawer: React.FC<UserProfileDrawerProps> = ({ onClose }) => {
   }, [activeTab, currentUser?.role, activeEmployeeLogins]);
 
   const email = currentUser?.email ?? '';
-  const avatarInitial = email.charAt(0).toUpperCase() || '?';
+  // Nome do responsável quando existir (fundador, desde o cadastro ampliado); senão o e-mail, como antes.
+  const displayName = currentUser?.name?.trim() || email;
+  const avatarInitial = displayName.charAt(0).toUpperCase() || '?';
   const roleLabel = currentUser?.role === 'admin' ? 'Administrador' : 'Funcionário';
   const planLabel = currentUser?.planTier ? (PLAN_LABELS[currentUser.planTier] ?? currentUser.planTier) : '—';
 
@@ -145,7 +147,7 @@ const UserProfileDrawer: React.FC<UserProfileDrawerProps> = ({ onClose }) => {
                       {avatarInitial}
                     </div>
                     <div className="flex-1 space-y-1 text-center sm:text-left">
-                      <h3 className="text-xl font-bold text-foreground break-all">{email}</h3>
+                      <h3 className="text-xl font-bold text-foreground break-all">{displayName}</h3>
                       <span className="inline-block mt-2 px-3 py-1 bg-primary/10 text-primary text-xs font-bold rounded-lg uppercase tracking-wider">
                         {roleLabel}
                       </span>
@@ -165,10 +167,29 @@ const UserProfileDrawer: React.FC<UserProfileDrawerProps> = ({ onClose }) => {
                       <span className="text-sm font-medium text-muted">Empresa</span>
                       <span className="text-sm font-bold text-foreground">{currentUser?.companyName ?? '—'}</span>
                     </div>
+                    {currentUser?.legalName && (
+                      <div className="flex items-center justify-between gap-4 px-5 py-4">
+                        <span className="text-sm font-medium text-muted">{currentUser.personType === 'PF' ? 'Nome completo' : 'Razão social'}</span>
+                        <span className="text-sm font-bold text-foreground text-right">{currentUser.legalName}</span>
+                      </div>
+                    )}
+                    {currentUser?.tradeName && (
+                      <div className="flex items-center justify-between gap-4 px-5 py-4">
+                        <span className="text-sm font-medium text-muted">Nome fantasia</span>
+                        <span className="text-sm font-bold text-foreground text-right">{currentUser.tradeName}</span>
+                      </div>
+                    )}
+                    {currentUser?.documentMasked && (
+                      <div className="flex items-center justify-between gap-4 px-5 py-4">
+                        <span className="text-sm font-medium text-muted">{currentUser.personType === 'PF' ? 'CPF' : 'CNPJ'}</span>
+                        <span className="text-sm font-bold text-foreground font-mono">{currentUser.documentMasked}</span>
+                      </div>
+                    )}
                   </div>
 
                   <p className="text-xs text-muted">
-                    O e-mail é a identidade deste login e não pode ser alterado por aqui. Dados de
+                    O e-mail é a identidade deste login e não pode ser alterado por aqui. Os dados
+                    cadastrais da empresa ainda não podem ser editados pelo sistema. Dados de
                     funcionário (nome, CPF, telefone, etc.), quando aplicável, são gerenciados na
                     tela de Funcionários.
                   </p>
