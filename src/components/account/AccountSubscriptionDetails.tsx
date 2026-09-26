@@ -81,20 +81,22 @@ const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 p-6 md:p-8 rounded-3xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-          <CreditCard size={120} />
+      <div className="bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 p-6 md:p-8 rounded-3xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <span className="inline-block px-3 py-1 bg-primary/20 text-primary text-xs font-bold rounded-full uppercase tracking-wider mb-4 border border-primary/30">
+              Plano Atual
+            </span>
+            <h3 className="text-3xl font-heading font-bold text-foreground mb-2">QuickFlow {plan.current.label}</h3>
+            <p className="text-muted font-medium max-w-sm">
+              Cobrança e faturas ainda não estão disponíveis nesta versão do QuickFlow.
+            </p>
+          </div>
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <CreditCard size={22} aria-hidden="true" />
+          </div>
         </div>
-
-        <span className="inline-block px-3 py-1 bg-primary/20 text-primary text-xs font-bold rounded-full uppercase tracking-wider mb-4 border border-primary/30">
-          Plano Atual
-        </span>
-
-        <h3 className="text-3xl font-heading font-bold text-foreground mb-2">QuickFlow {plan.current.label}</h3>
-        <p className="text-muted font-medium max-w-sm">
-          Cobrança e faturas ainda não estão disponíveis nesta versão do QuickFlow.
-        </p>
-        {children && <div className="relative mt-6">{children}</div>}
+        {children && <div className="mt-6">{children}</div>}
       </div>
 
       <div className="bg-secondary/20 border border-border/60 p-6 rounded-2xl space-y-4">
@@ -110,68 +112,76 @@ const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({
 
       <div>
         <h4 className="font-bold text-foreground mb-4">Compare os planos</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Um plano por linha (não colunas): este componente vive tanto no drawer estreito do ERP
+            quanto na página /conta, e breakpoints do Tailwind olham a janela, não o container. */}
+        <div className="space-y-3">
           {plan.catalog.map((item, idx) => {
             const isCurrent = item.tier === plan.current.tier;
             const canUpgrade = idx > currentIndex;
+            const items = [...item.modules, ...item.features];
 
             return (
               <div
                 key={item.tier}
-                className={`border rounded-2xl p-5 flex flex-col ${
+                className={`border rounded-2xl p-4 sm:p-5 ${
                   isCurrent ? 'border-primary bg-primary/5' : 'border-border/60 bg-panel'
                 }`}
               >
-                <div className="mb-3 min-h-[22px]">
-                  {isCurrent && (
-                    <span className="inline-block px-2.5 py-0.5 bg-primary/20 text-primary text-[11px] font-bold rounded-full uppercase tracking-wider">
-                      Plano atual
-                    </span>
-                  )}
-                </div>
-
-                <h5 className="text-lg font-heading font-bold text-foreground">{item.label}</h5>
-                <p className="text-sm text-muted mb-4">{item.priceLabel}</p>
-
-                <ul className="space-y-1.5 text-sm text-foreground/80 mb-4">
-                  {item.modules.map((moduleName) => (
-                    <li key={moduleName} className="flex items-start gap-2">
-                      <Check size={14} className="text-primary shrink-0 mt-0.5" />
-                      <span>{PLAN_ITEM_LABELS[moduleName] ?? moduleName}</span>
-                    </li>
-                  ))}
-                  {item.features.map((feature) => (
-                    <li key={feature} className="flex items-start gap-2">
-                      <Check size={14} className="text-primary shrink-0 mt-0.5" />
-                      <span>{PLAN_ITEM_LABELS[feature] ?? feature}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="flex-1 text-xs text-muted space-y-1 pt-3 mt-auto border-t border-border/40">
-                  <div>Cargos: {formatLimit(item.limits.maxRoles)}</div>
-                  <div>Funcionários: {formatLimit(item.limits.maxEmployees)}</div>
-                  <div>Logins de funcionário: {formatLimit(item.limits.maxEmployeeLogins)}</div>
-                </div>
-
-                {canUpgrade && (
-                  <div className="mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h5 className="text-lg font-heading font-bold text-foreground">{item.label}</h5>
+                      {isCurrent && (
+                        <span className="px-2.5 py-0.5 bg-primary/20 text-primary text-[11px] font-bold rounded-full uppercase tracking-wider">
+                          Plano atual
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted">{item.priceLabel}</p>
+                  </div>
+                  {canUpgrade && (
                     <button
                       type="button"
                       disabled
-                      className="w-full py-2 rounded-xl font-medium text-sm text-center bg-background border border-border text-muted cursor-not-allowed"
+                      title="Em breve — pagamento online ainda não disponível."
+                      className="px-4 py-2 rounded-xl font-medium text-sm bg-background border border-border text-muted cursor-not-allowed shrink-0"
                     >
                       Fazer upgrade
                     </button>
-                    <p className="text-[11px] text-muted mt-1.5 text-center">
-                      Em breve — pagamento online ainda não disponível.
-                    </p>
-                  </div>
-                )}
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {items.map((name) => (
+                    <span
+                      key={name}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs text-foreground/80 bg-secondary/40 border border-border/60"
+                    >
+                      <Check size={12} className="text-primary shrink-0" aria-hidden="true" />
+                      {PLAN_ITEM_LABELS[name] ?? name}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  {[
+                    { label: 'Cargos', value: item.limits.maxRoles },
+                    { label: 'Funcionários', value: item.limits.maxEmployees },
+                    { label: 'Logins', value: item.limits.maxEmployeeLogins },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="rounded-xl bg-background/60 border border-border/50 px-2 py-2 text-center">
+                      <div className="text-[11px] text-muted truncate">{label}</div>
+                      <div className="text-sm font-bold text-foreground">{formatLimit(value)}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             );
           })}
         </div>
+        {currentIndex < PLAN_ORDER.length - 1 && (
+          <p className="text-xs text-muted mt-3">Upgrade em breve — pagamento online ainda não disponível.</p>
+        )}
       </div>
     </div>
   );
