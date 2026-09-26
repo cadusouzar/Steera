@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
-import { CheckCircle2, CreditCard, Info, LogIn, Pencil, Shield, User } from 'lucide-react';
+import { CheckCircle2, CreditCard, Info, LogIn, MailWarning, Pencil, Shield, User } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import AccountProfileDetails from '../components/account/AccountProfileDetails';
 import AccountProfileEditForm from '../components/account/AccountProfileEditForm';
 import AccountPasswordForm from '../components/account/AccountPasswordForm';
 import AccountSubscriptionDetails from '../components/account/AccountSubscriptionDetails';
-import { getCurrentUser, subscribeCurrentUser, type CurrentUser } from '../lib/auth';
+import { ApiError } from '../lib/apiError';
+import { getCurrentUser, resendVerification, subscribeCurrentUser, type CurrentUser } from '../lib/auth';
 
 type Tab = 'perfil' | 'seguranca' | 'assinatura';
 
@@ -25,8 +26,27 @@ const Account = () => {
   const [user, setUser] = useState<CurrentUser | null>(() => getCurrentUser());
   const [isEditing, setIsEditing] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  // Faixa de confirmação de e-mail pendente ("Acesso e sessões", 26/09/2026) — mesmo caso do
+  // EmailVerificationRequired que bloqueia o /app inteiro, só que aqui /conta continua acessível
+  // (é justamente daqui que a pessoa consegue reenviar sem entrar no sistema).
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [resendError, setResendError] = useState<string | null>(null);
 
   useEffect(() => subscribeCurrentUser(setUser), []);
+
+  const emailPending = !!user && user.emailVerificationRequired && !user.emailVerified;
+
+  const handleResendVerification = async () => {
+    setResendState('sending');
+    setResendError(null);
+    try {
+      await resendVerification();
+      setResendState('sent');
+    } catch (err) {
+      setResendState('error');
+      setResendError(err instanceof ApiError ? err.message : 'Não foi possível reenviar o e-mail de confirmação.');
+    }
+  };
 
   // Trocar de aba sai do modo de edição (sem salvar) e esconde o aviso de "salvo".
   useEffect(() => {
@@ -57,6 +77,27 @@ const Account = () => {
             Entrar no sistema
           </Link>
         </div>
+
+        {emailPending && (
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-5 py-4">
+            <p className="flex items-start gap-2 text-sm text-foreground">
+              <MailWarning size={18} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+              Confirme seu e-mail (<span className="font-medium break-all">{user?.email}</span>) para acessar o sistema.
+            </p>
+            <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={resendState === 'sending'}
+                className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {resendState === 'sending' ? 'Enviando...' : 'Reenviar'}
+              </button>
+              {resendState === 'sent' && <p className="text-xs text-muted">E-mail reenviado. Confira sua caixa de entrada.</p>}
+              {resendState === 'error' && resendError && <p className="text-xs text-red-600 dark:text-red-400">{resendError}</p>}
+            </div>
+          </div>
+        )}
 
         <nav className="flex items-center gap-2 mb-6 overflow-x-auto" aria-label="Seções da conta">
           <NavLink to="/conta" end className={tabClass}>

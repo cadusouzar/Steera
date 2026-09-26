@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, Search, X, UserPlus, FileQuestion, LayoutDashboard, HeartHandshake, Users,
   TrendingUp, Package, BarChart3, Loader2, KeyRound, Copy, Check, ShieldOff, ShieldCheck,
-  Pencil, Trash2, AlertTriangle, Clock, ChevronDown,
+  Pencil, Trash2, AlertTriangle, Clock, ChevronDown, Send, Mail,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
@@ -68,6 +68,14 @@ interface UserFormState {
 }
 
 const emptyForm: UserFormState = { email: '', role: 'admin', employeeId: '', profileId: '' };
+
+// Aviso de convite/redefinição de senha ("Acesso e sessões", 26/09/2026) — 'invite' cobre tanto a
+// criação de um login quanto "Reenviar Convite" (mesma resposta de backend, `inviteUrl`/`sent`);
+// 'reset' cobre "Enviar Redefinição de Senha" pra um login que já aceitou o convite (sem link pra
+// copiar — só confirma que o e-mail foi enviado).
+type UserNotice =
+  | { kind: 'invite'; email: string; inviteUrl: string | null; sent: boolean }
+  | { kind: 'reset'; email: string; sent: boolean };
 
 const UsersManagement = () => {
   const currentUser = getCurrentUser();
@@ -149,11 +157,9 @@ const UsersManagement = () => {
     };
   }, [openActionsMenuUserId, closeActionsMenu]);
 
-  // Senha temporária devolvida pela criação OU por um reset de senha — só existe nessa única
-  // resposta, nunca mais recuperável depois. Fica num banner que só some com ação explícita do
-  // admin (nunca no backdrop/Escape), pra garantir que ele realmente copiou/anotou antes de perder
-  // o valor.
-  const [tempPasswordBanner, setTempPasswordBanner] = useState<{ email: string; temporaryPassword: string } | null>(null);
+  // Substitui o antigo banner de senha temporária (`tempPasswordBanner`) — fecha só com ação
+  // explícita do admin (nunca backdrop/Escape), mesmo padrão de sempre.
+  const [userNotice, setUserNotice] = useState<UserNotice | null>(null);
   const [copied, setCopied] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -195,7 +201,7 @@ const UsersManagement = () => {
   });
 
   useEffect(() => {
-    if (isModalOpen || editingUser || deletingUser || resettingPasswordUser || tempPasswordBanner || viewingModulesUser) {
+    if (isModalOpen || editingUser || deletingUser || resettingPasswordUser || userNotice || viewingModulesUser) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -203,7 +209,7 @@ const UsersManagement = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isModalOpen, editingUser, deletingUser, resettingPasswordUser, tempPasswordBanner, viewingModulesUser]);
+  }, [isModalOpen, editingUser, deletingUser, resettingPasswordUser, userNotice, viewingModulesUser]);
 
   const employeeById = useMemo(() => {
     const map = new Map<string, EmployeeListItem>();
@@ -273,7 +279,7 @@ const UsersManagement = () => {
         profileId: formData.profileId,
       });
       setUsers(prev => [...prev, result.user]);
-      setTempPasswordBanner({ email: result.user.email, temporaryPassword: result.temporaryPassword });
+      setUserNotice({ kind: 'invite', email: result.user.email, inviteUrl: result.inviteUrl, sent: result.sent });
       setIsModalOpen(false);
       setFormData(emptyForm);
     } catch (err) {
@@ -283,19 +289,24 @@ const UsersManagement = () => {
     }
   };
 
+  // `invited` conta como "bloqueável" (não como "já bloqueado") — sem isso, o toggle rotulava um
+  // convite pendente como "Desbloquear Acesso" (sobrava só binário active/não-active antes deste
+  // status existir) e chamava unblock() nele, um no-op (ver UsersService.unblock()).
+  const isBlockedStatus = (status: SystemUser['status']) => status === 'blocked' || status === 'locked';
+
   const handleToggleStatus = async (user: SystemUser) => {
     if (pendingUserId) return;
     setPendingUserId(user.id);
     setActionError(null);
     try {
-      if (user.status === 'active') {
-        await api.blockSystemUser(user.id);
-      } else {
+      if (isBlockedStatus(user.status)) {
         await api.unblockSystemUser(user.id);
+      } else {
+        await api.blockSystemUser(user.id);
       }
-      setUsers(prev => prev.map(u => u.id === user.id
-        ? { ...u, status: u.status === 'active' ? 'blocked' : 'active' }
-        : u));
+      // Recarrega em vez de adivinhar o novo status localmente: desbloquear um login que nunca
+      // aceitou o convite volta pra `invited` (não `active`) — ver UsersService.unblock().
+      await loadData();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar o status deste usuário.');
     } finally {
@@ -303,19 +314,36 @@ const UsersManagement = () => {
     }
   };
 
-  const closeCredentialBanner = () => {
-    setTempPasswordBanner(null);
+  // Reenvia o convite de um login ainda `invited` (400 caso contrário, mas a ação só aparece pra
+  // esse status) — reaproveita o indicador de carregamento por linha já usado por
+  // handleToggleStatus (`pendingUserId`).
+  const handleResendInvite = async (user: SystemUser) => {
+    if (pendingUserId) return;
+    setPendingUserId(user.id);
+    setActionError(null);
+    try {
+      const result = await api.resendSystemUserInvite(user.id);
+      setUserNotice({ kind: 'invite', email: user.email, inviteUrl: result.inviteUrl, sent: result.sent });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível reenviar o convite deste usuário.');
+    } finally {
+      setPendingUserId(null);
+    }
+  };
+
+  const closeUserNotice = () => {
+    setUserNotice(null);
     setCopied(false);
   };
 
-  const handleCopyPassword = async () => {
-    if (!tempPasswordBanner) return;
+  const handleCopyInviteLink = async () => {
+    if (!userNotice || userNotice.kind !== 'invite' || !userNotice.inviteUrl) return;
     try {
-      await navigator.clipboard.writeText(tempPasswordBanner.temporaryPassword);
+      await navigator.clipboard.writeText(userNotice.inviteUrl);
       setCopied(true);
     } catch {
       // Sem acesso à área de transferência (navegador/permite) — o admin
-      // ainda pode selecionar e copiar manualmente o texto exibido.
+      // ainda pode selecionar e copiar manualmente o link exibido.
     }
   };
 
@@ -370,12 +398,17 @@ const UsersManagement = () => {
       const result = await api.resetSystemUserPassword(resettingPasswordUser.id);
       const email = resettingPasswordUser.email;
       setResettingPasswordUser(null);
-      setTempPasswordBanner({ email, temporaryPassword: result.temporaryPassword });
-      // Reset também reativa o login (sai de bloqueado/travado) e zera o contador de tentativas —
-      // recarrega pra refletir o novo status na tabela sem precisar adivinhar o valor localmente.
+      // Um login ainda `invited` não tem senha pra redefinir — o backend reenvia o convite em vez
+      // disso (`inviteUrl` presente); esta ação não fica visível pra esse status na UI (ver
+      // "Reenviar Convite"), mas o fallback continua correto se algo mudar do lado do backend.
+      if (result.inviteUrl) {
+        setUserNotice({ kind: 'invite', email, inviteUrl: result.inviteUrl, sent: result.sent });
+      } else {
+        setUserNotice({ kind: 'reset', email, sent: result.sent });
+      }
       await loadData();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível redefinir a senha deste usuário.');
+      setActionError(err instanceof Error ? err.message : 'Não foi possível enviar a redefinição de senha deste usuário.');
       setResettingPasswordUser(null);
     } finally {
       setIsResettingPassword(false);
@@ -557,6 +590,14 @@ const UsersManagement = () => {
                                 <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                                 Ativo
                               </span>
+                            ) : user.status === 'invited' ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                                title="Aguardando a pessoa aceitar o convite e definir a própria senha"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                Convite pendente
+                              </span>
                             ) : user.status === 'locked' ? (
                               <span
                                 className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
@@ -639,14 +680,30 @@ const UsersManagement = () => {
               <Pencil size={15} className="text-muted shrink-0" />
               Editar Perfil
             </button>
-            <button
-              type="button"
-              onClick={() => { closeActionsMenu(); setResettingPasswordUser(menuUser); }}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
-            >
-              <KeyRound size={15} className="text-muted shrink-0" />
-              Redefinir Senha
-            </button>
+            {menuUser.status === 'invited' ? (
+              <button
+                type="button"
+                onClick={() => { closeActionsMenu(); handleResendInvite(menuUser); }}
+                disabled={pendingUserId === menuUser.id}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left disabled:opacity-50"
+              >
+                {pendingUserId === menuUser.id ? (
+                  <Loader2 size={15} className="animate-spin shrink-0" />
+                ) : (
+                  <Send size={15} className="text-muted shrink-0" />
+                )}
+                Reenviar Convite
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { closeActionsMenu(); setResettingPasswordUser(menuUser); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
+              >
+                <KeyRound size={15} className="text-muted shrink-0" />
+                Enviar Redefinição de Senha
+              </button>
+            )}
             <button
               type="button"
               onClick={() => { closeActionsMenu(); handleToggleStatus(menuUser); }}
@@ -655,12 +712,12 @@ const UsersManagement = () => {
             >
               {pendingUserId === menuUser.id ? (
                 <Loader2 size={15} className="animate-spin shrink-0" />
-              ) : menuUser.status === 'active' ? (
-                <ShieldOff size={15} className="text-muted shrink-0" />
-              ) : (
+              ) : isBlockedStatus(menuUser.status) ? (
                 <ShieldCheck size={15} className="text-muted shrink-0" />
+              ) : (
+                <ShieldOff size={15} className="text-muted shrink-0" />
               )}
-              {menuUser.status === 'active' ? 'Bloquear Acesso' : 'Desbloquear Acesso'}
+              {isBlockedStatus(menuUser.status) ? 'Desbloquear Acesso' : 'Bloquear Acesso'}
             </button>
             <div className="my-1.5 border-t border-border/40" />
             <button
@@ -783,8 +840,8 @@ const UsersManagement = () => {
                 </div>
 
                 <p className="text-xs text-muted bg-secondary/20 border border-border/40 rounded-xl px-4 py-3 flex items-center gap-2">
-                  <KeyRound size={14} className="shrink-0" />
-                  Uma senha temporária será gerada automaticamente e exibida uma única vez após a criação.
+                  <Mail size={14} className="shrink-0" />
+                  Um convite será enviado por e-mail — a pessoa cria a própria senha pelo link (válido por 72 horas).
                 </p>
 
                 <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
@@ -1020,8 +1077,9 @@ const UsersManagement = () => {
         document.body
       )}
 
-      {/* Confirmação de redefinição de senha (17/09/2026) — explica o efeito (nova senha
-          temporária, sessões ativas encerradas) antes de gerar. */}
+      {/* Confirmação de envio de redefinição de senha ("Acesso e sessões", 26/09/2026 — antes gerava
+          uma senha temporária nova; agora manda um link por e-mail) — explica o efeito antes de
+          enviar. */}
       {resettingPasswordUser && createPortal(
         <AnimatePresence>
           <motion.div
@@ -1043,13 +1101,13 @@ const UsersManagement = () => {
                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
                   <KeyRound size={20} />
                 </div>
-                <h2 className="text-xl font-heading font-bold text-foreground">Redefinir senha deste login?</h2>
+                <h2 className="text-xl font-heading font-bold text-foreground">Enviar redefinição de senha para este login?</h2>
               </div>
               <p className="text-sm text-muted mb-2">
-                Uma nova senha temporária vai ser gerada para{' '}
-                <span className="font-medium text-foreground break-all">{resettingPasswordUser.email}</span>. A senha
-                atual deixa de funcionar, todas as sessões ativas desse login são encerradas, e ele será obrigado a
-                trocar a senha no próximo acesso — use isso se o usuário esqueceu a senha ou teve o login travado por
+                Um link de redefinição de senha vai ser enviado para{' '}
+                <span className="font-medium text-foreground break-all">{resettingPasswordUser.email}</span>. Nada muda
+                até a pessoa usar o link — ao redefinir, a senha atual deixa de funcionar e todas as sessões ativas
+                desse login são encerradas. Use isso se o usuário esqueceu a senha ou teve o login travado por
                 excesso de tentativas.
               </p>
               {actionError && (
@@ -1073,7 +1131,7 @@ const UsersManagement = () => {
                   className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
                 >
                   {isResettingPassword && <Loader2 size={16} className="animate-spin" />}
-                  {isResettingPassword ? 'Gerando...' : 'Redefinir Senha'}
+                  {isResettingPassword ? 'Enviando...' : 'Enviar Redefinição de Senha'}
                 </button>
               </div>
             </motion.div>
@@ -1082,9 +1140,10 @@ const UsersManagement = () => {
         document.body
       )}
 
-      {/* Banner: senha temporária (uma única exibição, fecha só por ação explícita) — reaproveitado
-          tanto pela criação de um login quanto pelo reset de senha de um já existente. */}
-      {tempPasswordBanner && createPortal(
+      {/* Aviso de convite/redefinição de senha ("Acesso e sessões", 26/09/2026 — substitui o antigo
+          banner de senha temporária), uma única exibição, fecha só por ação explícita. Reaproveitado
+          pela criação de um login, "Reenviar Convite" e "Enviar Redefinição de Senha". */}
+      {userNotice && createPortal(
         <AnimatePresence>
           <motion.div
             initial={{ opacity: 0 }}
@@ -1103,47 +1162,75 @@ const UsersManagement = () => {
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
               <div className="flex items-center gap-3 mb-4 mt-2">
                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                  <KeyRound size={20} />
+                  {userNotice.kind === 'invite' ? <Mail size={20} /> : <KeyRound size={20} />}
                 </div>
                 <h2 className="text-xl font-heading font-bold text-foreground">
-                  Senha temporária gerada
+                  {userNotice.kind === 'invite' ? 'Convite enviado' : 'Redefinição de senha enviada'}
                 </h2>
               </div>
 
-              <p className="text-sm text-muted mb-4">
-                Copie a senha temporária abaixo agora — ela não pode ser recuperada depois de fechar esta janela.
-                O usuário deve trocá-la no primeiro acesso.
-              </p>
+              {userNotice.kind === 'invite' ? (
+                <>
+                  {userNotice.sent ? (
+                    <p className="text-sm text-muted mb-4">
+                      Convite enviado para <span className="font-medium text-foreground break-all">{userNotice.email}</span>.
+                      A pessoa cria a própria senha pelo link (válido por 72 horas).
+                    </p>
+                  ) : userNotice.inviteUrl ? (
+                    <p className="text-sm text-muted mb-4">
+                      Não conseguimos confirmar o envio do e-mail para{' '}
+                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Copie o link
+                      abaixo e envie manualmente — ele é válido por 72 horas.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted mb-4">
+                      Não foi possível gerar o convite agora para{' '}
+                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Tente
+                      "Reenviar Convite" na lista em instantes.
+                    </p>
+                  )}
 
-              <div className="bg-secondary/20 border border-border/40 rounded-xl p-4 mb-4">
-                <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Login</p>
-                <p className="text-sm font-medium text-foreground mb-3 break-all">{tempPasswordBanner.email}</p>
-                <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Senha Temporária</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-base font-bold text-foreground bg-background border border-border/60 rounded-lg px-3 py-2 break-all">
-                    {tempPasswordBanner.temporaryPassword}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={handleCopyPassword}
-                    className={`shrink-0 p-2.5 rounded-lg border transition-colors ${
-                      copied
-                        ? 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400'
-                        : 'border-border/60 text-muted hover:text-primary hover:border-primary/40'
-                    }`}
-                    title="Copiar senha"
-                  >
-                    {copied ? <Check size={16} /> : <Copy size={16} />}
-                  </button>
-                </div>
-              </div>
+                  {userNotice.inviteUrl && (
+                    <div className="bg-secondary/20 border border-border/40 rounded-xl p-4 mb-4">
+                      <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Link do convite</p>
+                      <code className="block text-xs font-medium text-foreground bg-background border border-border/60 rounded-lg px-3 py-2 break-all mb-3">
+                        {userNotice.inviteUrl}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={handleCopyInviteLink}
+                        className={`w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm font-bold transition-colors ${
+                          copied
+                            ? 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400'
+                            : 'border-border/60 text-foreground hover:text-primary hover:border-primary/40'
+                        }`}
+                      >
+                        {copied ? <Check size={16} /> : <Copy size={16} />}
+                        {copied ? 'Link copiado!' : 'Copiar link do convite'}
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted mb-4">
+                  {userNotice.sent ? (
+                    <>Enviamos um link de redefinição para <span className="font-medium text-foreground break-all">{userNotice.email}</span>.</>
+                  ) : (
+                    <>
+                      Não conseguimos confirmar o envio do e-mail de redefinição para{' '}
+                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Tente novamente
+                      em instantes.
+                    </>
+                  )}
+                </p>
+              )}
 
               <button
                 type="button"
-                onClick={closeCredentialBanner}
+                onClick={closeUserNotice}
                 className="w-full py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm"
               >
-                Já copiei, fechar
+                {userNotice.kind === 'invite' && userNotice.inviteUrl ? 'Já copiei, fechar' : 'Fechar'}
               </button>
             </motion.div>
           </div>

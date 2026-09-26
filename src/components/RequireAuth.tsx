@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Loader2, WifiOff } from 'lucide-react';
-import { getCurrentUser, restoreSessionDetailed } from '../lib/auth';
+import { getCurrentUser, restoreSessionDetailed, subscribeCurrentUser, type CurrentUser } from '../lib/auth';
 import ForcedPasswordChange from './ForcedPasswordChange';
+import EmailVerificationRequired from './EmailVerificationRequired';
 
 // Intervalos entre novas tentativas quando o servidor não pôde responder (o último se repete).
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
@@ -24,15 +25,19 @@ const RequireAuth = () => {
   const location = useLocation();
   const [authState, setAuthState] = useState<AuthState>(() => (getCurrentUser() ? 'authenticated' : 'checking'));
   const [attempt, setAttempt] = useState(0);
-  // Espelha `currentUser.mustChangePassword` (login criado por um admin com
-  // senha temporária, ver UsersService.create()) — enquanto true, mostra
-  // ForcedPasswordChange no lugar do app inteiro.
-  const [mustChangePassword, setMustChangePassword] = useState(!!getCurrentUser()?.mustChangePassword);
+  // Espelha o usuário atual em memória (auth.ts) — usado só pra decidir entre ForcedPasswordChange/
+  // EmailVerificationRequired/Outlet abaixo. Assinar subscribeCurrentUser (em vez de copiar campos
+  // específicos pra um estado próprio, como antes) significa que qualquer ação que atualize o
+  // usuário global (changePassword(), o "Já confirmei" de EmailVerificationRequired via
+  // refreshCurrentUser()) já reavalia esta tela sozinha, sem round-trip extra aqui.
+  const [user, setUser] = useState<CurrentUser | null>(() => getCurrentUser());
   // Uma restauração de cada vez. Em dev, o React.StrictMode invoca o efeito
   // de mount duas vezes; duas chamadas concorrentes usariam o MESMO cookie de
   // refresh ainda não rotacionado, e o backend trata a reapresentação de um
   // token já rotacionado como replay (revoga a família inteira).
   const inFlight = useRef(false);
+
+  useEffect(() => subscribeCurrentUser(setUser), []);
 
   const tryRestore = useCallback(() => {
     if (inFlight.current) return;
@@ -40,7 +45,6 @@ const RequireAuth = () => {
     restoreSessionDetailed().then((result) => {
       inFlight.current = false;
       if (result.status === 'authenticated') {
-        setMustChangePassword(result.user.mustChangePassword);
         setAuthState('authenticated');
       } else if (result.status === 'unauthenticated') {
         setAuthState('unauthenticated');
@@ -52,9 +56,7 @@ const RequireAuth = () => {
   }, []);
 
   useEffect(() => {
-    const existing = getCurrentUser();
-    if (existing) {
-      setMustChangePassword(existing.mustChangePassword);
+    if (getCurrentUser()) {
       setAuthState('authenticated');
       return;
     }
@@ -95,8 +97,16 @@ const RequireAuth = () => {
       </div>
     );
   }
-  if (mustChangePassword) {
-    return <ForcedPasswordChange onDone={() => setMustChangePassword(false)} />;
+  if (user?.mustChangePassword) {
+    // changePassword() já atualiza o usuário global (setCurrentUser) ao ter sucesso — a assinatura
+    // acima reavalia esta tela sozinha; onDone só existe pra satisfazer a prop obrigatória.
+    return <ForcedPasswordChange onDone={() => undefined} />;
+  }
+  // Bloqueio de e-mail não confirmado ("Acesso e sessões", 26/09/2026) — só pra rotas do ERP
+  // (/app/*); /conta* continua liberado (é de lá que a pessoa também consegue reenviar/confirmar,
+  // ver Account.tsx). Prioridade: troca de senha forçada primeiro (checada acima).
+  if (user?.emailVerificationRequired && !user.emailVerified && location.pathname.startsWith('/app')) {
+    return <EmailVerificationRequired email={user.email} />;
   }
   return <Outlet />;
 };

@@ -838,7 +838,9 @@ interface ApiSystemUser {
   role: 'ADMIN' | 'EMPLOYEE';
   employeeId: string | null;
   modules: string[];
-  status: 'ACTIVE' | 'BLOCKED' | 'LOCKED';
+  // INVITED ("Acesso e sessões", 26/09/2026): login criado por um admin que ainda não aceitou o
+  // convite por e-mail (substitui a antiga senha temporária) — sem senha utilizável até aceitar.
+  status: 'ACTIVE' | 'BLOCKED' | 'LOCKED' | 'INVITED';
   hasFullPontoAccess: boolean;
   profileId: string | null;
 }
@@ -849,7 +851,7 @@ export interface SystemUser {
   role: 'admin' | 'employee';
   employeeId: string | null;
   modules: string[];
-  status: 'active' | 'blocked' | 'locked';
+  status: 'active' | 'blocked' | 'locked' | 'invited';
   hasFullPontoAccess: boolean;
   profileId: string | null;
 }
@@ -872,13 +874,17 @@ export async function listSystemUsers(): Promise<SystemUser[]> {
   return items.map(mapSystemUser);
 }
 
+// "Acesso e sessões" (26/09/2026): não devolve mais senha nenhuma — o login nasce `INVITED` e a
+// pessoa cria a própria senha por um link de convite (72h). `inviteUrl` é `null`/`sent: false` só
+// no caso raro do e-mail em si falhar ao ser preparado (o login já foi criado normalmente) — a UI
+// usa "Reenviar convite" pra tentar de novo.
 export async function createSystemUser(dto: {
   email: string;
   role: 'admin' | 'employee';
   employeeId?: string;
   profileId: string;
-}): Promise<{ user: SystemUser; temporaryPassword: string }> {
-  const res = await request<{ user: ApiSystemUser; temporaryPassword: string }>('/companies/me/users', {
+}): Promise<{ user: SystemUser; inviteUrl: string | null; sent: boolean }> {
+  const res = await request<{ user: ApiSystemUser; inviteUrl: string | null; sent: boolean }>('/companies/me/users', {
     method: 'POST',
     body: JSON.stringify({
       email: dto.email,
@@ -887,7 +893,7 @@ export async function createSystemUser(dto: {
       profileId: dto.profileId,
     }),
   });
-  return { user: mapSystemUser(res.user), temporaryPassword: res.temporaryPassword };
+  return { user: mapSystemUser(res.user), inviteUrl: res.inviteUrl, sent: res.sent };
 }
 
 // Substitui updateSystemUser()/updatePontoAccess() (Fase 2a, 19/09/2026) — Módulos e acesso de
@@ -905,11 +911,19 @@ export async function deleteSystemUser(id: string): Promise<void> {
   await request(`/companies/me/users/${id}`, { method: 'DELETE' });
 }
 
-// Redefinição de senha por um admin (17/09/2026) — gera uma senha temporária nova (mesmo padrão
-// da criação, devolvida uma única vez), reativa o login e zera o contador de tentativas erradas —
-// é o caminho de saída de um login LOCKED por excesso de tentativas.
-export async function resetSystemUserPassword(id: string): Promise<{ temporaryPassword: string }> {
-  return request<{ temporaryPassword: string }>(`/companies/me/users/${id}/reset-password`, { method: 'PATCH' });
+// Redefinição de senha por um admin — "Acesso e sessões" (26/09/2026): em vez de gerar uma senha
+// temporária, envia um link de redefinição pro e-mail do login (`{ sent }`); nada muda no login até
+// a pessoa de fato usar o link. Um login ainda `INVITED` não tem senha pra redefinir — o backend
+// reenvia o convite em vez disso (`{ sent, inviteUrl }`), mesmo efeito de resendSystemUserInvite().
+export async function resetSystemUserPassword(id: string): Promise<{ sent: boolean; inviteUrl?: string }> {
+  return request<{ sent: boolean; inviteUrl?: string }>(`/companies/me/users/${id}/reset-password`, { method: 'PATCH' });
+}
+
+// Só pra login ainda INVITED (400 "Este login já aceitou o convite." caso contrário) — reemite o
+// token de convite (o link anterior deixa de valer) e reenvia o e-mail; `inviteUrl` deixa o admin
+// copiar o link se o e-mail não chegar.
+export async function resendSystemUserInvite(id: string): Promise<{ inviteUrl: string; sent: boolean }> {
+  return request<{ inviteUrl: string; sent: boolean }>(`/companies/me/users/${id}/resend-invite`, { method: 'PATCH' });
 }
 
 export async function blockSystemUser(id: string): Promise<void> {
