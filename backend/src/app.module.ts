@@ -6,6 +6,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PlanGuard } from './plans/plan.guard';
+import { PlansModule } from './plans/plans.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { CompanyModule } from './company/company.module';
 import { RolesModule } from './roles/roles.module';
@@ -88,6 +89,7 @@ import { ProfilesModule } from './profiles/profiles.module';
     TimeAdjustmentsModule,
     TimeJustificationsModule,
     TenantMigrationModule,
+    PlansModule,
   ],
   providers: [
     // JwtAuthGuard já respeita @Public() (Task 3) — nega por padrão em toda

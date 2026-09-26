@@ -1,0 +1,77 @@
+import { PlansService } from './plans.service';
+
+describe('PlansService', () => {
+  let service: PlansService;
+  let prisma: any;
+
+  beforeEach(() => {
+    prisma = {
+      company: { findUniqueOrThrow: jest.fn() },
+      role: { count: jest.fn() },
+      employee: { count: jest.fn() },
+      user: { count: jest.fn() },
+    };
+    service = new PlansService(prisma);
+  });
+
+  it('devolve o plano atual, o uso (3 contagens) e o catálogo completo (4 itens) pra uma empresa GRATIS', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.role.count.mockResolvedValue(3);
+    prisma.employee.count.mockResolvedValue(7);
+    prisma.user.count.mockResolvedValue(1);
+
+    const result = await service.getMyPlan('company-1');
+
+    expect(result.current).toEqual({
+      tier: 'GRATIS',
+      label: 'Grátis',
+      limits: { maxRoles: 5, maxEmployees: 10, maxEmployeeLogins: 2 },
+    });
+    expect(result.usage).toEqual({ roles: 3, employees: 7, employeeLogins: 1 });
+    expect(result.catalog).toHaveLength(4);
+    expect(result.catalog.map((p: any) => p.tier)).toEqual(['GRATIS', 'BASICO', 'PRO', 'EMPRESARIAL']);
+    expect(result.catalog[0]).toEqual({
+      tier: 'GRATIS',
+      label: 'Grátis',
+      priceLabel: 'R$ 0',
+      modules: ['DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS'],
+      features: [],
+      limits: { maxRoles: 5, maxEmployees: 10, maxEmployeeLogins: 2 },
+    });
+  });
+
+  it('consulta as três contagens com o filtro certo (só ativo) escopado por empresa', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'PRO' });
+    prisma.role.count.mockResolvedValue(0);
+    prisma.employee.count.mockResolvedValue(0);
+    prisma.user.count.mockResolvedValue(0);
+
+    await service.getMyPlan('company-2');
+
+    expect(prisma.company.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'company-2' },
+      select: { planTier: true },
+    });
+    expect(prisma.role.count).toHaveBeenCalledWith({ where: { companyId: 'company-2', active: true } });
+    expect(prisma.employee.count).toHaveBeenCalledWith({ where: { companyId: 'company-2', status: 'ACTIVE' } });
+    expect(prisma.user.count).toHaveBeenCalledWith({
+      where: { companyId: 'company-2', role: 'EMPLOYEE', status: 'ACTIVE' },
+    });
+  });
+
+  it('devolve o plano atual/limites certos pra uma empresa EMPRESARIAL (tudo ilimitado)', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'EMPRESARIAL' });
+    prisma.role.count.mockResolvedValue(40);
+    prisma.employee.count.mockResolvedValue(300);
+    prisma.user.count.mockResolvedValue(60);
+
+    const result = await service.getMyPlan('company-3');
+
+    expect(result.current).toEqual({
+      tier: 'EMPRESARIAL',
+      label: 'Empresarial',
+      limits: { maxRoles: null, maxEmployees: null, maxEmployeeLogins: null },
+    });
+    expect(result.usage).toEqual({ roles: 40, employees: 300, employeeLogins: 60 });
+  });
+});

@@ -183,6 +183,22 @@ describe('AuthService', () => {
     expect(result.user.hasFullPontoAccess).toBe(true);
   });
 
+  // Task 4 (26/09/2026): mock antigo, sem `company` nenhum na linha (nenhuma include de
+  // planTier) — toPublicUser precisa devolver `plan: null` em vez de lançar, pra nunca quebrar um
+  // teste/call site que ainda não foi atualizado pra incluir a relação.
+  it('login exposes plan: null when the mocked user row has no company (planTier ausente)', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['DASHBOARD'], status: 'ACTIVE',
+      passwordHash: 'h', mustChangePassword: false, hasFullPontoAccess: true,
+    });
+    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+    prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+    const result = await service.login({ email: 'x@x.com', password: 'y' }, fakeRes);
+
+    expect(result.user.plan).toBeNull();
+  });
+
   // Achado C2 da revisão final (15/09/2026): `User.hasFullPontoAccess` nasce `true` pra TODA linha
   // (@default(true) no schema) e UsersService.create() nunca desliga isso pra um login EMPLOYEE —
   // então o JWT de um gerente EMPLOYEE carregava `true`, o frontend lia o booleano cru sem
@@ -447,6 +463,20 @@ describe('AuthService', () => {
       }));
       const result = await service.register({ ...baseRegisterDto }, fakeRes);
       expect(result.user.maxEmployeeLogins).toBeNull();
+    });
+
+    // Task 4 (26/09/2026): user.plan é o mesmo formato usado pela aba Assinatura/telas de upgrade —
+    // toda empresa nova nasce GRATIS (ver teste acima), então o `user` de register() precisa expor
+    // o plano Grátis completo, incluindo os módulos/recursos bloqueados com o plano mínimo que libera.
+    it('devolve user.plan com o plano Grátis completo (módulos, features vazias e itens bloqueados)', async () => {
+      const result = await service.register({ ...baseRegisterDto }, fakeRes);
+      expect(result.user.plan).toEqual({
+        tier: 'GRATIS',
+        label: 'Grátis',
+        modules: ['DASHBOARD', 'CLIENTES', 'RH_CARGOS', 'RH_FUNCIONARIOS'],
+        features: [],
+        locked: expect.objectContaining({ PONTO_REGISTRO: { tier: 'BASICO', label: 'Básico' } }),
+      });
     });
 
     it('PF sem fantasia usa o nome completo como nome de exibição e fonte do schema', async () => {

@@ -12,7 +12,7 @@ import { assertValidSchemaName } from '../prisma/tenant-schema.util';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { applyMigrations } from '../prisma/tenant-migration.util';
 import { normalizePhone } from '../common/phone.util';
-import { planLimit } from '../plans/plan-catalog';
+import { getPlan, lockedItemsFor, planLimit } from '../plans/plan-catalog';
 import { maskDocument, normalizeDocument, PersonType } from './document.util';
 import { pickCompanyIdentity } from './schema-name-picker.util';
 import { RegisterDto } from './dto/register.dto';
@@ -141,6 +141,19 @@ export class AuthService {
       // legada Company.maxEmployeeLogins (default de schema 10), que mostrava capacidade errada pra
       // uma empresa GRATIS (teto real 2, ver plan-catalog.ts). null = ilimitado/plano desconhecido.
       maxEmployeeLogins: company?.planTier ? planLimit(company.planTier as CompanyPlanTier, 'employeeLogins') : null,
+      // Planos grátis e pagos (Task 4, 26/09/2026): mesmo formato consumido pela aba Assinatura de
+      // Minha conta e por qualquer tela que precise desenhar cadeados de upgrade sem uma segunda
+      // chamada a GET /plans/me. `null` só pra mocks antigos de teste sem `company.planTier` — todo
+      // usuário real sempre tem uma Company com planTier (coluna NOT NULL, @default(GRATIS)).
+      plan: company?.planTier
+        ? {
+            tier: company.planTier as CompanyPlanTier,
+            label: getPlan(company.planTier as CompanyPlanTier).label,
+            modules: getPlan(company.planTier as CompanyPlanTier).modules,
+            features: getPlan(company.planTier as CompanyPlanTier).features,
+            locked: lockedItemsFor(company.planTier as CompanyPlanTier),
+          }
+        : null,
       name: user.name ?? null,
       personType: user.company?.personType ?? null,
       documentMasked: maskDocument(user.company?.personType ?? null, user.company?.document ?? null),
