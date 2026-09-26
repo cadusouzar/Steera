@@ -404,6 +404,51 @@ describe('AuthService', () => {
       expect(data.planTier).toBe('GRATIS');
     });
 
+    // Fix pós-revisão (26/09/2026): grava também o teto de logins do catálogo (GRATIS = 2) na
+    // criação da empresa — coluna legada (Company.maxEmployeeLogins), mantida só por consistência,
+    // já que nenhuma leitura de negócio depende mais dela (ver plan-limits.util.ts).
+    it('grava maxEmployeeLogins do catálogo (GRATIS = 2) na criação da empresa', async () => {
+      await service.register({ ...baseRegisterDto }, fakeRes);
+      const data = prisma.company.create.mock.calls[0][0].data;
+      expect(data.maxEmployeeLogins).toBe(2);
+    });
+
+    // Fix pós-revisão (26/09/2026): a Aba Assinatura do frontend usava maxEmployeeLogins direto da
+    // coluna legada (default de schema 10), mostrando capacidade errada pra uma empresa GRATIS (teto
+    // real 2, ver PLAN_CATALOG). toPublicUser precisa derivar do catálogo por planTier, nunca da
+    // coluna crua — os 3 testes abaixo forçam a linha mockada a carregar um valor de coluna
+    // DIFERENTE do valor correto do catálogo, pra provar que a derivação (não a coluna) decide.
+    it('devolve maxEmployeeLogins do catálogo (2) mesmo que a linha da empresa carregue 10 na coluna legada', async () => {
+      // `data` NÃO é espalhado aqui de propósito: a linha retornada precisa carregar
+      // maxEmployeeLogins: 10 (coluna legada, valor DIFERENTE do catálogo, 2) mesmo que o fix de
+      // "gravar o teto do catálogo em create()" tenha gravado 2 — só assim este teste prova que
+      // toPublicUser deriva de planTier, não da coluna crua da linha retornada.
+      prisma.company.create.mockImplementationOnce(async () => ({
+        id: 'companygratis123456789012', name: 'Padaria Central', planTier: 'GRATIS', maxEmployeeLogins: 10,
+        personType: 'PJ', document: null, legalName: 'x', tradeName: null,
+      }));
+      const result = await service.register({ ...baseRegisterDto }, fakeRes);
+      expect(result.user.maxEmployeeLogins).toBe(2);
+    });
+
+    it('devolve maxEmployeeLogins do catálogo (50) pra uma empresa PRO', async () => {
+      prisma.company.create.mockImplementationOnce(async () => ({
+        id: 'companypro123456789012345', name: 'Padaria Central', planTier: 'PRO', maxEmployeeLogins: 10,
+        personType: 'PJ', document: null, legalName: 'x', tradeName: null,
+      }));
+      const result = await service.register({ ...baseRegisterDto }, fakeRes);
+      expect(result.user.maxEmployeeLogins).toBe(50);
+    });
+
+    it('devolve maxEmployeeLogins null (ilimitado) pra uma empresa EMPRESARIAL', async () => {
+      prisma.company.create.mockImplementationOnce(async () => ({
+        id: 'companyemp123456789012345', name: 'Padaria Central', planTier: 'EMPRESARIAL', maxEmployeeLogins: 10,
+        personType: 'PJ', document: null, legalName: 'x', tradeName: null,
+      }));
+      const result = await service.register({ ...baseRegisterDto }, fakeRes);
+      expect(result.user.maxEmployeeLogins).toBeNull();
+    });
+
     it('PF sem fantasia usa o nome completo como nome de exibição e fonte do schema', async () => {
       await service.register(
         { ...baseRegisterDto, personType: 'PF', document: '529.982.247-25', legalName: 'Ana Souza', tradeName: undefined },

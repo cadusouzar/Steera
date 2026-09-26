@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { AppModule as AppModuleEnum, Prisma } from '@prisma/client';
+import { AppModule as AppModuleEnum, CompanyPlanTier, Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { join } from 'path';
 import { AuthorizationService } from '../authorization/authorization.service';
@@ -12,6 +12,7 @@ import { assertValidSchemaName } from '../prisma/tenant-schema.util';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { applyMigrations } from '../prisma/tenant-migration.util';
 import { normalizePhone } from '../common/phone.util';
+import { planLimit } from '../plans/plan-catalog';
 import { maskDocument, normalizeDocument, PersonType } from './document.util';
 import { pickCompanyIdentity } from './schema-name-picker.util';
 import { RegisterDto } from './dto/register.dto';
@@ -136,7 +137,10 @@ export class AuthService {
       permissions,
       companyName: user.company?.name ?? null,
       planTier: user.company?.planTier ?? null,
-      maxEmployeeLogins: user.company?.maxEmployeeLogins ?? null,
+      // Fix pós-revisão (26/09/2026): derivado do catálogo por planTier — nunca mais da coluna
+      // legada Company.maxEmployeeLogins (default de schema 10), que mostrava capacidade errada pra
+      // uma empresa GRATIS (teto real 2, ver plan-catalog.ts). null = ilimitado/plano desconhecido.
+      maxEmployeeLogins: company?.planTier ? planLimit(company.planTier as CompanyPlanTier, 'employeeLogins') : null,
       name: user.name ?? null,
       personType: user.company?.personType ?? null,
       documentMasked: maskDocument(user.company?.personType ?? null, user.company?.document ?? null),
@@ -276,6 +280,9 @@ export class AuthService {
               // PLAN_CATALOG em plan-catalog.ts. Já era o @default(GRATIS) da coluna, mas gravado
               // explicitamente aqui pra nunca depender silenciosamente do default do schema.
               planTier: 'GRATIS',
+              // Coluna legada, mantida só por consistência (fix pós-revisão, 26/09/2026) — nenhuma
+              // leitura de negócio depende mais dela (ver plan-limits.util.ts/toPublicUser acima).
+              maxEmployeeLogins: planLimit('GRATIS', 'employeeLogins') ?? 999_999,
               personType: dto.personType,
               document,
               legalName,

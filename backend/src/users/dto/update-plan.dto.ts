@@ -1,5 +1,5 @@
 import { IsEnum } from 'class-validator';
 
 export class UpdatePlanDto {
-  @IsEnum(['BASICO', 'PRO', 'EMPRESARIAL']) planTier!: 'BASICO' | 'PRO' | 'EMPRESARIAL';
+  @IsEnum(['GRATIS', 'BASICO', 'PRO', 'EMPRESARIAL']) planTier!: 'GRATIS' | 'BASICO' | 'PRO' | 'EMPRESARIAL';
 }
