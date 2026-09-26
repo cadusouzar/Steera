@@ -7,6 +7,7 @@ import { FriendlyThrottlerGuard } from '../src/auth/guards/friendly-throttler.gu
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { setCompanyPlan } from './plan.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -48,6 +49,7 @@ describe('Planos grátis e pagos — gate de módulo, limites e GET /plans/me (e
       .expect(201);
     adminToken = `Bearer ${res.body.accessToken}`;
     companyId = (await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }))).companyId;
+    await markEmailVerified(prisma, email);
   });
 
   afterAll(async () => {

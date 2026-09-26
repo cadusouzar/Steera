@@ -6,6 +6,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 import { ProfilesService } from '../src/profiles/profiles.service';
@@ -94,6 +95,7 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
     const founder = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
     companyId = founder.companyId;
     administradorGeralId = founder.profileId!;
+    await markEmailVerified(prisma, adminEmail);
 
     // Mesma precondição do teste de update(): remove `usuarios.gerenciar` do perfil protegido
     // "Administrador Geral" do fundador, pra ele não contar como "outro perfil que ainda concede
@@ -122,12 +124,19 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
   // profileId aqui é só pra passar na validação de create() — todo chamador desta função move o
   // login criado pra um profileId de teste específico logo em seguida (via prisma.user.update
   // direto), então qual perfil ele nasce com não importa pras asserções do teste.
+  //
+  // Aceita o convite na hora (senha descartável — nenhum teste deste arquivo loga com este login) —
+  // "Acesso e sessões" (26/09/2026): login criado por um admin nasce INVITED, e todo
+  // `countActiveHoldersOfUsuariosGerenciar()`/guard de último detentor abaixo só conta login
+  // ACTIVE. Sem aceitar, este login nunca contaria como "detentor", quebrando a precondição que
+  // todo teste deste arquivo monta.
   async function createAdmin(label: string): Promise<string> {
     const res = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
       .send({ email: `${label}-${runId}@test.com`, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
+    await acceptInvite(app, res.body.inviteUrl, 'senha-descartavel-123');
     return res.body.user.id as string;
   }
 

@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema, selectBypassingRls } from './tenant-physical-read.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -63,6 +64,8 @@ describe('Isolamento físico por schema — cross-tenant (e2e)', () => {
     companyBId = userB.companyId;
     schemaAName = await getTenantSchemaName(prisma, companyAId);
     schemaBName = await getTenantSchemaName(prisma, companyBId);
+    await markEmailVerified(prisma, emailA);
+    await markEmailVerified(prisma, emailB);
 
     await request(server)
       .post('/clients')

@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
@@ -71,6 +72,7 @@ describe('Trava do último detentor de usuarios.gerenciar (e2e)', () => {
     companyId = founder.companyId;
     founderId = founder.id;
     administradorGeralId = founder.profileId!;
+    await markEmailVerified(prisma, adminEmail);
   });
 
   afterEach(async () => {
@@ -91,12 +93,20 @@ describe('Trava do último detentor de usuarios.gerenciar (e2e)', () => {
   // authorization-profiles-screen), então "dois ADMINs detendo usuarios.gerenciar" hoje é
   // simplesmente dois logins no MESMO perfil que concede a permissão, o que basta pros três testes
   // que usam este helper (nenhum deles afirma nada sobre o segundo login ter um perfil PRÓPRIO).
+  //
+  // Aceita o convite na hora (senha descartável, nenhum teste loga com este login) — "Acesso e
+  // sessões" (26/09/2026): login criado por um admin nasce INVITED, e tanto
+  // `assertNotLastActiveAdmin` quanto `assertNotLastHolderOfPermission` só contam login ACTIVE.
+  // Sem aceitar, o segundo admin nunca contaria como "ainda ativo", e excluir/bloquear o FUNDADOR
+  // cairia sempre na trava de "último ADMIN ativo" genérica, nunca alcançando a trava específica de
+  // `usuarios.gerenciar` que este arquivo existe pra testar.
   async function createAdminLogin(): Promise<string> {
     const res = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
       .send({ email: `last-holder-second-${uniq()}@test.com`, role: 'ADMIN', profileId: administradorGeralId })
       .expect(201);
+    await acceptInvite(app, res.body.inviteUrl, 'senha-descartavel-123');
     return res.body.user.id;
   }
 

@@ -7,6 +7,7 @@ import { FriendlyThrottlerGuard } from '../src/auth/guards/friendly-throttler.gu
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody, randomValidCpf } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
@@ -56,6 +57,7 @@ describe('Edição da própria conta — PATCH /auth/me e /auth/me/company (e2e)
       .expect(201);
     adminToken = `Bearer ${res.body.accessToken}`;
     companyId = (await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }))).companyId;
+    await markEmailVerified(prisma, email);
   });
 
   afterAll(async () => {
@@ -147,17 +149,13 @@ describe('Edição da própria conta — PATCH /auth/me e /auth/me/company (e2e)
       .set('Authorization', adminToken)
       .send({ email: empEmail, role: 'EMPLOYEE', employeeId: employeeRes.body.id, profileId: admin.profileId })
       .expect(201);
+    await acceptInvite(app, createRes.body.inviteUrl, 'senha-propria-123');
     const firstLogin = await request(app.getHttpServer())
       .post('/auth/login')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ email: empEmail, password: createRes.body.temporaryPassword })
+      .send({ email: empEmail, password: 'senha-propria-123' })
       .expect(201);
-    const pwRes = await request(app.getHttpServer())
-      .patch('/auth/me/password')
-      .set('Authorization', `Bearer ${firstLogin.body.accessToken}`)
-      .send({ currentPassword: createRes.body.temporaryPassword, newPassword: 'senha-propria-123' })
-      .expect(200);
-    const empToken = `Bearer ${pwRes.body.accessToken}`;
+    const empToken = `Bearer ${firstLogin.body.accessToken}`;
 
     await request(app.getHttpServer()).patch('/auth/me').set('Authorization', empToken).send({ name: 'Funcionária' }).expect(200);
     await request(app.getHttpServer()).patch('/auth/me/company').set('Authorization', empToken).send(companyBody).expect(403);

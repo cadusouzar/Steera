@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { selectBypassingRls } from './tenant-physical-read.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -42,6 +43,7 @@ describe('Atomicidade de deactivate() após a migração pra forma interativa (e
     token = `Bearer ${registerRes.body.accessToken}`;
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }));
     companyId = user.companyId;
+    await markEmailVerified(prisma, email);
   });
 
   afterAll(async () => {

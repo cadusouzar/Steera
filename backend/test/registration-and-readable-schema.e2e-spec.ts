@@ -8,6 +8,7 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { TENANT_TABLE_NAMES } from '../src/prisma/tenant-table-names';
+import { markEmailVerified } from './access.util';
 import { buildRegisterBody, randomValidCnpj, randomValidCpf } from './register-body.util';
 import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema, selectBypassingRls } from './tenant-physical-read.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -69,6 +70,10 @@ describe('Cadastro ampliado + schema legível (e2e)', () => {
     if (res.status === 201) {
       const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: body.email as string } }));
       createdCompanyIds.push(user.companyId);
+      // "Acesso e sessões" (26/09/2026): alguns testes deste arquivo chamam POST /clients logo
+      // depois de registrar (EmailVerifiedGuard bloquearia) — confirmar aqui é inofensivo pros que
+      // não chegam a usar o token de negócio.
+      await markEmailVerified(prisma, body.email as string);
       return { res, companyId: user.companyId };
     }
     return { res, companyId: undefined };

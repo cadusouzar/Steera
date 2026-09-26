@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
@@ -41,6 +42,7 @@ describe('Profiles (e2e)', () => {
     accessToken = res.body.accessToken;
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
     companyId = user.companyId;
+    await markEmailVerified(prisma, adminEmail);
   });
 
   afterAll(async () => {
@@ -92,11 +94,15 @@ describe('Profiles (e2e)', () => {
     // corretamente a trava de "último detentor" que PATCH .../profile aplica (Task 8), o que
     // quebraria o propósito deste teste (validar a reatribuição em si, não a trava).
     const adminProfile = listRes.body.find((p: { name: string }) => p.name === 'Administrador Geral');
-    await request(app.getHttpServer())
+    const secondAdminRes = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ email: `profiles-e2e-admin2-${runId}@test.com`, role: 'ADMIN', profileId: adminProfile.id })
       .expect(201);
+    // "Acesso e sessões" (26/09/2026): login criado por um admin nasce INVITED, e a trava de
+    // "último detentor" só conta login ACTIVE — sem aceitar o convite, este segundo admin não
+    // contaria como "ainda detentor", derrubando o propósito do teste (comentário acima).
+    await acceptInvite(app, secondAdminRes.body.inviteUrl, 'senha-segundo-admin-123');
 
     // Fundador tenta atribuir-se a este perfil pra testar o bloqueio de exclusão em uso.
     const founder = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));

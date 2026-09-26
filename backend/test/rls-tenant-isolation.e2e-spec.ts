@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
@@ -75,6 +76,8 @@ describe('RLS backstop: concurrent cross-tenant isolation (e2e)', () => {
     const userB = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: emailB } }));
     companyAId = userA.companyId;
     companyBId = userB.companyId;
+    await markEmailVerified(prisma, emailA);
+    await markEmailVerified(prisma, emailB);
 
     // Seed each company with a handful of distinctively-named clients, all
     // through the real HTTP API (not a direct Prisma call) so this exercises

@@ -8,6 +8,7 @@ import { getPermissionDefinition } from '../src/permissions/permission-catalog';
 import { MODULE_TO_PERMISSIONS } from '../src/permissions/profile-signature.util';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { setCompanyPlan } from './plan.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -57,6 +58,7 @@ async function setupFixture(companyName: string, adminEmail: string): Promise<Fi
 
   const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
   const companyId = user.companyId;
+  await markEmailVerified(prisma, adminEmail);
   // Planos grátis e pagos (26/09/2026): empresa nova nasce GRATIS (sem PONTO_REGISTRO/
   // PONTO_ADMINISTRACAO; teto de 2 logins de funcionário ativos) — este arquivo testa módulos
   // granulares por Perfil, não plano, e cria vários logins EMPLOYEE por describe. Sobe pra
@@ -132,23 +134,17 @@ async function createLoginAndLogin(f: Fixture, modules: string[]) {
     .set('Authorization', f.adminToken)
     .send({ email, role: 'EMPLOYEE', employeeId: empRes.body.id, profileId: profileRes.body.id })
     .expect(201);
+  // "Acesso e sessões" (26/09/2026): login criado por um admin nasce INVITED (convite por e-mail,
+  // sem senha temporária) — aceitar o convite já define a senha de verdade e ativa o login (sem
+  // mustChangePassword pendente), então basta logar em seguida com ela.
+  await acceptInvite(f.app, loginRes.body.inviteUrl, 'senha-propria-123');
   const authRes = await request(f.app.getHttpServer())
     .post('/auth/login')
     .set('x-requested-with', 'XMLHttpRequest')
-    .send({ email, password: loginRes.body.temporaryPassword })
+    .send({ email, password: 'senha-propria-123' })
     .expect(201);
 
-  // Todo login criado por um admin nasce com mustChangePassword: true — JwtAuthGuard bloqueia
-  // QUALQUER rota de negócio (independente de módulo) enquanto isso não for resolvido. Sem trocar
-  // a senha aqui, todo teste abaixo tomaria 403 por esse motivo, nunca chegando a exercitar o
-  // ModulesGuard de verdade.
-  const changeRes = await request(f.app.getHttpServer())
-    .patch('/auth/me/password')
-    .set('Authorization', `Bearer ${authRes.body.accessToken}`)
-    .send({ currentPassword: loginRes.body.temporaryPassword, newPassword: 'senha-propria-123' })
-    .expect(200);
-
-  return { token: `Bearer ${changeRes.body.accessToken}`, employeeId: empRes.body.id };
+  return { token: `Bearer ${authRes.body.accessToken}`, employeeId: empRes.body.id };
 }
 
 // Cobre o motivo de existir da reforma de módulos de 17/09/2026: dar pra criar um login que só

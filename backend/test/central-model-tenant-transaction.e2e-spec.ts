@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { setCompanyPlan } from './plan.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -61,6 +62,7 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
     // parte, mesmo padrão já usado em profiles-shared-permission-guard.e2e-spec.ts/
     // profiles-reassign-and-delete-guard.e2e-spec.ts.
     administradorGeralId = user.profileId!;
+    await markEmailVerified(prisma, adminEmail);
     // Planos grátis e pagos (26/09/2026): empresa nova nasce GRATIS, sem PONTO_ADMINISTRACAO — este
     // arquivo exercita /employees/:id/time-events/correct e /employees/:id/time-summary, que exigem
     // esse módulo (ver comentário em EmployeesController). Nada aqui testa plano, então sobe pra
@@ -132,18 +134,24 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
       .expect(201);
     const empUserId = loginRes.body.user.id;
 
+    // "Acesso e sessões" (26/09/2026): o login nasce INVITED, sem senha conhecida (o convite
+    // substituiu a antiga senha temporária fixa) — pra provar o 403 de bloqueio com a senha CERTA
+    // (ver comentário abaixo), o convite precisa ser aceito ANTES do bloqueio, definindo uma senha
+    // conhecida.
+    await acceptInvite(app, loginRes.body.inviteUrl, 'senha-propria-do-bloqueado-123');
+
     await request(app.getHttpServer())
       .patch(`/companies/me/users/${empUserId}/block`)
       .set('Authorization', adminToken)
       .expect(204);
 
     // 403 com mensagem específica, não mais o 401 genérico — mudança da auditoria de segurança de
-    // 17/09/2026 (ver AuthService.login()): a senha aqui está CORRETA (é a temporária de criação),
-    // então é seguro revelar que a conta está bloqueada.
+    // 17/09/2026 (ver AuthService.login()): a senha aqui está CORRETA (a que o próprio login
+    // definiu ao aceitar o convite), então é seguro revelar que a conta está bloqueada.
     const res = await request(app.getHttpServer())
       .post('/auth/login')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ email: empEmail, password: 'Mudar@123' })
+      .send({ email: empEmail, password: 'senha-propria-do-bloqueado-123' })
       .expect(403);
     expect(res.body.message).toMatch(/bloqueado/i);
   });

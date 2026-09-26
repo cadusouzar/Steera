@@ -6,6 +6,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 import { ProfilesService } from '../src/profiles/profiles.service';
@@ -96,6 +97,7 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     const founder = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
     companyId = founder.companyId;
     administradorGeralId = founder.profileId!;
+    await markEmailVerified(prisma, adminEmail);
 
     // Precondição do cenário de desastre: tira `ponto.administrar` do perfil protegido do fundador
     // (mutado direto no banco — perfil protegido não é editável por `update()`), pra ele deixar de
@@ -123,14 +125,20 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     await app.close();
   });
 
-  async function createAdmin(label: string, profileId = administradorGeralId) {
+  // Aceita o convite na hora, com uma senha padrão (sobrescrevível pelos 3 chamadores que de fato
+  // precisam logar com este login) — "Acesso e sessões" (26/09/2026): login criado por um admin
+  // nasce INVITED, e `countFullPontoAdmins()`/todo guard de último detentor abaixo só conta login
+  // ACTIVE. Sem aceitar, este login nunca contaria como "detentor", quebrando a precondição que
+  // praticamente todo teste deste arquivo monta.
+  async function createAdmin(label: string, profileId = administradorGeralId, password = 'senha-padrao-123456') {
     const email = `${label}-${runId}@test.com`;
     const res = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)
       .send({ email, role: 'ADMIN', profileId })
       .expect(201);
-    return { id: res.body.user.id as string, email, temporaryPassword: res.body.temporaryPassword as string };
+    await acceptInvite(app, res.body.inviteUrl, password);
+    return { id: res.body.user.id as string, email, password };
   }
 
   // Via a API de modelo do Prisma (nunca `$queryRawUnsafe`) — mesmo motivo já documentado nos
@@ -228,21 +236,15 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     const restrito = await runWithTenant(companyId, () =>
       profiles.create(companyId, { name: 'Admin Restrito no Ponto', grants: PONTO_DE_EQUIPE }),
     );
-    const restrictedAdmin = await createAdmin('restrito-http', restrito.id);
+    const restrictedAdmin = await createAdmin('restrito-http', restrito.id, 'senha-propria-12345');
 
-    // Login real + troca da senha temporária (todo login criado por admin nasce com
-    // mustChangePassword: true, e o JwtAuthGuard bloqueia qualquer rota até isso ser resolvido).
+    // O convite já foi aceito dentro de createAdmin() — só loga.
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ email: restrictedAdmin.email, password: restrictedAdmin.temporaryPassword })
+      .send({ email: restrictedAdmin.email, password: restrictedAdmin.password })
       .expect(201);
-    const changeRes = await request(app.getHttpServer())
-      .patch('/auth/me/password')
-      .set('Authorization', `Bearer ${loginRes.body.accessToken}`)
-      .send({ currentPassword: restrictedAdmin.temporaryPassword, newPassword: 'senha-propria-12345' })
-      .expect(200);
-    const restrictedToken = `Bearer ${changeRes.body.accessToken}`;
+    const restrictedToken = `Bearer ${loginRes.body.accessToken}`;
 
     // O token reflete a derivação do Perfil: ADMIN, porém SEM acesso total ao Ponto.
     // (`PATCH /auth/me/password` devolve só `accessToken` — o `user` vem de `/auth/me`.)
@@ -330,18 +332,13 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     );
     expect(autoPromocao.isProtected).toBe(false); // nada protege o próprio perfil dele
 
-    const selfPromoter = await createAdmin('auto-promocao', autoPromocao.id);
+    const selfPromoter = await createAdmin('auto-promocao', autoPromocao.id, 'senha-propria-54321');
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ email: selfPromoter.email, password: selfPromoter.temporaryPassword })
+      .send({ email: selfPromoter.email, password: selfPromoter.password })
       .expect(201);
-    const changeRes = await request(app.getHttpServer())
-      .patch('/auth/me/password')
-      .set('Authorization', `Bearer ${loginRes.body.accessToken}`)
-      .send({ currentPassword: selfPromoter.temporaryPassword, newPassword: 'senha-propria-54321' })
-      .expect(200);
-    const selfToken = `Bearer ${changeRes.body.accessToken}`;
+    const selfToken = `Bearer ${loginRes.body.accessToken}`;
 
     const meRes = await request(app.getHttpServer())
       .get('/auth/me')
@@ -381,23 +378,18 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
   // NOVO: `UsersService.create()` derivava `hasFullPontoAccess` do perfil escolhido sem gate
   // nenhum. Sequência do ataque, três chamadas comuns: criar um Perfil com
   // `ponto.administrar@EMPRESA` (inofensivo sozinho), criar um login ADMIN novo apontando pra ele
-  // (já nasce com acesso total), e entrar nele com a senha temporária fixa ('Mudar@123').
+  // (já nasce com acesso total), e entrar nele aceitando o próprio convite por e-mail.
   it('BARRA com 404 um ADMIN restrito CRIANDO um login ADMIN novo com acesso total', async () => {
     const restrito = await runWithTenant(companyId, () =>
       profiles.create(companyId, { name: 'Restrito Criador', grants: PONTO_DE_EQUIPE }),
     );
-    const creator = await createAdmin('criador-restrito', restrito.id);
+    const creator = await createAdmin('criador-restrito', restrito.id, 'senha-propria-98765');
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
       .set('x-requested-with', 'XMLHttpRequest')
-      .send({ email: creator.email, password: creator.temporaryPassword })
+      .send({ email: creator.email, password: creator.password })
       .expect(201);
-    const changeRes = await request(app.getHttpServer())
-      .patch('/auth/me/password')
-      .set('Authorization', `Bearer ${loginRes.body.accessToken}`)
-      .send({ currentPassword: creator.temporaryPassword, newPassword: 'senha-propria-98765' })
-      .expect(200);
-    const creatorToken = `Bearer ${changeRes.body.accessToken}`;
+    const creatorToken = `Bearer ${loginRes.body.accessToken}`;
 
     // Passo 1 do ataque: criar o perfil de acesso total. Permitido de propósito — um perfil sem
     // ninguém atribuído não concede nada a ninguém.

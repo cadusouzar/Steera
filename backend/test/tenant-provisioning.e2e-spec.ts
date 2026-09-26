@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema } from './tenant-physical-read.util';
 import { buildRegisterBody } from './register-body.util';
 import { setCompanyPlan } from './plan.util';
@@ -143,6 +144,7 @@ describe('Provisionamento de tenant novo (e2e)', () => {
     const tokenA = `Bearer ${registerRes.body.accessToken}`;
     const pontoUser = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: pontoEmail } }));
     const pontoCompanyId = pontoUser.companyId;
+    await markEmailVerified(prisma, pontoEmail);
 
     try {
       // Planos grátis e pagos (26/09/2026): empresa nova nasce GRATIS, sem PONTO_REGISTRO/

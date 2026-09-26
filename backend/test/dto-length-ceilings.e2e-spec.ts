@@ -3,10 +3,13 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 
 describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
   const runId = Date.now();
 
   beforeAll(async () => {
@@ -15,6 +18,7 @@ describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
     app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
+    prisma = app.get(PrismaService);
   });
 
   afterAll(async () => {
@@ -56,6 +60,7 @@ describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
       .send(buildRegisterBody({ companyName: 'Long Text Co', email: `longtext-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     const token = `Bearer ${reg.body.accessToken}`;
+    await markEmailVerified(prisma, `longtext-${runId}@test.com`);
 
     const client = await request(app.getHttpServer())
       .post('/clients')
@@ -77,6 +82,7 @@ describe('Tetos de tamanho/valor em DTOs (e2e)', () => {
       .send(buildRegisterBody({ companyName: 'Big Amount Co', email: `bigamount-${runId}@test.com`, password: 'senha-de-teste-12345' }))
       .expect(201);
     const token = `Bearer ${reg.body.accessToken}`;
+    await markEmailVerified(prisma, `bigamount-${runId}@test.com`);
 
     const client = await request(app.getHttpServer())
       .post('/clients')

@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { assertRowExistsInTenantSchema, selectBypassingRls } from './tenant-physical-read.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -44,6 +45,7 @@ describe('Percurso completo — login, criar, listar, editar, desativar (e2e, se
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }));
     companyId = user.companyId;
     schemaName = await getTenantSchemaName(prisma, companyId);
+    await markEmailVerified(prisma, email);
   });
 
   afterAll(async () => {

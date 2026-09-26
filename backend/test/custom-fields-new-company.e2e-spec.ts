@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
@@ -38,6 +39,7 @@ describe('Empresa nova nunca herda campos personalizados de outra empresa (e2e)'
     tokenOld = `Bearer ${regOld.body.accessToken}`;
     const userOld = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: `cf-old-${runId}@test.com` } }));
     companyOldId = userOld.companyId;
+    await markEmailVerified(prisma, `cf-old-${runId}@test.com`);
 
     // Empresa "antiga" cria vários campos personalizados em Clientes antes da empresa nova existir.
     for (const displayName of ['Segmento', 'Código interno', 'Cliente VIP']) {
@@ -69,6 +71,7 @@ describe('Empresa nova nunca herda campos personalizados de outra empresa (e2e)'
     tokenNew = `Bearer ${regNew.body.accessToken}`;
     const userNew = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: `cf-new-${runId}@test.com` } }));
     companyNewId = userNew.companyId;
+    await markEmailVerified(prisma, `cf-new-${runId}@test.com`);
 
     const activeFields = await request(app.getHttpServer())
       .get('/custom-fields/active?entity=client')

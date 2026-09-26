@@ -17,6 +17,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 // `runWithTenant(e2eCompanyId, ...)` instead, since this suite already knows
 // which company it registered.
 import { runAsSystem, runWithTenant } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
@@ -73,6 +74,10 @@ describe('QuickFlow backend (e2e)', () => {
 
     const e2eUser = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: e2eEmail } }));
     e2eCompanyId = e2eUser.companyId;
+    // "Acesso e sessões" (26/09/2026): toda empresa nova nasce com e-mail não confirmado, e
+    // EmailVerifiedGuard bloqueia qualquer rota de negócio (POST /clients, etc.) até isso ser
+    // resolvido — este arquivo testa outra coisa, então confirma direto no banco.
+    await markEmailVerified(prisma, e2eEmail);
   });
 
   afterAll(async () => {

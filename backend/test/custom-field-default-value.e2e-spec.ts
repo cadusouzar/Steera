@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
@@ -44,6 +45,7 @@ describe('Valor padrão de campo personalizado — criar, editar e remover (e2e)
     token = `Bearer ${reg.body.accessToken}`;
     const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: `def-value-${runId}@test.com` } }));
     companyId = user.companyId;
+    await markEmailVerified(prisma, `def-value-${runId}@test.com`);
   });
 
   afterAll(async () => {

@@ -7,6 +7,7 @@ import { FriendlyThrottlerGuard } from '../src/auth/guards/friendly-throttler.gu
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
+import { markEmailVerified } from './access.util';
 import { selectBypassingRls } from './tenant-physical-read.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -81,6 +82,10 @@ describe('Teste de stress — múltiplas empresas reais, concorrência real (e2e
       const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }));
       companyIds.push(user.companyId);
       schemaNames.set(user.companyId, await getTenantSchemaName(prisma, user.companyId));
+      // "Acesso e sessões" (26/09/2026): POST /clients abaixo exige e-mail confirmado
+      // (EmailVerifiedGuard) — este teste mede capacidade de conexão/roteamento, não o fluxo de
+      // confirmação, então confirma direto no banco pra cada empresa registrada.
+      await markEmailVerified(prisma, email);
     }
 
     const startedAt = Date.now();
