@@ -6,6 +6,7 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { buildRegisterBody } from './register-body.util';
+import { setCompanyPlan } from './plan.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
@@ -60,6 +61,11 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
     // parte, mesmo padrão já usado em profiles-shared-permission-guard.e2e-spec.ts/
     // profiles-reassign-and-delete-guard.e2e-spec.ts.
     administradorGeralId = user.profileId!;
+    // Planos grátis e pagos (26/09/2026): empresa nova nasce GRATIS, sem PONTO_ADMINISTRACAO — este
+    // arquivo exercita /employees/:id/time-events/correct e /employees/:id/time-summary, que exigem
+    // esse módulo (ver comentário em EmployeesController). Nada aqui testa plano, então sobe pra
+    // EMPRESARIAL antes de qualquer chamada.
+    await setCompanyPlan(prisma, companyId, 'EMPRESARIAL');
   });
 
   afterAll(async () => {

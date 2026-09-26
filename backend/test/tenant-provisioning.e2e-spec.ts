@@ -7,6 +7,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { assertRowAbsentFromPublicSchema, assertRowExistsInTenantSchema } from './tenant-physical-read.util';
 import { buildRegisterBody } from './register-body.util';
+import { setCompanyPlan } from './plan.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
@@ -144,6 +145,10 @@ describe('Provisionamento de tenant novo (e2e)', () => {
     const pontoCompanyId = pontoUser.companyId;
 
     try {
+      // Planos grátis e pagos (26/09/2026): empresa nova nasce GRATIS, sem PONTO_REGISTRO/
+      // PONTO_ADMINISTRACAO — este teste é sobre roteamento físico de schema, não sobre plano, então
+      // sobe a empresa pra EMPRESARIAL antes de bater ponto/mexer nas configurações.
+      await setCompanyPlan(prisma, pontoCompanyId, 'EMPRESARIAL');
       // O fundador (criado via /auth/register) nunca tem um Employee vinculado por padrão —
       // precisa criar um Cargo, um Employee, e se auto-vincular antes de bater o próprio ponto.
       const roleRes = await request(server)

@@ -9,6 +9,7 @@ import { MODULE_TO_PERMISSIONS } from '../src/permissions/profile-signature.util
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
 import { buildRegisterBody } from './register-body.util';
+import { setCompanyPlan } from './plan.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 
 function sys<T>(fn: () => Promise<T>): Promise<T> {
@@ -56,6 +57,11 @@ async function setupFixture(companyName: string, adminEmail: string): Promise<Fi
 
   const user = await sys(() => prisma.user.findUniqueOrThrow({ where: { email: adminEmail } }));
   const companyId = user.companyId;
+  // Planos grátis e pagos (26/09/2026): empresa nova nasce GRATIS (sem PONTO_REGISTRO/
+  // PONTO_ADMINISTRACAO; teto de 2 logins de funcionário ativos) — este arquivo testa módulos
+  // granulares por Perfil, não plano, e cria vários logins EMPLOYEE por describe. Sobe pra
+  // EMPRESARIAL (todos os módulos, sem limite de login) antes de qualquer outra chamada.
+  await setCompanyPlan(prisma, companyId, 'EMPRESARIAL');
 
   const roleRes = await request(app.getHttpServer())
     .post('/roles')
