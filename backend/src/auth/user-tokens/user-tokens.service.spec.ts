@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { UserTokensService } from './user-tokens.service';
+import { INVALID_OR_EXPIRED_MESSAGE, UserTokensService } from './user-tokens.service';
 
 describe('UserTokensService', () => {
   const prisma = { userToken: { updateMany: jest.fn(), create: jest.fn(), findUnique: jest.fn() } } as any;
@@ -40,5 +40,13 @@ describe('UserTokensService', () => {
     prisma.userToken.findUnique.mockResolvedValue(found);
     prisma.userToken.updateMany.mockResolvedValue(updated);
     await expect(service.consume('raw', 'INVITE')).rejects.toThrow('Link inválido ou expirado. Peça um novo.');
+  });
+});
+
+// Fix round 1 (Task 7): mensagem única exportada — AuthService (reset de INVITED, aceite de convite
+// de login não-INVITED) reaproveita esta constante em vez de duplicar o texto.
+describe('INVALID_OR_EXPIRED_MESSAGE', () => {
+  it('é a mensagem genérica de link inválido/expirado', () => {
+    expect(INVALID_OR_EXPIRED_MESSAGE).toBe('Link inválido ou expirado. Peça um novo.');
   });
 });

@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma, UserStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
@@ -11,7 +11,7 @@ import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { assertNotLastAdminWithFullPontoAccess, assertNotLastHolderOfPermission } from './last-permission-holder.util';
 import { planLimit } from '../plans/plan-catalog';
-import { assertBelowPlanLimit } from '../plans/plan-limits.util';
+import { assertBelowPlanLimit, PLAN_COUNTED_LOGIN_STATUSES } from '../plans/plan-limits.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { InviteMailer } from '../auth/user-tokens/invite-mailer';
 import { UserTokensService } from '../auth/user-tokens/user-tokens.service';
@@ -39,10 +39,6 @@ const SAFE_USER_SELECT = {
   updatedAt: true,
 } as const;
 
-// Convite pendente conta no teto de logins do plano ("Acesso e sessões", 26/09/2026) — senão dava pra
-// convidar além do limite e só "ativar" depois, quando cada um aceitasse.
-const PLAN_COUNTED_STATUSES: UserStatus[] = ['ACTIVE', 'INVITED'];
-
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -56,7 +52,7 @@ export class UsersService {
   ) {}
 
   private countPlanEmployeeLogins(companyId: string): Promise<number> {
-    return this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: { in: PLAN_COUNTED_STATUSES } } });
+    return this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: { in: PLAN_COUNTED_LOGIN_STATUSES } } });
   }
 
   // Nome da empresa (vai no assunto/corpo do convite) + emissão/envio. Rota autenticada de ADMIN: o
@@ -251,9 +247,18 @@ export class UsersService {
     // admin) quanto a trava temporária por excesso de senha errada (lockedUntil, ver
     // AuthService.login(); LOCKED é o legado disso): sem zerar, o login voltaria a travar na primeira
     // senha errada seguinte, ou continuaria travado até lockedUntil expirar.
+    //
+    // Um convite pendente bloqueado e depois desbloqueado volta a INVITED, não ACTIVE (senão ficaria
+    // ACTIVE com o hash aleatório inutilizável de create(), fora do fluxo de aceite). block() perde o
+    // status INVITED, então o marcador de "nunca aceitou o convite" é: EMPLOYEE + emailVerifiedAt
+    // null + emailVerificationRequired false. Aceitar o convite sempre seta emailVerifiedAt;
+    // fundadores têm emailVerificationRequired true; logins legados foram backfillados como
+    // confirmados — nenhum desses cai aqui.
+    const neverAcceptedInvite =
+      user.role === 'EMPLOYEE' && user.emailVerifiedAt === null && user.emailVerificationRequired === false;
     await this.prisma.user.update({
       where: { id: userId },
-      data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
+      data: { status: neverAcceptedInvite ? 'INVITED' : 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
     });
   }
 
@@ -373,13 +378,9 @@ export class UsersService {
       return { sent, inviteUrl };
     }
 
-    // Planos grátis e pagos (26/09/2026): mantido do fluxo antigo (que reativava o login). O reset
-    // em si não muda mais o status, mas um login LOCKED legado volta a ACTIVE sozinho no próximo
-    // login certo (AuthService.login) — então entregar a ele uma senha nova ainda contornaria o teto
-    // de logins de funcionário. Só relevante se o login não está ACTIVE; ADMIN nunca é checado.
-    if (user.role === 'EMPLOYEE' && user.status !== 'ACTIVE') {
-      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () => this.countPlanEmployeeLogins(companyId));
-    }
+    // Sem checagem de teto do plano aqui (fix round 1): o reset não reativa nada, só manda um e-mail —
+    // a única reativação real é unblock(), que checa. Conhecido e fora de escopo: um login LOCKED
+    // legado volta a ACTIVE sozinho no próximo login certo (AuthService.login) sem passar pelo teto.
 
     const raw = await this.userTokens.issue(user.id, 'PASSWORD_RESET');
     const sent = await this.email.send(

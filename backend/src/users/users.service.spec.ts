@@ -416,6 +416,37 @@ describe('UsersService', () => {
     });
   });
 
+  // Fix round 1: um convite pendente bloqueado e depois desbloqueado volta a INVITED (não ACTIVE com
+  // um hash aleatório inutilizável). Marcador de "nunca aceitou o convite": EMPLOYEE,
+  // emailVerifiedAt null e emailVerificationRequired false.
+  it('unblock restores INVITED (not ACTIVE) for a BLOCKED employee that never accepted its invite', async () => {
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: false,
+    });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
+    prisma.user.count.mockResolvedValue(0);
+    await service.unblock('c1', 'u1');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { status: 'INVITED', failedLoginAttempts: 0, lockedUntil: null },
+    });
+  });
+
+  it.each([
+    ['accepted invite (emailVerifiedAt set)', { role: 'EMPLOYEE', emailVerifiedAt: new Date(), emailVerificationRequired: false }],
+    ['founder-style login (verification required)', { role: 'EMPLOYEE', emailVerifiedAt: null, emailVerificationRequired: true }],
+    ['ADMIN login', { role: 'ADMIN', emailVerifiedAt: null, emailVerificationRequired: false }],
+  ])('unblock restores ACTIVE for a BLOCKED %s', async (_label, fields) => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', status: 'BLOCKED', ...fields });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
+    prisma.user.count.mockResolvedValue(0);
+    await service.unblock('c1', 'u1');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
+    });
+  });
+
   // INVITED já conta no limite e ainda não tem senha — "desbloquear" só limpa a trava temporária,
   // nunca promove um convite pendente a ACTIVE (com um hash inutilizável e sem e-mail confirmado).
   it('unblock keeps an INVITED login INVITED (only clears the temporary lock) and skips the plan check', async () => {
@@ -518,20 +549,17 @@ describe('UsersService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
-    // Um login LOCKED legado volta a ACTIVE sozinho no próximo login certo (AuthService.login) — então
-    // mandar o link pra ele ainda precisa respeitar o teto do plano, como antes.
-    it('rejects a blocked/LOCKED EMPLOYEE login once the GRATIS plan limit (2) is reached, counting ACTIVE + INVITED', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'LOCKED' });
+    // Fix round 1: o reset não reativa nada (só manda um e-mail), então nunca checa o teto do plano —
+    // nem pra um EMPLOYEE BLOCKED/LOCKED de uma empresa já no limite.
+    it.each(['BLOCKED', 'LOCKED'])('sends the reset e-mail to a %s EMPLOYEE even at the GRATIS plan cap (no plan check)', async (status) => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', role: 'EMPLOYEE', status });
       prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
       prisma.user.count.mockResolvedValue(2);
-      await expect(service.resetPassword('c1', 'u1')).rejects.toThrow(
-        'Limite do plano Grátis: até 2 logins de funcionário ativos. Faça upgrade para cadastrar mais.',
-      );
-      expect(prisma.user.count).toHaveBeenCalledWith({
-        where: { companyId: 'c1', role: 'EMPLOYEE', status: { in: ['ACTIVE', 'INVITED'] } },
-      });
-      expect(userTokens.issue).not.toHaveBeenCalled();
-      expect(email.send).not.toHaveBeenCalled();
+      await expect(service.resetPassword('c1', 'u1')).resolves.toEqual({ sent: true });
+      expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.user.count).not.toHaveBeenCalled();
+      expect(userTokens.issue).toHaveBeenCalledWith('u1', 'PASSWORD_RESET');
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
     it('does not check the plan limit for an already-ACTIVE EMPLOYEE login', async () => {

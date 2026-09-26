@@ -1,6 +1,12 @@
 import { ForbiddenException } from '@nestjs/common';
-import { CompanyPlanTier } from '@prisma/client';
+import { CompanyPlanTier, UserStatus } from '@prisma/client';
 import { planLimit, planLimitMessage, PlanLimitKind } from './plan-catalog';
+
+// Status de login EMPLOYEE que ocupam vaga no teto `employeeLogins` do plano ("Acesso e sessões",
+// 26/09/2026): ativo + convite pendente (senão dava pra convidar além do limite e cada um "ativar"
+// depois, ao aceitar). Fonte ÚNICA pro teto (UsersService) e pro uso exibido (PlansService,
+// GET /plans/me) — se os dois divergissem, a tela mostraria vaga sobrando e a criação recusaria.
+export const PLAN_COUNTED_LOGIN_STATUSES: UserStatus[] = ['ACTIVE', 'INVITED'];
 
 interface CompanyReader {
   company: { findUniqueOrThrow(args: { where: { id: string }; select: { planTier: true } }): Promise<{ planTier: CompanyPlanTier }> };

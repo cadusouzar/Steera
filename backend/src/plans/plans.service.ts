@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { getPlan, PLAN_CATALOG } from './plan-catalog';
+import { PLAN_COUNTED_LOGIN_STATUSES } from './plan-limits.util';
 
 // Sem cache de propósito (mesma decisão de PlanGuard) — o plano/uso é lido do banco a cada
 // chamada, então mudar `Company.planTier` no banco (hoje manual; no futuro, o checkout) aparece na
@@ -14,14 +15,14 @@ export class PlansService {
       where: { id: companyId },
       select: { planTier: true },
     });
-    // As três contagens contam só ativo (mesma regra usada por PlanGuard/assertBelowPlanLimit nos
-    // pontos de criação): Role.active, Employee.status ACTIVE, User (login) role EMPLOYEE + status
-    // ACTIVE. `companyId` explícito em cada uma é defesa em profundidade junto do RLS/roteamento por
+    // As três contagens usam a MESMA regra do teto aplicado nos pontos de criação (PlanGuard/
+    // assertBelowPlanLimit): Role.active, Employee.status ACTIVE, e User (login) role EMPLOYEE com
+    // status em PLAN_COUNTED_LOGIN_STATUSES (ACTIVE + convite pendente INVITED). `companyId` explícito em cada uma é defesa em profundidade junto do RLS/roteamento por
     // tenant, mesmo padrão já usado em roles.service.ts/employees.service.ts/users.service.ts.
     const [roles, employees, employeeLogins] = await Promise.all([
       this.prisma.role.count({ where: { companyId, active: true } }),
       this.prisma.employee.count({ where: { companyId, status: 'ACTIVE' } }),
-      this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' } }),
+      this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: { in: PLAN_COUNTED_LOGIN_STATUSES } } }),
     ]);
     const current = getPlan(planTier);
     return {

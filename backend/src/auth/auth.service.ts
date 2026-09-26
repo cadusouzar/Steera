@@ -27,7 +27,7 @@ import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
-import { UserTokensService } from './user-tokens/user-tokens.service';
+import { INVALID_OR_EXPIRED_MESSAGE, UserTokensService } from './user-tokens/user-tokens.service';
 import { InviteMailer } from './user-tokens/invite-mailer';
 
 // `RH` de propósito fora daqui — não é mais atribuído a login novo nenhum, nem o fundador (ver
@@ -62,15 +62,10 @@ export const LOCK_DURATION_MS = 15 * 60_000;
 // string à mão em vários lugares.
 export const FORGOT_PASSWORD_MESSAGE = 'Se existir uma conta com esse e-mail, enviamos um link para redefinir a senha.';
 
-// Mesmo texto de UserTokensService's INVALID_OR_EXPIRED_MESSAGE (não exportada por aquele módulo) —
-// duplicada aqui de propósito: um token PASSWORD_RESET pertencente a um usuário INVITED é
-// tecnicamente válido (consume() não rejeita), mas convite pendente não tem senha própria pra
-// "redefinir" — o aceite de convite é outro fluxo (Task 7). Nunca revela essa distinção pro
-// cliente, que vê a mesma mensagem genérica de link inválido/expirado.
-const RESET_PASSWORD_INVITED_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
-// Mesmo texto genérico pra um token INVITE válido de um login que não está mais INVITED (já aceito,
-// ou BLOCKED por um admin) — nunca revela qual dos casos é.
-const ACCEPT_INVITE_INVALID_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
+// Um token PASSWORD_RESET de um usuário INVITED, ou um token INVITE de um login que não está mais
+// INVITED (já aceito, ou BLOCKED por um admin), é tecnicamente válido (consume() não rejeita) mas
+// não pode ser usado — o cliente vê a MESMA mensagem genérica de link inválido/expirado de
+// UserTokensService (INVALID_OR_EXPIRED_MESSAGE), sem nunca revelar qual dos casos é.
 
 // process.cwd(), não __dirname: __dirname aponta pra dentro de `dist/src/auth` depois de compilado
 // (`npm run build` + `node dist/main.js`), onde `prisma/` não existe — mesmo padrão já usado em
@@ -614,7 +609,7 @@ export class AuthService {
 
   // POST /auth/reset-password — token + nova senha. Nunca desfaz um BLOCKED (ação de admin,
   // ortogonal a "esqueceu a senha") — `status` deliberadamente NUNCA aparece no `data` do update
-  // abaixo. INVITED é rejeitado (RESET_PASSWORD_INVITED_MESSAGE): convite se aceita pela rota de
+  // abaixo. INVITED é rejeitado (INVALID_OR_EXPIRED_MESSAGE): convite se aceita pela rota de
   // convite (Task 7), nunca por aqui.
   async resetPassword(rawToken: string, newPassword: string): Promise<void> {
     // consume() já lança BadRequestException('Link inválido ou expirado. Peça um novo.') sozinho
@@ -623,7 +618,7 @@ export class AuthService {
     const user = await runAsSystem(() => this.prisma.user.findUniqueOrThrow({ where: { id: userId } }));
 
     if (user.status === 'INVITED') {
-      throw new BadRequestException(RESET_PASSWORD_INVITED_MESSAGE);
+      throw new BadRequestException(INVALID_OR_EXPIRED_MESSAGE);
     }
 
     const passwordHash = await hashPassword(newPassword);
@@ -715,7 +710,7 @@ export class AuthService {
   async acceptInvite(rawToken: string, password: string): Promise<void> {
     const userId = await this.userTokens.consume(rawToken, 'INVITE');
     const user = await runAsSystem(() => this.prisma.user.findUniqueOrThrow({ where: { id: userId } }));
-    if (user.status !== 'INVITED') throw new BadRequestException(ACCEPT_INVITE_INVALID_MESSAGE);
+    if (user.status !== 'INVITED') throw new BadRequestException(INVALID_OR_EXPIRED_MESSAGE);
 
     const passwordHash = await hashPassword(password);
     const { count } = await runAsSystem(() =>
@@ -731,7 +726,7 @@ export class AuthService {
         },
       }),
     );
-    if (count === 0) throw new BadRequestException(ACCEPT_INVITE_INVALID_MESSAGE);
+    if (count === 0) throw new BadRequestException(INVALID_OR_EXPIRED_MESSAGE);
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {

@@ -54,8 +54,9 @@ describe('PlansService', () => {
     });
     expect(prisma.role.count).toHaveBeenCalledWith({ where: { companyId: 'company-2', active: true } });
     expect(prisma.employee.count).toHaveBeenCalledWith({ where: { companyId: 'company-2', status: 'ACTIVE' } });
+    // Convite pendente (INVITED) conta no uso — mesma regra do teto aplicado em UsersService.create.
     expect(prisma.user.count).toHaveBeenCalledWith({
-      where: { companyId: 'company-2', role: 'EMPLOYEE', status: 'ACTIVE' },
+      where: { companyId: 'company-2', role: 'EMPLOYEE', status: { in: ['ACTIVE', 'INVITED'] } },
     });
   });
 

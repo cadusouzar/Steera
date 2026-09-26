@@ -10,7 +10,9 @@ export const TOKEN_TTL_MS: Record<UserTokenType, number> = {
   PASSWORD_RESET: 30 * 60 * 1000,
 };
 
-const INVALID_OR_EXPIRED_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
+// Exportada: AuthService reaproveita o MESMO texto quando um token válido cai num estado que não
+// pode usá-lo (reset de um INVITED, aceite de convite de um login que não é mais INVITED).
+export const INVALID_OR_EXPIRED_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
 
 /**
  * Issues and consumes single-use, hashed tokens (e-mail verification, invite,
