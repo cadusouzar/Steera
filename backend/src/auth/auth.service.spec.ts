@@ -5,7 +5,9 @@ import { Prisma } from '@prisma/client';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthService } from './auth.service';
+import { EmailService } from '../email/email.service';
+import { AuthService, LOCK_DURATION_MS } from './auth.service';
+import { UserTokensService } from './user-tokens/user-tokens.service';
 import * as passwordUtil from './password.util';
 
 describe('AuthService', () => {
@@ -13,6 +15,8 @@ describe('AuthService', () => {
   let prisma: any;
   let jwtService: any;
   let authorization: any;
+  let email: { send: jest.Mock };
+  let userTokens: { issue: jest.Mock };
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
 
   // Cadastro ampliado (Task 5): shape completo do novo RegisterDto, usado como base por TODA
@@ -68,12 +72,16 @@ describe('AuthService', () => {
       profile: { create: jest.fn() },
     };
     authorization = { getEffectivePermissions: jest.fn().mockResolvedValue({}) };
+    email = { send: jest.fn().mockResolvedValue(true) };
+    userTokens = { issue: jest.fn().mockResolvedValue('raw-reset-token') };
     const module = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: { sign: jest.fn(() => 'signed.jwt.token') } },
         { provide: AuthorizationService, useValue: authorization },
+        { provide: EmailService, useValue: email },
+        { provide: UserTokensService, useValue: userTokens },
       ],
     }).compile();
     service = module.get(AuthService);
@@ -98,36 +106,163 @@ describe('AuthService', () => {
     await expect(service.login({ email: 'x@x.com', password: 'y' }, fakeRes)).rejects.toThrow(/procure um administrador/i);
   });
 
-  it('login rejects a locked (excesso de tentativas) user with its own specific 403 message', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'LOCKED', passwordHash: 'h', failedLoginAttempts: 5 });
-    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
-    await expect(service.login({ email: 'x@x.com', password: 'y' }, fakeRes)).rejects.toThrow(/redefinir sua senha/i);
-  });
-
   it('login rejects an incorrect password', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h', failedLoginAttempts: 0 });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
     await expect(service.login({ email: 'x@x.com', password: 'errada' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  // Achado durante a auditoria de segurança (17/09/2026): o rate-limit por janela de tempo
-  // (ThrottlerGuard) nunca acaba de verdade — dá pra esperar e tentar de novo. Este contador é
-  // persistente (só reseta com login certo ou ação de admin).
-  it('login increments the persistent failed-attempt counter on a wrong password, without locking before the 5th', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h', failedLoginAttempts: 2 });
-    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
-    await expect(service.login({ email: 'x@x.com', password: 'errada' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: '1' }, data: { failedLoginAttempts: 3 } });
-  });
+  // Bloqueio temporário por conta ("Acesso e sessões", 26/09/2026): substitui o LOCKED permanente
+  // (que só um admin destravava) por lockedUntil = agora + 15min, que expira sozinho.
+  describe('login — bloqueio temporário por conta', () => {
+    const activeUser = (overrides: Record<string, unknown> = {}) => ({
+      id: 'u1', companyId: 'c1', email: 'vitima@teste.com', role: 'ADMIN', modules: ['DASHBOARD'],
+      status: 'ACTIVE', passwordHash: 'h', mustChangePassword: false, hasFullPontoAccess: true,
+      failedLoginAttempts: 0, lockedUntil: null, ...overrides,
+    });
 
-  it('login locks the account (status LOCKED) on reaching the 5th consecutive wrong password', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: '1', status: 'ACTIVE', passwordHash: 'h', failedLoginAttempts: 4 });
-    jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
-    // Mesma mensagem genérica, mesmo sendo a tentativa que travou a conta — nunca revela o estado.
-    await expect(service.login({ email: 'x@x.com', password: 'errada' }, fakeRes)).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: '1' },
-      data: { failedLoginAttempts: 5, status: 'LOCKED' },
+    it('na 5ª senha errada seguida trava por 15min (status continua ACTIVE), zera o contador, manda e-mail e responde o 401 genérico', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ failedLoginAttempts: 4 }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+      const before = Date.now();
+
+      const err = await service.login({ email: 'vitima@teste.com', password: 'errada' }, fakeRes).catch((e) => e);
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      expect(err.message).toBe('E-mail ou senha inválidos');
+
+      expect(prisma.user.update).toHaveBeenCalledTimes(1);
+      const call = prisma.user.update.mock.calls[0][0];
+      expect(call.where).toEqual({ id: 'u1' });
+      expect(Object.keys(call.data).sort()).toEqual(['failedLoginAttempts', 'lockedUntil']);
+      expect(call.data.failedLoginAttempts).toBe(0);
+      const lockedUntil = (call.data.lockedUntil as Date).getTime();
+      expect(lockedUntil).toBeGreaterThanOrEqual(before + LOCK_DURATION_MS);
+      expect(lockedUntil).toBeLessThanOrEqual(Date.now() + LOCK_DURATION_MS);
+      expect(LOCK_DURATION_MS).toBe(15 * 60_000);
+
+      expect(userTokens.issue).toHaveBeenCalledWith('u1', 'PASSWORD_RESET');
+      expect(email.send).toHaveBeenCalledTimes(1);
+      const [message, context] = email.send.mock.calls[0];
+      expect(message.to).toBe('vitima@teste.com');
+      expect(message.subject).toMatch(/bloqueada temporariamente/i);
+      expect(message.html).toContain('raw-reset-token');
+      expect(context).toBe('account-locked');
+    });
+
+    it('falha ao emitir o token do e-mail de aviso nunca troca o 401 genérico por outro erro', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ failedLoginAttempts: 4 }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+      userTokens.issue.mockRejectedValue(new Error('db down'));
+
+      const err = await service.login({ email: 'vitima@teste.com', password: 'errada' }, fakeRes).catch((e) => e);
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      expect(err.message).toBe('E-mail ou senha inválidos');
+      expect(prisma.user.update).toHaveBeenCalledTimes(1);
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('senha errada antes da 5ª só incrementa o contador, sem e-mail', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ failedLoginAttempts: 1 }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+
+      await expect(service.login({ email: 'vitima@teste.com', password: 'errada' }, fakeRes)).rejects.toThrow(
+        'E-mail ou senha inválidos',
+      );
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { failedLoginAttempts: 2 } });
+      expect(email.send).not.toHaveBeenCalled();
+      expect(userTokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('conta travada (lockedUntil no futuro) + senha CERTA → 403 ACCOUNT_TEMPORARILY_LOCKED, sem checar a senha nem escrever nada', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ lockedUntil: new Date(Date.now() + 10 * 60_000) }));
+      const verify = jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+
+      const err = await service.login({ email: 'vitima@teste.com', password: 'certa' }, fakeRes).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ForbiddenException);
+      const body = err.getResponse();
+      expect(body.statusCode).toBe(403);
+      expect(body.code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
+      expect(body.retryAfterSeconds).toBeGreaterThan(0);
+      expect(body.retryAfterSeconds).toBeLessThanOrEqual(600);
+      expect(body.message).toBe(
+        'Muitas tentativas para esta conta. Tente novamente em 10 minutos ou redefina sua senha pelo e-mail.',
+      );
+      expect(verify).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('lockedUntil já expirado + senha certa → login ok, zera contador e lockedUntil', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ lockedUntil: new Date(Date.now() - 60_000) }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+      const result = await service.login({ email: 'vitima@teste.com', password: 'certa' }, fakeRes);
+
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
+    });
+
+    it('status legado LOCKED + senha certa → login ok (tratado como ACTIVE, volta a ACTIVE no banco)', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ status: 'LOCKED', failedLoginAttempts: 5 }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+      const result = await service.login({ email: 'vitima@teste.com', password: 'certa' }, fakeRes);
+
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { failedLoginAttempts: 0, lockedUntil: null, status: 'ACTIVE' },
+      });
+    });
+
+    it('status legado LOCKED + senha errada continua contando (e trava temporariamente na 5ª)', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ status: 'LOCKED', failedLoginAttempts: 4 }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+
+      await expect(service.login({ email: 'vitima@teste.com', password: 'errada' }, fakeRes)).rejects.toThrow(
+        'E-mail ou senha inválidos',
+      );
+      expect(prisma.user.update.mock.calls[0][0].data).toEqual({
+        failedLoginAttempts: 0,
+        lockedUntil: expect.any(Date),
+      });
+    });
+
+    it('BLOCKED + senha certa → mensagem de admin inalterada', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ status: 'BLOCKED' }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+
+      const err = await service.login({ email: 'vitima@teste.com', password: 'certa' }, fakeRes).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.message).toBe('Seu login foi bloqueado. Procure um administrador da sua empresa.');
+    });
+
+    it('BLOCKED + senha errada não acumula tentativas (só ACTIVE/LOCKED contam)', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ status: 'BLOCKED', failedLoginAttempts: 4 }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+
+      await expect(service.login({ email: 'vitima@teste.com', password: 'errada' }, fakeRes)).rejects.toThrow(
+        'E-mail ou senha inválidos',
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('INVITED + qualquer senha → 401 genérico, sem checar a senha nem incrementar o contador', async () => {
+      prisma.user.findUnique.mockResolvedValue(activeUser({ status: 'INVITED', failedLoginAttempts: 4 }));
+      const verify = jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+
+      const err = await service.login({ email: 'vitima@teste.com', password: 'qualquer' }, fakeRes).catch((e) => e);
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      expect(err.message).toBe('E-mail ou senha inválidos');
+      expect(verify).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
     });
   });
 
@@ -149,7 +284,7 @@ describe('AuthService', () => {
 
     await service.login({ email: 'x@x.com', password: 'certa' }, fakeRes);
 
-    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { failedLoginAttempts: 0 } });
+    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { failedLoginAttempts: 0, lockedUntil: null } });
   });
 
   it('login does not write to the database when the counter is already 0 on a successful login', async () => {

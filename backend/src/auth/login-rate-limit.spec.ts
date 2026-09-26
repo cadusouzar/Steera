@@ -1,36 +1,20 @@
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { SkipThrottle, Throttle, ThrottlerException, ThrottlerGuard, ThrottlerStorageService } from '@nestjs/throttler';
-import { loginEmailTracker } from './login-throttle.util';
+import { ThrottlerException, ThrottlerGuard, ThrottlerStorageService } from '@nestjs/throttler';
+import { AuthController } from './auth.controller';
 
-// Exercita o ThrottlerGuard de verdade (não um mock) com a MESMA
-// configuração usada em auth.controller.ts/app.module.ts: dois throttlers
-// nomeados, "default" (por IP, tracker padrão do pacote) e "login-email"
-// (por e-mail, via loginEmailTracker). Prova o objetivo do fix: um atacante
-// que faz brute-force de UM e-mail conhecido rotacionando IPs é pego pelo
-// throttler "login-email" mesmo que cada IP individual nunca estoure o
-// throttler "default" sozinho.
-class FakeAuthController {
-  @Throttle({
-    default: { limit: 5, ttl: 900_000 },
-    'login-email': { limit: 5, ttl: 900_000, getTracker: loginEmailTracker },
-  })
-  login() {
-    return 'ok';
-  }
-
-  @SkipThrottle({ 'login-email': true })
-  @Throttle({ default: { limit: 60, ttl: 900_000 } })
-  refresh() {
-    return 'ok';
-  }
-}
-
+// Exercita o ThrottlerGuard de verdade (não um mock) contra os handlers REAIS de AuthController
+// (o @Throttle({...}) deles é o que vale) e os mesmos throttlers nomeados de app.module.ts:
+// "default" (por IP, tracker padrão do pacote) e "login-email" (por e-mail, via
+// loginEmailTracker). Prova o objetivo do fix: um atacante que faz brute-force de UM e-mail
+// conhecido rotacionando IPs é pego pelo throttler "login-email" mesmo que cada IP individual
+// nunca estoure o throttler "default" sozinho. (A resposta 403 anti-enumeração desse caso é
+// coberta em guards/login-throttler.guard.spec.ts; aqui é o ThrottlerGuard base.)
 function makeContext(handlerName: 'login' | 'refresh', req: Record<string, any>): ExecutionContext {
-  const handler = FakeAuthController.prototype[handlerName];
+  const handler = AuthController.prototype[handlerName];
   return {
     getHandler: () => handler,
-    getClass: () => FakeAuthController,
+    getClass: () => AuthController,
     switchToHttp: () => ({
       getRequest: () => req,
       getResponse: () => ({ header: jest.fn() }),
@@ -41,7 +25,7 @@ function makeContext(handlerName: 'login' | 'refresh', req: Record<string, any>)
 async function buildGuard() {
   const options = [
     { name: 'default', ttl: 900_000, limit: 5 },
-    { name: 'login-email', ttl: 900_000, limit: 5 },
+    { name: 'login-email', ttl: 900_000, limit: 5, setHeaders: false },
   ];
   const storage = new ThrottlerStorageService();
   const guard = new ThrottlerGuard(options as any, storage, new Reflector());
@@ -86,5 +70,20 @@ describe('login rate limiting (real ThrottlerGuard, "default" + "login-email")',
       const req = { ip: '10.0.0.1', body: {}, headers: {} };
       await expect(guard.canActivate(makeContext('refresh', req))).resolves.toBe(true);
     }
+  });
+
+  // Refresh por sessão (sha256 do cookie rt, ver refresh-throttle.util.ts), não por IP: um escritório
+  // inteiro atrás de um IP não divide mais o mesmo bucket de 60/15min.
+  it('refresh: 60 por sessão — a 61ª da mesma sessão é 429, outra sessão no mesmo IP segue livre', async () => {
+    const guard = await buildGuard();
+    for (let i = 0; i < 60; i++) {
+      const req = { ip: '10.0.0.1', body: {}, headers: {}, cookies: { rt: 'sessao-a' } };
+      await expect(guard.canActivate(makeContext('refresh', req))).resolves.toBe(true);
+    }
+    const sameSession = { ip: '10.0.0.2', body: {}, headers: {}, cookies: { rt: 'sessao-a' } };
+    await expect(guard.canActivate(makeContext('refresh', sameSession))).rejects.toBeInstanceOf(ThrottlerException);
+
+    const otherSession = { ip: '10.0.0.1', body: {}, headers: {}, cookies: { rt: 'sessao-b' } };
+    await expect(guard.canActivate(makeContext('refresh', otherSession))).resolves.toBe(true);
   });
 });

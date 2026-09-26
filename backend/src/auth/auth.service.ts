@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AppModule as AppModuleEnum, CompanyPlanTier, Prisma } from '@prisma/client';
 import { Response } from 'express';
@@ -12,7 +12,10 @@ import { assertValidSchemaName } from '../prisma/tenant-schema.util';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { applyMigrations } from '../prisma/tenant-migration.util';
 import { normalizePhone } from '../common/phone.util';
+import { EmailService } from '../email/email.service';
+import { accountLockedTemplate, buildAppLink } from '../email/email-templates';
 import { getPlan, lockedItemsFor, planLimit } from '../plans/plan-catalog';
+import { accountLockedError } from './account-lock.util';
 import { maskDocument, normalizeDocument, PersonType } from './document.util';
 import { pickCompanyIdentity } from './schema-name-picker.util';
 import { RegisterDto } from './dto/register.dto';
@@ -21,6 +24,7 @@ import { UpdateMeDto } from './dto/update-me.dto';
 import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
+import { UserTokensService } from './user-tokens/user-tokens.service';
 
 // `RH` de propósito fora daqui — não é mais atribuído a login novo nenhum, nem o fundador (ver
 // RH_CARGOS/RH_FUNCIONARIOS no schema). O fundador via /auth/register continua recebendo TODOS os
@@ -39,12 +43,15 @@ const PUBLIC_COMPANY_SELECT = {
 } as const;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
 const REFRESH_COOKIE_NAME = 'rt';
-// Achado durante a auditoria de segurança (17/09/2026): testar manualmente confirmou que o
-// rate-limit por janela de tempo (ThrottlerGuard, 5/15min) nunca acaba de verdade — dá pra esperar
-// e tentar de novo indefinidamente. Este teto é ortogonal e persistente (nunca reseta sozinho com o
-// tempo, só com um login certo ou uma ação de admin) — na 5ª senha errada seguida, a conta trava e
-// só um admin destrava (unblock ou reset de senha).
+// Achado durante a auditoria de segurança (17/09/2026): o rate-limit por janela de tempo
+// (ThrottlerGuard) sozinho nunca acaba de verdade — dá pra esperar e tentar de novo
+// indefinidamente. Este contador é persistente (não reseta com o tempo, só com um login certo): na
+// 5ª senha errada seguida a conta trava. Até 26/09/2026 a trava era PERMANENTE (status LOCKED, só
+// admin destravava) — virou um DoS fácil contra qualquer e-mail conhecido. Agora ("Acesso e
+// sessões") é TEMPORÁRIA: lockedUntil = agora + LOCK_DURATION_MS, expira sozinha, o contador volta
+// a zero e a pessoa recebe um e-mail de aviso com link de redefinição de senha.
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+export const LOCK_DURATION_MS = 15 * 60_000;
 
 // process.cwd(), não __dirname: __dirname aponta pra dentro de `dist/src/auth` depois de compilado
 // (`npm run build` + `node dist/main.js`), onde `prisma/` não existe — mesmo padrão já usado em
@@ -55,10 +62,14 @@ const TENANT_MIGRATIONS_DIR = join(process.cwd(), 'prisma', 'tenant-migrations')
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly authorization: AuthorizationService,
+    private readonly email: EmailService,
+    private readonly userTokens: UserTokensService,
   ) {}
 
   private async signAccessToken(user: {
@@ -388,44 +399,58 @@ export class AuthService {
     );
     if (!user) throw new UnauthorizedException('E-mail ou senha inválidos');
 
+    // Bloqueio temporário por conta (26/09/2026, "Acesso e sessões"): checado ANTES da senha e com
+    // a mesma resposta que o throttler por e-mail dá pra e-mail inexistente (LoginThrottlerGuard) —
+    // quem está chutando não distingue conta real bloqueada de e-mail inventado. Checar antes da
+    // senha também é o que impede o chute de continuar durante a trava (nem a senha certa entra).
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      throw accountLockedError(Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000));
+    }
+
     // Confirma a senha ANTES de checar o status — auditoria de segurança (17/09/2026): revelar
-    // "esta conta está bloqueada/travada" pra quem nem sabe a senha certa vazaria a existência e o
-    // estado de uma conta como um oráculo de enumeração. Só depois da senha bater é seguro dar uma
-    // mensagem específica (a pessoa já provou que é quem diz ser).
-    if (!(await verifyPassword(user.passwordHash, dto.password))) {
-      // Contador persistente de tentativas erradas — nunca reseta com o tempo (diferente do
-      // ThrottlerGuard por IP/e-mail, que já existia e continua ativo em paralelo), só com um login
-      // certo ou uma ação de admin (unblock/reset de senha). Só incrementa se a conta ainda está
-      // ACTIVE — uma já BLOCKED/LOCKED não precisa continuar acumulando.
-      if (user.status === 'ACTIVE') {
-        const failedLoginAttempts = user.failedLoginAttempts + 1;
+    // "esta conta está bloqueada" pra quem nem sabe a senha certa vazaria a existência e o estado
+    // de uma conta como um oráculo de enumeração. Só depois da senha bater é seguro dar uma
+    // mensagem específica (a pessoa já provou que é quem diz ser). INVITED (convite ainda não
+    // aceito) nunca entra por senha — nem chega a conferir o hash —, com a mesma resposta genérica.
+    const passwordOk = user.status !== 'INVITED' && (await verifyPassword(user.passwordHash, dto.password));
+    if (!passwordOk) {
+      // Só conta pra ACTIVE (e o LOCKED legado, tratado como ACTIVE) — BLOCKED é ação de admin e
+      // INVITED não tem senha própria ainda; nenhum dos dois precisa acumular tentativas.
+      if (user.status === 'ACTIVE' || user.status === 'LOCKED') {
+        const attempts = user.failedLoginAttempts + 1;
+        const locking = attempts >= MAX_FAILED_LOGIN_ATTEMPTS;
         await runAsSystem(() =>
           this.prisma.user.update({
             where: { id: user.id },
-            data:
-              failedLoginAttempts >= MAX_FAILED_LOGIN_ATTEMPTS
-                ? { failedLoginAttempts, status: 'LOCKED' }
-                : { failedLoginAttempts },
+            data: locking
+              ? { failedLoginAttempts: 0, lockedUntil: new Date(Date.now() + LOCK_DURATION_MS) }
+              : { failedLoginAttempts: attempts },
           }),
         );
+        if (locking) await this.sendAccountLockedEmail(user.id, user.email);
       }
       // Mesma mensagem genérica sempre, mesmo na tentativa que acabou de travar a conta — nunca
-      // revelar o estado da conta pra uma senha errada.
+      // revelar o estado da conta pra uma senha errada (a 6ª tentativa, com a trava já ativa, é que
+      // recebe o 403 — igual ao que o throttler por e-mail dá pra um e-mail inventado).
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
 
     if (user.status === 'BLOCKED') {
       throw new ForbiddenException('Seu login foi bloqueado. Procure um administrador da sua empresa.');
     }
-    if (user.status === 'LOCKED') {
-      throw new ForbiddenException(
-        'Seu login foi bloqueado por excesso de tentativas. Procure um administrador da sua empresa para redefinir sua senha.',
-      );
-    }
 
-    if (user.failedLoginAttempts > 0) {
+    // Login certo: zera contador/trava vencida e converte o LOCKED legado (trava permanente de antes
+    // de 26/09/2026) de volta pra ACTIVE — a trava temporária substitui o LOCKED por completo.
+    if (user.failedLoginAttempts > 0 || user.lockedUntil || user.status === 'LOCKED') {
       await runAsSystem(() =>
-        this.prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0 } }),
+        this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            failedLoginAttempts: 0,
+            lockedUntil: null,
+            ...(user.status === 'LOCKED' ? { status: 'ACTIVE' as const } : {}),
+          },
+        }),
       );
     }
 
@@ -434,6 +459,19 @@ export class AuthService {
     this.setRefreshCookie(res, refreshValue);
     const permissions = await this.getEffectivePermissionsAsSystem(user.id);
     return { accessToken, user: this.toPublicUser(user, permissions) };
+  }
+
+  // Aviso de trava temporária com link de redefinição de senha. Nunca derruba o login (que já vai
+  // responder o 401 genérico): EmailService.send nunca lança, e uma falha ao emitir o token cai no
+  // catch — a trava em si já foi gravada e vale mesmo sem o e-mail. Nunca loga o token.
+  private async sendAccountLockedEmail(userId: string, email: string): Promise<void> {
+    try {
+      const raw = await this.userTokens.issue(userId, 'PASSWORD_RESET');
+      const template = accountLockedTemplate(LOCK_DURATION_MS / 60_000, buildAppLink('/redefinir-senha', raw));
+      await this.email.send({ to: email, ...template }, 'account-locked');
+    } catch (err) {
+      this.logger.error(`Falha ao preparar o e-mail de conta travada (user ${userId}): ${(err as Error).message}`);
+    }
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {

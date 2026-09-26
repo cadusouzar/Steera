@@ -15,8 +15,10 @@ import { AllowDuringForcedPasswordChange } from './decorators/allow-during-force
 import { Public } from './decorators/public.decorator';
 import { AntiCsrfHeaderGuard } from './guards/anti-csrf-header.guard';
 import { FriendlyThrottlerGuard } from './guards/friendly-throttler.guard';
+import { LoginThrottlerGuard } from './guards/login-throttler.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { loginEmailTracker } from './login-throttle.util';
+import { refreshSessionTracker } from './refresh-throttle.util';
 
 // `me`/`me/password` levam @UseGuards(JwtAuthGuard) explícito aqui, mesmo
 // sabendo que a Task 4 vai registrar esse mesmo guard globalmente — sem
@@ -56,45 +58,40 @@ export class AuthController {
     return this.auth.register(dto, res);
   }
 
-  // Dois throttlers em paralelo aqui (ver login-throttle.util.ts e
-  // app.module.ts): "default" por IP (5/5min) e "login-email"
-  // por e-mail, sem IP na chave — fecha a lacuna de um atacante que
-  // faz brute-force de UM e-mail conhecido rotacionando IPs, que o "default"
-  // sozinho não pega (cada IP novo começa com bucket zerado).
-  // AntiCsrfHeaderGuard (ver register acima e anti-csrf-header.guard.ts) roda
-  // antes dos throttlers pelo mesmo motivo.
-  // Janela de 5min (reduzida de 15min a pedido do usuário, 18/09/2026 — ver
-  // [[DECISOES-TECNICAS]] "Mensagem de rate limit amigável"): 15min de
-  // bloqueio depois de só 5 tentativas era punitivo demais pra um erro de
-  // digitação legítimo, e a mensagem amigável já deixa claro quanto tempo
-  // falta, então uma janela menor ainda comunica bem sem irritar o usuário.
+  // Dois throttlers em paralelo aqui (ver login-throttle.util.ts e app.module.ts):
+  // - "default", por IP: 100/15min ("Acesso e sessões", 26/09/2026 — era 5/5min). Um escritório
+  //   inteiro atrás do mesmo IP errando senha de manhã estourava o limite de todo mundo; a proteção
+  //   de verdade contra chute de senha agora é por CONTA (abaixo e AuthService.login), então o
+  //   limite por IP fica só como teto contra abuso grosseiro (password spraying em massa).
+  // - "login-email", por e-mail, sem IP na chave: 5/15min com bloqueio de 15min — fecha a lacuna
+  //   de um atacante que faz brute-force de UM e-mail rotacionando IPs, e conta e-mail inexistente
+  //   também. LoginThrottlerGuard responde esse caso com o MESMO 403 ACCOUNT_TEMPORARILY_LOCKED da
+  //   trava de conta real (anti-enumeração, ver login-throttler.guard.ts/account-lock.util.ts).
+  // AntiCsrfHeaderGuard (ver register acima e anti-csrf-header.guard.ts) roda antes dos throttlers
+  // pelo mesmo motivo.
   @Public()
-  @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
+  @UseGuards(AntiCsrfHeaderGuard, LoginThrottlerGuard)
   @Throttle({
-    default: { limit: 5, ttl: 300_000 },
-    'login-email': { limit: 5, ttl: 300_000, getTracker: loginEmailTracker },
+    default: { limit: 100, ttl: 900_000 },
+    'login-email': { limit: 5, ttl: 900_000, blockDuration: 900_000, getTracker: loginEmailTracker },
   })
   @Post('login')
   login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     return this.auth.login(dto, res);
   }
 
-  // Limite bem mais generoso que login/register (60/15min vs 5/5min login,
-  // 5/15min register): POST /auth/refresh é chamado em TODO carregamento de
-  // página/restauração de sessão (RequireAuth -> restoreSession() ->
-  // refreshOnce(), ver src/lib/auth.ts) — um limite baixo bastava pra alguns
-  // reloads derrubarem a sessão de um usuário legítimo. 60/15min ainda é um
-  // teto real (protege contra abuso
-  // grosseiro) mas dá folga confortável até pra um escritório pequeno atrás
-  // do mesmo IP compartilhado. @SkipThrottle({'login-email': true}): refresh
-  // não tem e-mail no corpo (só o cookie httpOnly), então esse throttler não
-  // se aplica aqui — sem o skip, todo refresh sem e-mail cairia no mesmo
-  // bucket "sem e-mail" (ver fallback em loginEmailTracker), o que juntaria
-  // usuários diferentes na mesma chave.
+  // 60/15min POR SESSÃO (sha256 do cookie rt, ver refresh-throttle.util.ts — "Acesso e sessões",
+  // 26/09/2026), não mais por IP: POST /auth/refresh é chamado em TODO carregamento de
+  // página/restauração de sessão (RequireAuth -> restoreSession() -> refreshOnce(), ver
+  // src/lib/auth.ts), e com a chave por IP um escritório inteiro atrás do mesmo IP dividia um único
+  // bucket — os reloads de um derrubavam a sessão dos outros. 60/15min por sessão ainda é um teto
+  // real contra abuso grosseiro. Sem cookie, cai no IP. @SkipThrottle({'login-email': true}):
+  // refresh não tem e-mail no corpo, então esse throttler não se aplica aqui — sem o skip, todo
+  // refresh cairia no mesmo bucket "sem e-mail" (ver fallback em loginEmailTracker).
   @Public()
   @UseGuards(FriendlyThrottlerGuard)
   @SkipThrottle({ 'login-email': true })
-  @Throttle({ default: { limit: 60, ttl: 900_000 } })
+  @Throttle({ default: { limit: 60, ttl: 900_000, getTracker: refreshSessionTracker } })
   @Post('refresh')
   refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.auth.refresh(req.cookies?.rt, res);

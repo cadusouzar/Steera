@@ -43,27 +43,26 @@ import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     // Limite padrão de 5 requisições a cada 15 min, por IP (throttler
-    // "default"). Não é registrado como APP_GUARD global — só o
-    // AuthController aplica ThrottlerGuard explicitamente (ver
-    // auth.controller.ts), pra não limitar rotas de RH/Financeiro sem
-    // necessidade.
+    // "default"). Não é registrado como APP_GUARD global — só as rotas que
+    // precisam aplicam o guard explicitamente (ver auth.controller.ts), pra
+    // não limitar rotas de RH/Financeiro sem necessidade. Cada handler
+    // sobrescreve limite/ttl/tracker via @Throttle({...}).
     //
     // "login-email" é um segundo throttler nomeado, keyed só por e-mail
     // (nunca por IP — ver login-throttle.util.ts), usado só em POST
     // /auth/login pra fechar a lacuna de um atacante que faz brute-force de
-    // UM e-mail conhecido rotacionando IPs (o throttler "default" sozinho
-    // não pega isso, já que cada IP novo começa com um bucket zerado).
-    // register()/refresh() pulam esse throttler via @SkipThrottle — register
-    // cria um recurso novo a cada request (rastreio por e-mail não faz
-    // sentido do mesmo jeito) e refresh não tem e-mail no corpo. O limite
-    // aqui é o mesmo do "default" (5/15min) só por consistência com o valor
-    // já usado nesta mesma spec ("5 tentativas/15 min") — o valor de fato
-    // usado em runtime vem do @Throttle({'login-email': {...}}) no handler
-    // de login, este aqui é só o "existir" mínimo exigido pra esse nome
-    // aparecer em `this.throttlers` do guard.
+    // UM e-mail conhecido rotacionando IPs. Todas as outras rotas com
+    // throttle pulam esse nome via @SkipThrottle. O valor usado em runtime
+    // vem do @Throttle({'login-email': {...}}) do login (5/15min, bloqueio de
+    // 15min); este aqui é o mínimo pra esse nome existir em
+    // `this.throttlers` do guard. setHeaders: false ("Acesso e sessões",
+    // 26/09/2026): quando esse throttler estoura, LoginThrottlerGuard responde
+    // o mesmo 403 da trava de conta real (AuthService.login) — um cabeçalho
+    // Retry-After-login-email/X-RateLimit-*-login-email só existiria num dos
+    // dois caminhos e denunciaria qual respondeu (anti-enumeração).
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 900_000, limit: 5 },
-      { name: 'login-email', ttl: 900_000, limit: 5 },
+      { name: 'login-email', ttl: 900_000, limit: 5, setHeaders: false },
     ]),
     PrismaModule,
     EmailModule,
