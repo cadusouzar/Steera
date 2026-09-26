@@ -426,6 +426,34 @@ describe('UsersService', () => {
         data: { revokedAt: expect.any(Date) },
       });
     });
+
+    // Planos grátis e pagos (26/09/2026): resetPassword() também reativa o login pra ACTIVE (mesmo
+    // efeito de unblock() num login BLOCKED/LOCKED) — sem o mesmo guard, dava pra contornar o teto de
+    // logins de funcionário do plano resetando a senha de um login travado em vez de desbloqueá-lo.
+    it('rejects reactivating a blocked/LOCKED EMPLOYEE login once the GRATIS plan limit (2) is reached', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'LOCKED' });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+      prisma.user.count.mockResolvedValue(2);
+      await expect(service.resetPassword('c1', 'u1')).rejects.toThrow(
+        'Limite do plano Grátis: até 2 logins de funcionário ativos. Faça upgrade para cadastrar mais.',
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('does not check the plan limit for an already-ACTIVE EMPLOYEE login', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'ACTIVE' });
+      await service.resetPassword('c1', 'u1');
+      expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.user.update).toHaveBeenCalled();
+    });
+
+    it('never checks the plan limit for an ADMIN login', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED' });
+      await service.resetPassword('c1', 'admin1');
+      expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.user.update).toHaveBeenCalled();
+    });
   });
 
   // Task 8 (Fase 2a, 19/09/2026): `assertNotLastHolderOfPermission` é espionado (não

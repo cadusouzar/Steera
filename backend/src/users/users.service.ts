@@ -323,6 +323,17 @@ export class UsersService {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
 
+    // Planos grátis e pagos (26/09/2026): resetPassword() também reativa o login pra ACTIVE (mesmo
+    // efeito de unblock() num login BLOCKED/LOCKED) — precisa do mesmo guard de teto de logins do
+    // catálogo que unblock() já tem, senão dava pra contornar o limite resetando a senha de um login
+    // travado em vez de desbloqueá-lo. Só relevante se o login ainda não está ACTIVE. ADMIN nunca é
+    // checado — o teto é só de logins EMPLOYEE.
+    if (user.role === 'EMPLOYEE' && user.status !== 'ACTIVE') {
+      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () =>
+        this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' } }),
+      );
+    }
+
     const temporaryPassword = 'Mudar@123';
     const passwordHash = await hashPassword(temporaryPassword);
 
