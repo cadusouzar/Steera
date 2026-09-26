@@ -84,15 +84,19 @@ const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({
     return (
       <div className="bg-secondary/20 border border-border/60 p-6 rounded-2xl text-sm text-muted">
         Não foi possível carregar as informações do plano agora.
+        {children && <div className="mt-4">{children}</div>}
       </div>
     );
   }
 
   if (!plan) {
     return (
-      <p className="text-sm text-muted flex items-center gap-2">
-        <Loader2 size={14} className="animate-spin" /> Carregando...
-      </p>
+      <div>
+        <p className="text-sm text-muted flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Carregando...
+        </p>
+        {children && <div className="mt-4">{children}</div>}
+      </div>
     );
   }
 

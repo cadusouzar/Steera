@@ -238,7 +238,7 @@ const LandingPage = () => {
             <PricingCard
               name="Empresarial"
               price="Sob consulta"
-              features={["Tudo do Pro", "Logins de funcionário ilimitados", "Suporte dedicado"]}
+              features={["Tudo do Pro", "Logins de funcionário ilimitados"]}
             />
           </div>
         </div>
