@@ -34,6 +34,7 @@ import { TimeJustificationsModule } from './time-justifications/time-justificati
 import { TenantMigrationModule } from './tenant-migration/tenant-migration.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { EmailModule } from './email/email.module';
+import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { EmailModule } from './email/email.module';
     PrismaModule,
     EmailModule,
     AuthModule,
+    UserTokensModule,
     CompanyModule,
     RolesModule,
     EmployeesModule,
