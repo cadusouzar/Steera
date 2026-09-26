@@ -22,7 +22,7 @@ import { AntiCsrfHeaderGuard } from './guards/anti-csrf-header.guard';
 import { FriendlyThrottlerGuard } from './guards/friendly-throttler.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { loginEmailTracker } from './login-throttle.util';
-import { refreshSessionTracker } from './refresh-throttle.util';
+import { refreshIpTracker, refreshSessionTracker } from './refresh-throttle.util';
 
 // `me`/`me/password` levam @UseGuards(JwtAuthGuard) explícito aqui, mesmo
 // sabendo que a Task 4 vai registrar esse mesmo guard globalmente — sem
@@ -55,7 +55,7 @@ export class AuthController {
   // do bucket de throttle (ver anti-csrf-header.guard.ts).
   @Public()
   @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
   @Post('register')
   register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
@@ -75,7 +75,7 @@ export class AuthController {
   // pelo mesmo motivo.
   @Public()
   @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 100, ttl: 900_000 } })
   @Post('login')
   login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
@@ -92,8 +92,15 @@ export class AuthController {
   // refresh cairia no mesmo bucket "sem e-mail" (ver fallback em loginEmailTracker).
   @Public()
   @UseGuards(FriendlyThrottlerGuard)
+  //
+  // "refresh-ip" (fix final): teto secundário de 600/15min por IP. Só por sessão, quem manda um cookie
+  // aleatório a cada requisição ganhava um bucket novo toda vez — nunca batia em limite nenhum. Esta
+  // é a ÚNICA rota que não pula "refresh-ip" (ver app-throttlers.ts).
   @SkipThrottle({ 'login-email': true })
-  @Throttle({ default: { limit: 60, ttl: 900_000, getTracker: refreshSessionTracker } })
+  @Throttle({
+    default: { limit: 60, ttl: 900_000, getTracker: refreshSessionTracker },
+    'refresh-ip': { limit: 600, ttl: 900_000, getTracker: refreshIpTracker },
+  })
   @Post('refresh')
   refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.auth.refresh(req.cookies?.rt, res);
@@ -110,6 +117,7 @@ export class AuthController {
   // a caixa de entrada de UMA conta com pedidos de redefinição repetidos).
   @Public()
   @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
+  @SkipThrottle({ 'refresh-ip': true })
   @Throttle({
     default: { limit: 5, ttl: 900_000 },
     'login-email': { limit: 3, ttl: 900_000, getTracker: loginEmailTracker },
@@ -126,7 +134,7 @@ export class AuthController {
   // mesmo teto genérico já usado por accept-invite/verify-email (10/15min).
   @Public()
   @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 10, ttl: 900_000 } })
   @HttpCode(204)
   @Post('reset-password')
@@ -140,7 +148,7 @@ export class AuthController {
   // "login-email") e teto por IP de 10/15min. Não loga automaticamente.
   @Public()
   @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 10, ttl: 900_000 } })
   @HttpCode(204)
   @Post('accept-invite')
@@ -153,7 +161,7 @@ export class AuthController {
   // (10/15min), AntiCsrfHeaderGuard pelo mesmo motivo de register()/login().
   @Public()
   @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 10, ttl: 900_000 } })
   @HttpCode(204)
   @Post('verify-email')
@@ -168,7 +176,7 @@ export class AuthController {
   // FriendlyThrottlerGuard. O `?? req.ip` é só uma rede de segurança que nunca deveria disparar.
   @AllowUnverifiedEmail()
   @UseGuards(JwtAuthGuard, FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 3, ttl: 3_600_000, getTracker: (req) => `user:${req.user?.userId ?? req.ip}` } })
   @HttpCode(202)
   @Post('resend-verification')
@@ -212,7 +220,7 @@ export class AuthController {
   @AllowDuringForcedPasswordChange()
   @AllowUnverifiedEmail()
   @UseGuards(JwtAuthGuard, FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 10, ttl: 900_000 } })
   @Patch('me/password')
   changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {

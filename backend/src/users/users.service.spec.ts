@@ -419,6 +419,30 @@ describe('UsersService', () => {
   // Fix round 1: um convite pendente bloqueado e depois desbloqueado volta a INVITED (não ACTIVE com
   // um hash aleatório inutilizável). Marcador de "nunca aceitou o convite": EMPLOYEE,
   // emailVerifiedAt null e emailVerificationRequired false.
+  // Q4: o marcador é independente do papel — um ADMIN convidado que nunca aceitou também volta a
+  // INVITED (fundadores têm emailVerificationRequired true e nunca caem aqui).
+  it('unblock restores INVITED for a BLOCKED ADMIN that never accepted its invite', async () => {
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'a2', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: false,
+    });
+    await service.unblock('c1', 'a2');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'a2' },
+      data: { status: 'INVITED', failedLoginAttempts: 0, lockedUntil: null },
+    });
+  });
+
+  it('unblock keeps a BLOCKED founder ADMIN (verification required, not yet verified) as ACTIVE', async () => {
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'a1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: true,
+    });
+    await service.unblock('c1', 'a1');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
+    });
+  });
+
   it('unblock restores INVITED (not ACTIVE) for a BLOCKED employee that never accepted its invite', async () => {
     prisma.user.findFirst.mockResolvedValue({
       id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: false,
@@ -435,7 +459,9 @@ describe('UsersService', () => {
   it.each([
     ['accepted invite (emailVerifiedAt set)', { role: 'EMPLOYEE', emailVerifiedAt: new Date(), emailVerificationRequired: false }],
     ['founder-style login (verification required)', { role: 'EMPLOYEE', emailVerifiedAt: null, emailVerificationRequired: true }],
-    ['ADMIN login', { role: 'ADMIN', emailVerifiedAt: null, emailVerificationRequired: false }],
+    // Q4 (fix final): ADMIN com e-mail já confirmado volta a ACTIVE; ADMIN convidado que nunca aceitou
+    // volta a INVITED (teste logo acima) — o marcador não depende mais do papel.
+    ['ADMIN login (e-mail confirmado)', { role: 'ADMIN', emailVerifiedAt: new Date(), emailVerificationRequired: false }],
   ])('unblock restores ACTIVE for a BLOCKED %s', async (_label, fields) => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', status: 'BLOCKED', ...fields });
     prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });

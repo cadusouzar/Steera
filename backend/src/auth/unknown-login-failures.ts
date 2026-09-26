@@ -94,6 +94,10 @@ export class UnknownLoginFailureTracker {
   }
 }
 
+// Chave = o e-mail EXATAMENTE como chegou (fix final): a busca da conta real em AuthService.login é
+// findUnique por igualdade exata (LoginDto não tem transform). Minúsculas/trim aqui deixavam variantes
+// de caixa distinguirem conta real de e-mail inexistente (travar "FULANO@x" — sem conta — e testar
+// "fulano@x": conta real → 401, inexistente → 403).
 function normalize(email: string): string {
-  return String(email ?? '').trim().toLowerCase();
+  return String(email ?? '');
 }

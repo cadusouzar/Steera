@@ -1,6 +1,9 @@
 import { ExecutionContext } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { ThrottlerException, ThrottlerStorageService } from '@nestjs/throttler';
+import { THROTTLERS } from '../app-throttlers';
+import { TimeClockController } from '../time-clock/time-clock.controller';
 import { AuthController } from './auth.controller';
 import { FriendlyThrottlerGuard } from './guards/friendly-throttler.guard';
 
@@ -25,17 +28,22 @@ function makeContext(handlerName: Handler, req: Record<string, any>): ExecutionC
   } as unknown as ExecutionContext;
 }
 
+// Mesma lista de throttlers nomeados registrada em app.module.ts (THROTTLERS).
+const storages: ThrottlerStorageService[] = [];
 async function buildGuard() {
-  const options = [
-    { name: 'default', ttl: 900_000, limit: 5 },
-    { name: 'login-email', ttl: 900_000, limit: 5 },
-  ];
-  const guard = new FriendlyThrottlerGuard(options as any, new ThrottlerStorageService(), new Reflector());
+  const storage = new ThrottlerStorageService();
+  storages.push(storage);
+  const guard = new FriendlyThrottlerGuard(THROTTLERS as any, storage, new Reflector());
   await guard.onModuleInit();
   return guard;
 }
 
 describe('rate limits de /auth (throttler real contra os handlers reais)', () => {
+  // O storage agenda um setTimeout de 15min por chave — sem limpar, o Jest nunca sai sozinho.
+  afterEach(() => {
+    storages.splice(0).forEach((storage) => storage.onApplicationShutdown());
+  });
+
   it('login: o MESMO e-mail vindo de IPs diferentes nunca é barrado pelo throttler (logins certos não podem contar)', async () => {
     const guard = await buildGuard();
     for (let i = 0; i < 20; i++) {
@@ -79,5 +87,42 @@ describe('rate limits de /auth (throttler real contra os handlers reais)', () =>
 
     const otherSession = { ip: '10.0.0.1', body: {}, headers: {}, cookies: { rt: 'sessao-b' } };
     await expect(guard.canActivate(makeContext('refresh', otherSession))).resolves.toBe(true);
+  });
+
+  // Q2 (fix final): só por sessão, um cookie aleatório por requisição ganhava um bucket novo a cada
+  // chamada — sem teto nenhum pra quem martela /auth/refresh com lixo. "refresh-ip" é um teto
+  // secundário por IP (600/15min), bem acima do uso legítimo de um escritório inteiro.
+  it('refresh: teto secundário por IP — 600 sessões aleatórias do mesmo IP passam, a 601ª é 429; outro IP segue livre', async () => {
+    const guard = await buildGuard();
+    for (let i = 0; i < 600; i++) {
+      const req = { ip: '10.7.7.7', body: {}, headers: {}, cookies: { rt: `lixo-${i}` } };
+      await expect(guard.canActivate(makeContext('refresh', req))).resolves.toBe(true);
+    }
+    const next = { ip: '10.7.7.7', body: {}, headers: {}, cookies: { rt: 'lixo-novo' } };
+    const err = await guard.canActivate(makeContext('refresh', next)).catch((e) => e);
+    expect(err).toBeInstanceOf(ThrottlerException);
+    expect(err.message).toBe('Muitas tentativas. Tente novamente em 15 minutos.');
+
+    const otherIp = { ip: '10.7.7.8', body: {}, headers: {}, cookies: { rt: 'lixo-novo' } };
+    await expect(guard.canActivate(makeContext('refresh', otherIp))).resolves.toBe(true);
+  });
+
+  // Throttler nomeado vale em TODA rota com ThrottlerGuard que não o pule — "refresh-ip" só pode
+  // valer em /auth/refresh.
+  it.each([
+    ['AuthController', AuthController],
+    ['TimeClockController', TimeClockController],
+  ])('%s: toda rota com throttler pula "refresh-ip", exceto refresh', (_name, controller) => {
+    const proto = (controller as any).prototype;
+    const throttled = Object.getOwnPropertyNames(proto).filter((name) => {
+      if (name === 'constructor') return false;
+      const guards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, proto[name]) ?? [];
+      return guards.includes(FriendlyThrottlerGuard);
+    });
+    expect(throttled.length).toBeGreaterThan(0);
+    for (const name of throttled) {
+      const skip = Reflect.getMetadata('THROTTLER:SKIPrefresh-ip', proto[name]);
+      expect({ name, skip: skip === true }).toEqual({ name, skip: name !== 'refresh' });
+    }
   });
 });

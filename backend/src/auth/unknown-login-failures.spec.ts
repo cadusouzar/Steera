@@ -33,10 +33,14 @@ describe('UnknownLoginFailureTracker', () => {
     expect(err!.getResponse()).toEqual(accountLockedError(900).getResponse());
   });
 
-  it('a chave é normalizada (trim + minúsculas)', () => {
-    fail('  Vitima@Teste.COM ', 3);
-    fail('vitima@teste.com', 2);
-    expect(() => tracker.assertNotLocked('VITIMA@teste.com')).toThrow(ForbiddenException);
+  // Q5: a chave tem a MESMA semântica da busca da conta real (findUnique por igualdade exata, sem
+  // transform no LoginDto) — normalizar aqui deixaria variantes de caixa distinguirem conta real de
+  // e-mail inexistente.
+  it('a chave é o e-mail exato (sem minúsculas nem trim — igual à busca da conta real)', () => {
+    fail('Vitima@Teste.COM', 5);
+    expect(() => tracker.assertNotLocked('Vitima@Teste.COM')).toThrow(ForbiddenException);
+    expect(() => tracker.assertNotLocked('vitima@teste.com')).not.toThrow();
+    expect(() => tracker.assertNotLocked(' Vitima@Teste.COM ')).not.toThrow();
   });
 
   it('retryAfterSeconds diminui com o tempo e a trava expira sozinha depois de 15 minutos', () => {

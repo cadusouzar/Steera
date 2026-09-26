@@ -250,12 +250,12 @@ export class UsersService {
     //
     // Um convite pendente bloqueado e depois desbloqueado volta a INVITED, não ACTIVE (senão ficaria
     // ACTIVE com o hash aleatório inutilizável de create(), fora do fluxo de aceite). block() perde o
-    // status INVITED, então o marcador de "nunca aceitou o convite" é: EMPLOYEE + emailVerifiedAt
-    // null + emailVerificationRequired false. Aceitar o convite sempre seta emailVerifiedAt;
-    // fundadores têm emailVerificationRequired true; logins legados foram backfillados como
-    // confirmados — nenhum desses cai aqui.
-    const neverAcceptedInvite =
-      user.role === 'EMPLOYEE' && user.emailVerifiedAt === null && user.emailVerificationRequired === false;
+    // status INVITED, então o marcador de "nunca aceitou o convite" é: emailVerifiedAt null +
+    // emailVerificationRequired false, independente do papel (fix final — um ADMIN convidado também
+    // volta a INVITED). Aceitar o convite sempre seta emailVerifiedAt; fundadores têm
+    // emailVerificationRequired true; logins legados foram backfillados como confirmados — nenhum
+    // desses cai aqui.
+    const neverAcceptedInvite = user.emailVerifiedAt === null && user.emailVerificationRequired === false;
     await this.prisma.user.update({
       where: { id: userId },
       data: { status: neverAcceptedInvite ? 'INVITED' : 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },

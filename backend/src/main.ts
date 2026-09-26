@@ -6,7 +6,7 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { validateJwtSecret } from './common/jwt-secret.util';
 import { translateValidationErrors } from './common/validation-message-translator.util';
-import { validateMailConfig } from './email/mail-config.util';
+import { readResendApiKey, validateMailConfig } from './email/mail-config.util';
 
 async function bootstrap() {
   // Falha rápido, antes de qualquer outra coisa: um JWT_ACCESS_SECRET ausente,
@@ -16,11 +16,12 @@ async function bootstrap() {
   validateJwtSecret(process.env.JWT_ACCESS_SECRET);
 
   // Mesma lógica de falha rápida, agora para e-mail transacional: nunca deixa
-  // o backend subir em produção sem RESEND_API_KEY (ver mail-config.util.ts).
+  // o backend subir em produção sem RESEND_API_KEY nem com um FRONTEND_URL que não seja https
+  // público (ver mail-config.util.ts).
   // Em dev sem chave, o boot segue normalmente, só avisando — os e-mails
   // vão parar no log (LogEmailSender, ver email.module.ts).
   validateMailConfig(process.env);
-  if (process.env.NODE_ENV !== 'production' && !process.env.RESEND_API_KEY) {
+  if (process.env.NODE_ENV !== 'production' && !readResendApiKey(process.env)) {
     Logger.warn('RESEND_API_KEY ausente — e-mails serão só registrados no log', 'Bootstrap');
   }
 

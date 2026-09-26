@@ -328,12 +328,23 @@ describe('AuthService', () => {
       expect(real[5].getResponse()).toEqual(accountLockedError(900).getResponse());
     });
 
-    it('e-mail inventado travado continua 403 mesmo com qualquer senha, e a chave ignora maiúsculas/espaços', async () => {
+    it('e-mail inventado travado continua 403 mesmo com qualquer senha', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       for (let i = 0; i < 5; i++) await attempt('x', 'fake@teste.com');
-      const err = await attempt('outra', '  FAKE@teste.com ');
+      const err = await attempt('outra', 'fake@teste.com');
       expect(err).toBeInstanceOf(ForbiddenException);
       expect(err.getResponse().code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
+    });
+
+    // Q5: a busca da conta real é por igualdade EXATA do e-mail (findUnique, sem transform no
+    // LoginDto). Se a chave do e-mail inventado fosse minúscula/aparada, travar "VITIMA@..." (que não
+    // acha conta) e depois testar "vitima@..." distinguiria conta real (401, contador próprio) de
+    // e-mail inexistente (403). A chave tem a mesma semântica da busca.
+    it('a chave do e-mail inventado é exatamente o e-mail enviado (mesma semântica da busca da conta)', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      for (let i = 0; i < 5; i++) await attempt('x', 'FAKE@teste.com');
+      await expect(attempt('x', 'fake@teste.com')).resolves.toBeInstanceOf(UnauthorizedException);
+      await expect(attempt('x', 'FAKE@teste.com')).resolves.toBeInstanceOf(ForbiddenException);
     });
 
     it('login CERTO nunca conta: 6 logins seguidos com a senha certa entram todos', async () => {
@@ -418,17 +429,98 @@ describe('AuthService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('INVITED + qualquer senha → 401 genérico, sem checar a senha nem incrementar o contador', async () => {
-      const row = installUserRow(activeUser({ status: 'INVITED', failedLoginAttempts: 4 }));
+    it('INVITED + qualquer senha (mesmo a "certa") → 401 genérico, nunca contra o hash do login, sem tocar no banco', async () => {
+      const row = installUserRow(activeUser({ status: 'INVITED', failedLoginAttempts: 4, passwordHash: 'hash-do-convite' }));
       const verify = jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
 
       const err = await attempt('qualquer');
       expect(err).toBeInstanceOf(UnauthorizedException);
       expect(err.message).toBe('E-mail ou senha inválidos');
-      expect(verify).not.toHaveBeenCalled();
+      // I1: roda um verify "de mentira" (hash fixo do processo) pra latência bater com a de uma
+      // conta real — nunca contra o hash do próprio login.
+      expect(verify).toHaveBeenCalledTimes(1);
+      expect(verify.mock.calls[0][0]).not.toBe('hash-do-convite');
       expect(row.failedLoginAttempts).toBe(4);
       expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
       expect(email.send).not.toHaveBeenCalled();
+    });
+
+    // I1: antes, senha errada só contava pra ACTIVE/LOCKED — INVITED/BLOCKED nunca travavam, então
+    // 6 senhas erradas davam 401×6 nelas e 401×5+403 numa conta real/e-mail inventado: dava pra
+    // descobrir que o e-mail tinha um login convidado/bloqueado. Agora caem na MESMA trava em memória
+    // do e-mail inventado.
+    const sixWrong = async (emailAddr: string) => {
+      const out: any[] = [];
+      for (let i = 0; i < 6; i++) out.push(await attempt('errada', emailAddr));
+      return out;
+    };
+    const expectSameSequence = (actual: any[], reference: any[]) => {
+      for (let i = 0; i < 5; i++) {
+        expect(actual[i]).toBeInstanceOf(UnauthorizedException);
+        expect(actual[i].getResponse()).toEqual(reference[i].getResponse());
+      }
+      expect(actual[5]).toBeInstanceOf(ForbiddenException);
+      expect(actual[5].getStatus()).toBe(reference[5].getStatus());
+      expect(actual[5].getResponse()).toEqual(reference[5].getResponse());
+      expect(actual[5].getResponse()).toEqual(accountLockedError(900).getResponse());
+    };
+
+    it.each(['INVITED', 'BLOCKED'])(
+      'anti-enumeração: %s dá 401×5 e depois o MESMO 403 ACCOUNT_TEMPORARILY_LOCKED de uma conta real e de um e-mail inventado',
+      async (status) => {
+        const verify = jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+        installUserRow(activeUser());
+        const real = await sixWrong('vitima@teste.com');
+
+        prisma.user.findUnique.mockResolvedValue(null);
+        const unknown = await sixWrong('nao-existe@teste.com');
+
+        installUserRow(activeUser({ id: 'u9', email: 'outro@teste.com', status }));
+        verify.mockClear();
+        const other = await sixWrong('outro@teste.com');
+
+        expectSameSequence(unknown, real);
+        expectSameSequence(other, real);
+        // Um verify por tentativa que chegou a conferir senha (as 5 primeiras; a 6ª já sai no 403).
+        expect(verify).toHaveBeenCalledTimes(5);
+      },
+    );
+
+    it('BLOCKED travado pela trava em memória: nem a senha certa entra (403 da trava, não a mensagem de admin)', async () => {
+      installUserRow(activeUser({ status: 'BLOCKED' }));
+      const verify = jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+      for (let i = 0; i < 5; i++) await attempt('errada');
+      verify.mockResolvedValue(true);
+      const err = await attempt('certa');
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse().code).toBe('ACCOUNT_TEMPORARILY_LOCKED');
+    });
+
+    it('verifyPassword roda em TODO caminho de senha (conta ativa, e-mail inventado, INVITED, BLOCKED)', async () => {
+      const verify = jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+
+      installUserRow(activeUser());
+      await attempt('errada');
+      expect(verify).toHaveBeenCalledTimes(1);
+
+      prisma.user.findUnique.mockResolvedValue(null);
+      await attempt('errada', 'nao-existe@teste.com');
+      expect(verify).toHaveBeenCalledTimes(2);
+
+      installUserRow(activeUser({ status: 'INVITED' }));
+      await attempt('errada');
+      expect(verify).toHaveBeenCalledTimes(3);
+
+      installUserRow(activeUser({ status: 'BLOCKED' }));
+      await attempt('errada');
+      expect(verify).toHaveBeenCalledTimes(4);
+
+      // O verify do e-mail inventado e do INVITED usa o hash "de mentira" do processo, nunca 'h'.
+      expect(verify.mock.calls[1][0]).not.toBe('h');
+      expect(verify.mock.calls[2][0]).not.toBe('h');
+      expect(verify.mock.calls[1][0]).toBe(verify.mock.calls[2][0]);
+      expect(verify.mock.calls[3][0]).toBe('h');
     });
   });
 
@@ -1466,8 +1558,21 @@ describe('AuthService', () => {
         expect(email.send).not.toHaveBeenCalled();
       });
 
+      // Q3: login que não precisa confirmar (convidado que aceitou, legado) → mesmo 400, sem emitir.
+      it('emailVerificationRequired false → 400 "Seu e-mail já está confirmado." sem emitir nada', async () => {
+        prisma.user.findUniqueOrThrow.mockResolvedValue({
+          id: 'u1', email: 'a@b.com', name: 'Ana', emailVerifiedAt: null, emailVerificationRequired: false,
+        });
+
+        await expect(service.resendVerification('u1')).rejects.toThrow(new BadRequestException('Seu e-mail já está confirmado.'));
+        expect(userTokens.issue).not.toHaveBeenCalled();
+        expect(email.send).not.toHaveBeenCalled();
+      });
+
       it('pendente → reemite EMAIL_VERIFICATION, reenvia e devolve { sent }', async () => {
-        prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', email: 'a@b.com', name: 'Ana', emailVerifiedAt: null });
+        prisma.user.findUniqueOrThrow.mockResolvedValue({
+          id: 'u1', email: 'a@b.com', name: 'Ana', emailVerifiedAt: null, emailVerificationRequired: true,
+        });
         userTokens.issue.mockResolvedValue('raw-verify-token-2');
         email.send.mockResolvedValue(false);
 

@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { THROTTLERS } from './app-throttlers';
 import { AuthModule } from './auth/auth.module';
 import { EmailVerifiedGuard } from './auth/guards/email-verified.guard';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
@@ -59,10 +60,10 @@ import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
     // em AuthService.login, que só conta falhas. O valor usado em runtime vem
     // do @Throttle({'login-email': {...}}) de cada handler; este aqui é o
     // mínimo pra esse nome existir em `this.throttlers` do guard.
-    ThrottlerModule.forRoot([
-      { name: 'default', ttl: 900_000, limit: 5 },
-      { name: 'login-email', ttl: 900_000, limit: 5 },
-    ]),
+    //
+    // "refresh-ip" (fix final): teto secundário por IP só em POST /auth/refresh — ver
+    // app-throttlers.ts, onde a lista mora (compartilhada com o teste do throttler real).
+    ThrottlerModule.forRoot(THROTTLERS),
     PrismaModule,
     EmailModule,
     AuthModule,

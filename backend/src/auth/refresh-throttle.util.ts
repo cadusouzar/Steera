@@ -14,3 +14,10 @@ export function refreshSessionTracker(req: Record<string, any>): string {
   }
   return `ip:${req?.ip ?? 'unknown'}`;
 }
+
+// Tracker do throttler "refresh-ip" (teto secundário por IP em POST /auth/refresh, fix final de
+// "Acesso e sessões"): sempre o IP, nunca o cookie — é justamente o limite que um cookie novo por
+// requisição não consegue contornar.
+export function refreshIpTracker(req: Record<string, any>): string {
+  return `ip:${req?.ip ?? 'unknown'}`;
+}

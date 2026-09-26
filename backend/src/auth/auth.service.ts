@@ -23,7 +23,7 @@ import { pickCompanyIdentity } from './schema-name-picker.util';
 import { RegisterDto } from './dto/register.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
-import { hashPassword, verifyPassword } from './password.util';
+import { getDummyPasswordHash, hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
@@ -456,8 +456,13 @@ export class AuthService {
     // em memória (UnknownLoginFailureTracker); a da conta real é persistida (User.lockedUntil). Só
     // tentativa ERRADA conta nos dois caminhos — o throttler por e-mail que existia antes rodava
     // antes do handler e contava login certo também (fix round 1).
+    //
+    // Fix final: o e-mail sem conta também roda um argon2.verify (contra um hash "de mentira" do
+    // processo) — sem isso a resposta saía bem mais rápido que a de uma conta real e a latência
+    // denunciava se o e-mail existe.
     if (!user) {
       this.unknownLoginFailures.assertNotLocked(dto.email);
+      await this.verifyAgainstDummyHash(dto.password);
       this.unknownLoginFailures.recordFailure(dto.email);
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
@@ -471,17 +476,31 @@ export class AuthService {
       throw accountLockedError(Math.ceil((user.lockedUntil.getTime() - now.getTime()) / 1000));
     }
 
+    // INVITED/BLOCKED (fix final de "Acesso e sessões"): senha errada nelas não conta no banco
+    // (BLOCKED é ação de admin, INVITED não tem senha própria ainda) — mas sem contar em lugar
+    // nenhum, 6 senhas erradas davam 401×6 aqui e 401×5+403 numa conta real ou num e-mail
+    // inventado, denunciando um login convidado/bloqueado. Então usam a MESMA trava em memória do
+    // e-mail inventado (UnknownLoginFailureTracker): checada antes da senha, conta só falha.
+    const countsInDatabase = user.status === 'ACTIVE' || user.status === 'LOCKED';
+    if (!countsInDatabase) this.unknownLoginFailures.assertNotLocked(dto.email);
+
     // Confirma a senha ANTES de checar o status — auditoria de segurança (17/09/2026): revelar
     // "esta conta está bloqueada" pra quem nem sabe a senha certa vazaria a existência e o estado
     // de uma conta como um oráculo de enumeração. Só depois da senha bater é seguro dar uma
     // mensagem específica (a pessoa já provou que é quem diz ser). INVITED (convite ainda não
-    // aceito) nunca entra por senha — nem chega a conferir o hash —, com a mesma resposta genérica.
-    const passwordOk = user.status !== 'INVITED' && (await verifyPassword(user.passwordHash, dto.password));
+    // aceito) nunca entra por senha: confere contra o hash "de mentira" (mesma latência) e falha
+    // sempre, com a mesma resposta genérica.
+    let passwordOk = false;
+    if (user.status === 'INVITED') {
+      await this.verifyAgainstDummyHash(dto.password);
+    } else {
+      passwordOk = await verifyPassword(user.passwordHash, dto.password);
+    }
     if (!passwordOk) {
-      // Só conta pra ACTIVE (e o LOCKED legado, tratado como ACTIVE) — BLOCKED é ação de admin e
-      // INVITED não tem senha própria ainda; nenhum dos dois precisa acumular tentativas.
-      if (user.status === 'ACTIVE' || user.status === 'LOCKED') {
+      if (countsInDatabase) {
         await this.recordFailedLogin(user.id, user.email, now);
+      } else {
+        this.unknownLoginFailures.recordFailure(dto.email);
       }
       // Mesma mensagem genérica sempre, mesmo na tentativa que acabou de travar a conta — nunca
       // revelar o estado da conta pra uma senha errada (a 6ª tentativa, com a trava já ativa, é que
@@ -513,6 +532,17 @@ export class AuthService {
     this.setRefreshCookie(res, refreshValue);
     const permissions = await this.getEffectivePermissionsAsSystem(user.id);
     return { accessToken, user: this.toPublicUser(user, permissions) };
+  }
+
+  // Gasta o mesmo tempo de um argon2.verify de verdade, sem nenhum hash real a conferir (e-mail sem
+  // conta, login INVITED). O resultado é ignorado de propósito (quem chama sempre trata como falha) e
+  // um erro aqui nunca vira outra resposta — o chamador responde o 401 genérico de qualquer jeito.
+  private async verifyAgainstDummyHash(password: string): Promise<void> {
+    try {
+      await verifyPassword(await getDummyPasswordHash(), password);
+    } catch {
+      // Ignorado: ver comentário acima.
+    }
   }
 
   // Contador de senha errada ATÔMICO (fix round 1): antes era ler failedLoginAttempts no findUnique
@@ -684,7 +714,11 @@ export class AuthService {
   // reenvio e a resposta diz se o provedor aceitou (`sent`). E-mail já confirmado → 400.
   async resendVerification(userId: string): Promise<{ sent: boolean }> {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    if (user.emailVerifiedAt) throw new BadRequestException('Seu e-mail já está confirmado.');
+    // Login que nem precisa confirmar (convidado que aceitou o convite, legado backfillado) recebe o
+    // mesmo 400 — não há o que reenviar.
+    if (user.emailVerifiedAt || !user.emailVerificationRequired) {
+      throw new BadRequestException('Seu e-mail já está confirmado.');
+    }
     const sent = await this.sendVerificationEmail(user.id, user.email, user.name ?? null);
     return { sent };
   }

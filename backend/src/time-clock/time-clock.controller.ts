@@ -52,7 +52,7 @@ export class TimeClockController {
   // — aqui não faz sentido nenhum (não é uma ação de login).
   @Post('punches')
   @UseGuards(FriendlyThrottlerGuard)
-  @SkipThrottle({ 'login-email': true })
+  @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 30, ttl: 900_000 } })
   @UseInterceptors(FileInterceptor('photo', { limits: { fileSize: 8 * 1024 * 1024 } }))
   createPunch(

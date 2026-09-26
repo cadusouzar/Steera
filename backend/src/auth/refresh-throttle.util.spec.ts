@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { refreshSessionTracker } from './refresh-throttle.util';
+import { refreshIpTracker, refreshSessionTracker } from './refresh-throttle.util';
 
 describe('refreshSessionTracker', () => {
   it('rastreia pela sessão (sha256 do cookie rt), nunca pelo valor cru do cookie', () => {
@@ -23,5 +23,12 @@ describe('refreshSessionTracker', () => {
     expect(refreshSessionTracker({ ip: '1.2.3.4' })).toBe('ip:1.2.3.4');
     expect(refreshSessionTracker({ cookies: {}, ip: '1.2.3.4' })).toBe('ip:1.2.3.4');
     expect(refreshSessionTracker({ cookies: { rt: '' }, ip: '1.2.3.4' })).toBe('ip:1.2.3.4');
+  });
+});
+
+describe('refreshIpTracker', () => {
+  it('rastreia sempre pelo IP, ignorando o cookie (sessões aleatórias do mesmo IP caem no mesmo bucket)', () => {
+    expect(refreshIpTracker({ cookies: { rt: 'a' }, ip: '1.2.3.4' })).toBe('ip:1.2.3.4');
+    expect(refreshIpTracker({ cookies: { rt: 'b' }, ip: '1.2.3.4' })).toBe('ip:1.2.3.4');
   });
 });
