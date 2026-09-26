@@ -13,7 +13,7 @@ import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension'
 import { applyMigrations } from '../prisma/tenant-migration.util';
 import { normalizePhone } from '../common/phone.util';
 import { EmailService } from '../email/email.service';
-import { accountLockedTemplate, buildAppLink } from '../email/email-templates';
+import { accountLockedTemplate, buildAppLink, inviteTemplate, passwordChangedTemplate, passwordResetTemplate } from '../email/email-templates';
 import { getPlan, lockedItemsFor, planLimit } from '../plans/plan-catalog';
 import { accountLockedError } from './account-lock.util';
 import { maskDocument, normalizeDocument, PersonType } from './document.util';
@@ -52,6 +52,18 @@ const REFRESH_COOKIE_NAME = 'rt';
 // a zero e a pessoa recebe um e-mail de aviso com link de redefinição de senha.
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 export const LOCK_DURATION_MS = 15 * 60_000;
+
+// Resposta ÚNICA de POST /auth/forgot-password, exista ou não a conta — mesmo texto, mesmo status
+// (202) sempre (ver forgotPassword() abaixo). Exportada só pra o teste comparar sem duplicar a
+// string à mão em vários lugares.
+export const FORGOT_PASSWORD_MESSAGE = 'Se existir uma conta com esse e-mail, enviamos um link para redefinir a senha.';
+
+// Mesmo texto de UserTokensService's INVALID_OR_EXPIRED_MESSAGE (não exportada por aquele módulo) —
+// duplicada aqui de propósito: um token PASSWORD_RESET pertencente a um usuário INVITED é
+// tecnicamente válido (consume() não rejeita), mas convite pendente não tem senha própria pra
+// "redefinir" — o aceite de convite é outro fluxo (Task 7). Nunca revela essa distinção pro
+// cliente, que vê a mesma mensagem genérica de link inválido/expirado.
+const RESET_PASSWORD_INVITED_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
 
 // process.cwd(), não __dirname: __dirname aponta pra dentro de `dist/src/auth` depois de compilado
 // (`npm run build` + `node dist/main.js`), onde `prisma/` não existe — mesmo padrão já usado em
@@ -472,6 +484,109 @@ export class AuthService {
     } catch (err) {
       this.logger.error(`Falha ao preparar o e-mail de conta travada (user ${userId}): ${(err as Error).message}`);
     }
+  }
+
+  // POST /auth/forgot-password — sempre 202 com a mesma mensagem genérica (FORGOT_PASSWORD_MESSAGE),
+  // exista ou não a conta: nunca revela a existência de um e-mail (anti-enumeração, mesma filosofia
+  // já usada pelo 401 genérico de login() e pelo 403 idêntico do throttler "login-email"). E-mail
+  // inexistente literalmente não chama issue()/send() nenhum — não é só "a mesma resposta", é o
+  // mesmo NÚMERO de operações de negócio (nada a esconder atrás de um await artificial).
+  //
+  // runAsSystem: rota @Public(), e-mail é globalmente único e ainda não sabemos a empresa do
+  // usuário antes de achá-lo — mesmo raciocínio de login()/refresh() acima.
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const user = await runAsSystem(() =>
+      this.prisma.user.findUnique({ where: { email }, include: { company: { select: { name: true } } } }),
+    );
+
+    if (user) {
+      try {
+        // INVITED nunca tem senha própria pra redefinir — reenviar o convite é o equivalente
+        // correto de "esqueci minha senha" pra esse status (mesmo link/token, apenas reemitido).
+        if (user.status === 'INVITED') {
+          await this.sendInviteEmail(user.id, user.email, user.company?.name ?? '');
+        } else {
+          const raw = await this.userTokens.issue(user.id, 'PASSWORD_RESET');
+          const template = passwordResetTemplate(buildAppLink('/redefinir-senha', raw));
+          await this.email.send({ to: user.email, ...template }, 'password-reset');
+        }
+      } catch (err) {
+        // Nunca derruba a resposta genérica — mesma filosofia de sendAccountLockedEmail acima
+        // (e-mail é sempre efeito colateral, nunca a fonte de verdade da ação principal).
+        this.logger.error(`Falha ao preparar o e-mail de esqueci-minha-senha (user ${user.id}): ${(err as Error).message}`);
+      }
+    }
+
+    return { message: FORGOT_PASSWORD_MESSAGE };
+  }
+
+  // POST /auth/reset-password — token + nova senha. Nunca desfaz um BLOCKED (ação de admin,
+  // ortogonal a "esqueceu a senha") — `status` deliberadamente NUNCA aparece no `data` do update
+  // abaixo. INVITED é rejeitado (RESET_PASSWORD_INVITED_MESSAGE): convite se aceita pela rota de
+  // convite (Task 7), nunca por aqui.
+  async resetPassword(rawToken: string, newPassword: string): Promise<void> {
+    // consume() já lança BadRequestException('Link inválido ou expirado. Peça um novo.') sozinho
+    // pra token ausente/tipo errado/expirado/já usado — repassada como está (Step 1, teste 7).
+    const userId = await this.userTokens.consume(rawToken, 'PASSWORD_RESET');
+    const user = await runAsSystem(() => this.prisma.user.findUniqueOrThrow({ where: { id: userId } }));
+
+    if (user.status === 'INVITED') {
+      throw new BadRequestException(RESET_PASSWORD_INVITED_MESSAGE);
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+
+    // Rota @Public(): nenhum contexto de tenant nunca é estabelecido pra ela (TenantContextInterceptor
+    // só roda em rota autenticada), então runAsSystem aqui é só bypass puro — diferente de
+    // changePassword()/UsersService.block() (rotas AUTENTICADAS, com um companyId real no contexto),
+    // não há NENHUM registry/companyId ativo pra sequer cogitar redirecionar pro client de um
+    // tenant. Confirmado lendo tenant-rls.extension.ts: `$allOperations` checa `store.bypass` ANTES
+    // de checar se o modelo é de tenant (`isTenantModel`) — o branch de bypass nunca alcança a
+    // lógica de redirecionamento/registry, sempre roda no client central (`base`); redirecionar
+    // pro client de tenant é estruturalmente inatingível aqui.
+    //
+    // Ainda assim, `runInsideExplicitTenantTransaction` é necessário (não é redundante): sem ele,
+    // CADA operação dentro do `$transaction(async (tx) => ...)` abaixo dispararia de novo o hook
+    // `$allOperations` (que não sabe que já está "dentro" de uma transação explícita) e tentaria
+    // abrir sua PRÓPRIA mini-transação via `base.$transaction([...])` — exatamente o problema que
+    // fez `changePassword()`/`UsersService.block()` adotarem este mesmo padrão (ver o comentário
+    // longo em `changePassword()` acima). `runInsideExplicitTenantTransaction` marca o contexto
+    // como "já dentro de uma transação explícita", fazendo o hook simplesmente repassar a chamada
+    // (`return query(args)`) pra rodar na MESMA conexão/transação do `tx` — só assim o
+    // `user.update` e o `refreshToken.updateMany` abaixo são de fato atômicos entre si.
+    await runAsSystem(() =>
+      runInsideExplicitTenantTransaction(() =>
+        this.prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`;
+          await tx.user.update({
+            where: { id: userId },
+            data: {
+              passwordHash,
+              failedLoginAttempts: 0,
+              lockedUntil: null,
+              mustChangePassword: false,
+              emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+            },
+          });
+          await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+        }),
+      ),
+    );
+
+    await this.email.send({ to: user.email, ...passwordChangedTemplate() }, 'password-changed');
+  }
+
+  // Emite um token INVITE e envia o e-mail de convite — usado por forgotPassword() acima (INVITED
+  // reenviando o próprio convite) e, mais adiante (Task 7), por UsersService ao criar um login
+  // INVITED novo. Ao contrário de sendAccountLockedEmail()/do bloco try/catch de forgotPassword(),
+  // esta função NÃO engole erro nenhum — quem chama decide como reagir (forgotPassword() já embrulha
+  // a própria chamada num try/catch; um chamador futuro pode legitimamente precisar de outro
+  // comportamento, ex.: desfazer a criação do login se o convite não puder nem ser preparado).
+  async sendInviteEmail(userId: string, email: string, companyName: string): Promise<{ inviteUrl: string; sent: boolean }> {
+    const raw = await this.userTokens.issue(userId, 'INVITE');
+    const inviteUrl = buildAppLink('/aceitar-convite', raw);
+    const sent = await this.email.send({ to: email, ...inviteTemplate(companyName, inviteUrl) }, 'invite');
+    return { inviteUrl, sent };
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {

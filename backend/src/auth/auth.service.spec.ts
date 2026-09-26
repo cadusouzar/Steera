@@ -6,7 +6,7 @@ import { AuthorizationService } from '../authorization/authorization.service';
 import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import { AuthService, LOCK_DURATION_MS } from './auth.service';
+import { AuthService, FORGOT_PASSWORD_MESSAGE, LOCK_DURATION_MS } from './auth.service';
 import { UserTokensService } from './user-tokens/user-tokens.service';
 import * as passwordUtil from './password.util';
 
@@ -16,7 +16,7 @@ describe('AuthService', () => {
   let jwtService: any;
   let authorization: any;
   let email: { send: jest.Mock };
-  let userTokens: { issue: jest.Mock };
+  let userTokens: { issue: jest.Mock; consume: jest.Mock };
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
 
   // Cadastro ampliado (Task 5): shape completo do novo RegisterDto, usado como base por TODA
@@ -73,7 +73,7 @@ describe('AuthService', () => {
     };
     authorization = { getEffectivePermissions: jest.fn().mockResolvedValue({}) };
     email = { send: jest.fn().mockResolvedValue(true) };
-    userTokens = { issue: jest.fn().mockResolvedValue('raw-reset-token') };
+    userTokens = { issue: jest.fn().mockResolvedValue('raw-reset-token'), consume: jest.fn() };
     const module = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -888,6 +888,157 @@ describe('AuthService', () => {
     it('telefone inválido é recusado', async () => {
       prisma.company.findUniqueOrThrow.mockResolvedValue({ personType: 'PJ' });
       await expect(service.updateCompany('u1', 'c1', { ...companyDto, phone: '123' })).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // Task 5 ("Acesso e sessões", 26/09/2026): esqueci minha senha / redefinir senha.
+  describe('forgotPassword', () => {
+    it('e-mail inexistente devolve a mensagem genérica sem chamar issue nem send', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      const result = await service.forgotPassword('fantasma@teste.com');
+
+      expect(result).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('usuário ACTIVE recebe o e-mail de redefinição de senha e a mesma mensagem genérica', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', company: { name: 'Padaria Central' },
+      });
+      userTokens.issue.mockResolvedValue('raw-reset-token');
+
+      const result = await service.forgotPassword('ana@teste.com');
+
+      expect(result).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+      expect(userTokens.issue).toHaveBeenCalledWith('u1', 'PASSWORD_RESET');
+      expect(email.send).toHaveBeenCalledTimes(1);
+      const [message, context] = email.send.mock.calls[0];
+      expect(message.to).toBe('ana@teste.com');
+      expect(message.subject).toMatch(/redefinição de senha/i);
+      expect(message.html).toContain('/redefinir-senha');
+      expect(message.html).toContain('raw-reset-token');
+      expect(context).toBe('password-reset');
+    });
+
+    it('usuário INVITED reenvia o convite (nunca um e-mail de redefinição) com a mesma mensagem genérica', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u2', email: 'convidado@teste.com', status: 'INVITED', company: { name: 'Padaria Central' },
+      });
+      userTokens.issue.mockResolvedValue('raw-invite-token');
+
+      const result = await service.forgotPassword('convidado@teste.com');
+
+      expect(result).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+      expect(userTokens.issue).toHaveBeenCalledWith('u2', 'INVITE');
+      expect(email.send).toHaveBeenCalledTimes(1);
+      const [message, context] = email.send.mock.calls[0];
+      expect(message.to).toBe('convidado@teste.com');
+      expect(message.subject).toMatch(/convidado/i);
+      expect(message.html).toContain('/aceitar-convite');
+      expect(message.html).toContain('raw-invite-token');
+      expect(context).toBe('invite');
+    });
+
+    it('falha ao emitir/enviar o e-mail nunca troca a mensagem genérica por um erro', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', company: null });
+      userTokens.issue.mockRejectedValue(new Error('db down'));
+
+      const result = await service.forgotPassword('ana@teste.com');
+
+      expect(result).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+    });
+  });
+
+  describe('sendInviteEmail', () => {
+    it('emite um token INVITE, envia o e-mail e devolve a url do convite + se foi enviado', async () => {
+      userTokens.issue.mockResolvedValue('raw-invite-token');
+      email.send.mockResolvedValue(true);
+
+      const result = await service.sendInviteEmail('u3', 'novo@teste.com', 'Padaria Central');
+
+      expect(userTokens.issue).toHaveBeenCalledWith('u3', 'INVITE');
+      expect(result.inviteUrl).toContain('/aceitar-convite');
+      expect(result.inviteUrl).toContain('raw-invite-token');
+      expect(result.sent).toBe(true);
+      expect(email.send).toHaveBeenCalledWith(expect.objectContaining({ to: 'novo@teste.com' }), 'invite');
+    });
+  });
+
+  describe('resetPassword', () => {
+    const activeUser = {
+      id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', passwordHash: 'antigo', emailVerifiedAt: null,
+    };
+
+    it('token válido troca a senha, zera o bloqueio, confirma o e-mail, revoga as sessões e envia o aviso', async () => {
+      userTokens.consume.mockResolvedValue('u1');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser });
+
+      await service.resetPassword('token-valido', 'senhaNova12345');
+
+      expect(userTokens.consume).toHaveBeenCalledWith('token-valido', 'PASSWORD_RESET');
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: {
+          passwordHash: expect.any(String),
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          mustChangePassword: false,
+          emailVerifiedAt: expect.any(Date),
+        },
+      });
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(email.send).toHaveBeenCalledTimes(1);
+      const [message, context] = email.send.mock.calls[0];
+      expect(message.to).toBe('ana@teste.com');
+      expect(message.subject).toMatch(/senha.*alterada/i);
+      expect(context).toBe('password-changed');
+    });
+
+    it('mantém emailVerifiedAt já existente em vez de sobrescrever com a data de agora', async () => {
+      const verifiedAt = new Date('2026-01-01T00:00:00.000Z');
+      userTokens.consume.mockResolvedValue('u1');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser, emailVerifiedAt: verifiedAt });
+
+      await service.resetPassword('token-valido', 'senhaNova12345');
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: expect.objectContaining({ emailVerifiedAt: verifiedAt }),
+      });
+    });
+
+    it('usuário BLOCKED tem a senha trocada mas status nunca entra no data (BLOCKED nunca é desfeito por reset)', async () => {
+      userTokens.consume.mockResolvedValue('u1');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser, status: 'BLOCKED' });
+
+      await service.resetPassword('token-valido', 'senhaNova12345');
+
+      const data = prisma.user.update.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('status');
+    });
+
+    it('usuário INVITED é recusado — convite se aceita pela rota de convite, nunca por redefinir senha', async () => {
+      userTokens.consume.mockResolvedValue('u2');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser, id: 'u2', status: 'INVITED' });
+
+      await expect(service.resetPassword('token-valido', 'senhaNova12345')).rejects.toThrow(
+        'Link inválido ou expirado. Peça um novo.',
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('token inválido/expirado repassa a BadRequestException de consume()', async () => {
+      userTokens.consume.mockRejectedValue(new BadRequestException('Link inválido ou expirado. Peça um novo.'));
+
+      await expect(service.resetPassword('token-invalido', 'senhaNova12345')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
 });

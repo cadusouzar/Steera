@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LinkEmployeeDto } from './dto/link-employee.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { Roles } from './decorators/roles.decorator';
@@ -95,6 +97,41 @@ export class AuthController {
   @Post('refresh')
   refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.auth.refresh(req.cookies?.rt, res);
+  }
+
+  // Esqueci minha senha / redefinir senha ("Acesso e sessões", 26/09/2026) — as duas @Public(), sem
+  // sessão nenhuma ainda. AntiCsrfHeaderGuard nos dois pelo mesmo motivo de register()/login()
+  // acima (um <form> cross-site não consegue setar o cabeçalho custom).
+  //
+  // forgot-password: dois throttlers em paralelo, mesmo padrão de login() — "default" por IP
+  // (5/15min, mais apertado que o de login porque aqui cada chamada bem-sucedida DISPARA um e-mail
+  // de verdade, então o teto contra abuso grosseiro precisa ser mais baixo) e "login-email" por
+  // e-mail (3/15min — mais apertado que os 5/15min do próprio login, pra não deixar alguém inundar
+  // a caixa de entrada de UMA conta com pedidos de redefinição repetidos).
+  @Public()
+  @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
+  @Throttle({
+    default: { limit: 5, ttl: 900_000 },
+    'login-email': { limit: 3, ttl: 900_000, getTracker: loginEmailTracker },
+  })
+  @HttpCode(202)
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.auth.forgotPassword(dto.email);
+  }
+
+  // reset-password: sem e-mail no corpo (só token + senha nova), então o throttler "login-email"
+  // não faz sentido aqui — @SkipThrottle nele pelo mesmo motivo de refresh() acima (sem isso, toda
+  // chamada cairia no bucket "sem e-mail" do fallback de loginEmailTracker). Limite só por IP,
+  // mesmo teto genérico já usado por accept-invite/verify-email (10/15min).
+  @Public()
+  @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 10, ttl: 900_000 } })
+  @HttpCode(204)
+  @Post('reset-password')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.auth.resetPassword(dto.token, dto.newPassword);
   }
 
   @Public()
