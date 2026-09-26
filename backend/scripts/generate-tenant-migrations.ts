@@ -37,7 +37,10 @@ export const NOOP_WHEN_REPLAYED_FROM_EMPTY = [
 // mesmo motivo de AppModule/UserStatus: a migration que adiciona GRATIS ao enum é um `ALTER TYPE`
 // contra um tipo global único, e replayá-la de novo em cada empresa provisionada depois da primeira
 // quebraria com "enum label already exists".
-export const CENTRAL_ONLY_ENUM_NAMES = ['AppModule', 'UserStatus', 'CompanyPlanTier'];
+// UserTokenType (26/09/2026) — usado só por `UserToken`, tabela central nova (token de uso único
+// de confirmação/convite/redefinição de senha) — mesmo motivo das demais: sem uso nenhum em
+// tabela de tenant, não precisa (nem deve) ser replicado no histórico de tenant-migrations.
+export const CENTRAL_ONLY_ENUM_NAMES = ['AppModule', 'UserStatus', 'CompanyPlanTier', 'UserTokenType'];
 
 // Views que existem só sobre tabelas CENTRAIS (nunca sobre nenhuma tabela de tenant) — achado em
 // 25/09/2026 ao gerar a migration que cria `tenant_directory` (lê "Company"/"User", as duas

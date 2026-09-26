@@ -300,8 +300,8 @@ describe('CENTRAL_ONLY_VIEW_NAMES', () => {
 });
 
 describe('CENTRAL_ONLY_ENUM_NAMES', () => {
-  it('contém AppModule, UserStatus e CompanyPlanTier, os enums usados só por tabelas centrais hoje', () => {
-    expect(CENTRAL_ONLY_ENUM_NAMES).toEqual(['AppModule', 'UserStatus', 'CompanyPlanTier']);
+  it('contém AppModule, UserStatus, CompanyPlanTier e UserTokenType, os enums usados só por tabelas centrais hoje', () => {
+    expect(CENTRAL_ONLY_ENUM_NAMES).toEqual(['AppModule', 'UserStatus', 'CompanyPlanTier', 'UserTokenType']);
   });
 });
 

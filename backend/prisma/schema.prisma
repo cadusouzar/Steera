@@ -156,22 +156,23 @@ enum UserRole {
 enum UserStatus {
   ACTIVE
   BLOCKED
-  // Setado automaticamente pelo próprio backend (nunca por um admin) quando `failedLoginAttempts`
-  // atinge o teto — ver AuthService.login(). Distinto de BLOCKED (sempre uma ação deliberada de um
-  // admin) só pra dar uma mensagem certa em cada caso; as duas ações de desbloqueio (unblock e
-  // reset de senha) tratam os dois status da mesma forma.
+  // Legado — não é mais setado (26/09/2026): o bloqueio por excesso de senha errada virou
+  // temporário (`User.lockedUntil`). Migration converteu os LOCKED existentes em ACTIVE.
   LOCKED
+  // Login criado pelo admin que ainda não aceitou o convite (não tem senha própria). Conta no
+  // limite de logins do plano. Ver UsersService.create / AuthService.acceptInvite.
+  INVITED
 }
 
 model User {
-  id                  String         @id @default(cuid())
-  companyId           String
-  company             Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  email               String         @unique
+  id                        String         @id @default(cuid())
+  companyId                 String
+  company                   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email                     String         @unique
   // Nome do responsável — informado pelo fundador no cadastro; logins criados pelo admin ficam null.
-  name                String?
-  passwordHash        String
-  role                UserRole
+  name                      String?
+  passwordHash              String
+  role                      UserRole
   // Sem `@relation` de propósito: `Employee` é um modelo de tenant, fisicamente roteado pro schema
   // da empresa (ver tenant-rls.extension.ts) — uma FK de `public."User"` pra uma tabela que só
   // existe fisicamente dentro de `tenant_<companyId>` é estruturalmente impossível no Postgres (o
@@ -183,20 +184,27 @@ model User {
   // projeto usa `include: { employee: ... }` (todo lugar que precisa do Employee vinculado já faz a
   // busca manual em duas etapas, ver `TimeManagementAuthService.resolveOwnEmployee`), então remover
   // a relação Prisma não quebra nenhum join existente.
-  employeeId          String?        @unique
-  profileId           String?
-  profile             Profile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  modules             AppModule[]
-  status              UserStatus     @default(ACTIVE)
+  employeeId                String?        @unique
+  profileId                 String?
+  profile                   Profile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  modules                   AppModule[]
+  status                    UserStatus     @default(ACTIVE)
   // Incrementado a cada senha errada (nunca por e-mail inexistente — não há o que incrementar);
   // zerado num login bem-sucedido ou numa ação de admin (unblock/reset de senha). Ver
   // AuthService.login().
-  failedLoginAttempts Int            @default(0)
-  mustChangePassword  Boolean        @default(false)
-  hasFullPontoAccess  Boolean        @default(true)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  refreshTokens       RefreshToken[]
+  failedLoginAttempts       Int            @default(0)
+  // Fim do bloqueio temporário por excesso de senha errada (5 seguidas → +15min). null = sem bloqueio.
+  lockedUntil               DateTime?
+  // null = e-mail não confirmado. Logins anteriores a 26/09/2026 foram marcados como confirmados.
+  emailVerifiedAt           DateTime?
+  // true só pra quem nasce em POST /auth/register — torna a confirmação BLOQUEANTE (EmailVerifiedGuard).
+  emailVerificationRequired Boolean        @default(false)
+  userTokens                UserToken[]
+  mustChangePassword        Boolean        @default(false)
+  hasFullPontoAccess        Boolean        @default(true)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+  refreshTokens             RefreshToken[]
 
   @@index([companyId])
 }
@@ -212,6 +220,27 @@ model RefreshToken {
   createdAt         DateTime  @default(now())
 
   @@index([userId])
+}
+
+enum UserTokenType {
+  EMAIL_VERIFICATION
+  INVITE
+  PASSWORD_RESET
+}
+
+// Token de uso único enviado por e-mail (confirmação, convite, redefinição). Só o sha256 do valor
+// é guardado; o valor puro existe apenas no link. Central, sem RLS (mesmo tratamento de RefreshToken).
+model UserToken {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      UserTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([userId, type])
 }
 
 enum Scope {
