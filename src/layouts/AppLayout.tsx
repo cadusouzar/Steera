@@ -28,13 +28,17 @@ const FEATURE_LABELS: Record<string, string> = {
 // específico pro mais genérico (ex.: /app/ponto-administracao antes de /app/ponto, que também
 // bateria por prefixo). Usado só pra decidir se a rota ATUAL está travada pelo plano (Task 6,
 // 26/09/2026) — a fronteira de segurança real é o PlanGuard no backend.
+function matchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
 function lockedItemForPath(pathname: string): string | null {
-  if (pathname.startsWith('/app/ponto-administracao')) return 'PONTO_ADMINISTRACAO';
-  if (pathname.startsWith('/app/ponto')) return 'PONTO_REGISTRO';
-  if (pathname.startsWith('/app/orcamentos')) return 'COMERCIAL';
-  if (pathname.startsWith('/app/estoque') || pathname.startsWith('/app/compras')) return 'OPERACOES';
-  if (pathname.startsWith('/app/financas')) return 'FINANCAS';
-  if (pathname.startsWith('/app/analytics')) return 'ANALYTICS';
+  if (matchesPrefix(pathname, '/app/ponto-administracao')) return 'PONTO_ADMINISTRACAO';
+  if (matchesPrefix(pathname, '/app/ponto')) return 'PONTO_REGISTRO';
+  if (matchesPrefix(pathname, '/app/orcamentos')) return 'COMERCIAL';
+  if (matchesPrefix(pathname, '/app/estoque') || matchesPrefix(pathname, '/app/compras')) return 'OPERACOES';
+  if (matchesPrefix(pathname, '/app/financas')) return 'FINANCAS';
+  if (matchesPrefix(pathname, '/app/analytics')) return 'ANALYTICS';
   return null;
 }
 
@@ -210,7 +214,7 @@ const AppLayout = () => {
               <ChevronDown size={16} className={`transition-transform duration-300 ${isPontoOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isPontoOpen ? 'max-h-24 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isPontoOpen ? 'max-h-40 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <div className="pl-11 pr-2 space-y-1">
                 {hasModule('PONTO_REGISTRO') && (
                 <Link

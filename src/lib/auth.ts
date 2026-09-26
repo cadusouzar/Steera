@@ -34,7 +34,7 @@ export interface CurrentUser {
   // backend devolve `null` defensivamente quando `company` não vem populado (nunca acontece fora
   // de teste unitário do backend).
   companyName: string | null;
-  planTier: 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
+  planTier: 'GRATIS' | 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
   maxEmployeeLogins: number | null;
   // Nome do responsável (User.name) — null em logins criados pelo admin (sem nome ainda).
   name: string | null;
@@ -84,7 +84,7 @@ interface ApiUser {
   employeeId: string | null;
   hasFullPontoAccess: boolean;
   companyName: string | null;
-  planTier: 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
+  planTier: 'GRATIS' | 'BASICO' | 'PRO' | 'EMPRESARIAL' | null;
   maxEmployeeLogins: number | null;
   name: string | null;
   personType: 'PJ' | 'PF' | null;

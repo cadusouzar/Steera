@@ -21,7 +21,8 @@ const LockedNavItem = ({ icon: Icon, label, planLabel }: LockedNavItemProps) => 
     >
       <Icon size={18} />
       <span className="flex-1">{label}</span>
-      <Lock size={14} />
+      <Lock size={14} aria-hidden="true" />
+      <span className="sr-only">(bloqueado)</span>
       <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary">
         {planLabel}
       </span>
