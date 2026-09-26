@@ -1,8 +1,10 @@
 import { createHash } from 'crypto';
-import { INVALID_OR_EXPIRED_MESSAGE, UserTokensService } from './user-tokens.service';
+import { INVALID_OR_EXPIRED_MESSAGE, SELF_SERVICE_EMAIL_COOLDOWN_MS, UserTokensService } from './user-tokens.service';
 
 describe('UserTokensService', () => {
-  const prisma = { userToken: { updateMany: jest.fn(), create: jest.fn(), findUnique: jest.fn() } } as any;
+  const prisma = {
+    userToken: { updateMany: jest.fn(), create: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn() },
+  } as any;
   const service = new UserTokensService(prisma);
   beforeEach(() => jest.resetAllMocks());
 
@@ -20,6 +22,33 @@ describe('UserTokensService', () => {
     expect(data.tokenHash).not.toBe(raw);
     expect(data.expiresAt.getTime() - Date.now()).toBeGreaterThan(29 * 60_000);
     expect(data.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(30 * 60_000);
+  });
+
+  describe('hasRecentPending (cooldown de e-mails pedidos pela própria pessoa)', () => {
+    it('procura um token do mesmo usuário+tipo, não usado, não expirado e emitido dentro da janela', async () => {
+      prisma.userToken.findFirst.mockResolvedValue({ id: 't1' });
+      const before = Date.now();
+
+      await expect(service.hasRecentPending('u1', 'PASSWORD_RESET', 5 * 60_000)).resolves.toBe(true);
+
+      const { where } = prisma.userToken.findFirst.mock.calls[0][0];
+      expect(where.userId).toBe('u1');
+      expect(where.type).toBe('PASSWORD_RESET');
+      expect(where.usedAt).toBeNull();
+      expect(where.expiresAt.gt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(where.expiresAt.gt.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(where.createdAt.gt.getTime()).toBeGreaterThanOrEqual(before - 5 * 60_000);
+      expect(where.createdAt.gt.getTime()).toBeLessThanOrEqual(Date.now() - 5 * 60_000);
+    });
+
+    it('nenhum token recente pendente → false', async () => {
+      prisma.userToken.findFirst.mockResolvedValue(null);
+      await expect(service.hasRecentPending('u1', 'INVITE', 5 * 60_000)).resolves.toBe(false);
+    });
+
+    it('o cooldown padrão é de 5 minutos', () => {
+      expect(SELF_SERVICE_EMAIL_COOLDOWN_MS).toBe(5 * 60_000);
+    });
   });
 
   it('consume marks the token used atomically and returns the userId', async () => {

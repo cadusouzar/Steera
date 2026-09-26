@@ -19,7 +19,7 @@ describe('AuthService', () => {
   let jwtService: any;
   let authorization: any;
   let email: { send: jest.Mock };
-  let userTokens: { issue: jest.Mock; consume: jest.Mock };
+  let userTokens: { issue: jest.Mock; consume: jest.Mock; hasRecentPending: jest.Mock };
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
   // E-mails (aviso de trava, esqueci minha senha) saem em segundo plano, sem a resposta esperar por
   // eles (anti-enumeração por latência) — os testes que olham o envio esperam a fila esvaziar.
@@ -83,7 +83,11 @@ describe('AuthService', () => {
     };
     authorization = { getEffectivePermissions: jest.fn().mockResolvedValue({}) };
     email = { send: jest.fn().mockResolvedValue(true) };
-    userTokens = { issue: jest.fn().mockResolvedValue('raw-reset-token'), consume: jest.fn() };
+    userTokens = {
+      issue: jest.fn().mockResolvedValue('raw-reset-token'),
+      consume: jest.fn(),
+      hasRecentPending: jest.fn().mockResolvedValue(false),
+    };
     const module = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -200,6 +204,21 @@ describe('AuthService', () => {
       expect(message.subject).toMatch(/bloqueada temporariamente/i);
       expect(message.html).toContain('raw-reset-token');
       expect(context).toBe('account-locked');
+    });
+
+    it('trava com um link de redefinição emitido há menos de 5min → trava, mas não emite token nem manda e-mail', async () => {
+      const row = installUserRow(activeUser({ failedLoginAttempts: 4 }));
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
+      userTokens.hasRecentPending.mockResolvedValue(true);
+
+      const err = await attempt('errada');
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      await flush();
+
+      expect(row.lockedUntil).not.toBeNull();
+      expect(userTokens.hasRecentPending).toHaveBeenCalledWith('u1', 'PASSWORD_RESET', 5 * 60_000);
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
     });
 
     it('o incremento é condicional e atômico (updateMany com increment, só fora de trava ativa)', async () => {
@@ -1201,6 +1220,53 @@ describe('AuthService', () => {
       expect(context).toBe('invite');
     });
 
+    it('ACTIVE com link de redefinição emitido há menos de 5min → mesma resposta, sem emitir nem enviar', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', company: null });
+      userTokens.hasRecentPending.mockResolvedValue(true);
+
+      const result = await service.forgotPassword('ana@teste.com');
+      await flush();
+
+      expect(result).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+      expect(userTokens.hasRecentPending).toHaveBeenCalledWith('u1', 'PASSWORD_RESET', 5 * 60_000);
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('INVITED com convite emitido há menos de 5min → mesma resposta, sem reemitir nem reenviar o convite', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u2', email: 'convidado@teste.com', status: 'INVITED', company: { name: 'Padaria Central' },
+      });
+      userTokens.hasRecentPending.mockResolvedValue(true);
+
+      const result = await service.forgotPassword('convidado@teste.com');
+      await flush();
+
+      expect(result).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+      expect(userTokens.hasRecentPending).toHaveBeenCalledWith('u2', 'INVITE', 5 * 60_000);
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('fora da janela de 5min (nenhum link recente pendente) → emite e envia normalmente', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', company: null });
+      userTokens.hasRecentPending.mockResolvedValue(false);
+
+      await service.forgotPassword('ana@teste.com');
+      await flush();
+
+      expect(userTokens.hasRecentPending).toHaveBeenCalledWith('u1', 'PASSWORD_RESET', 5 * 60_000);
+      expect(userTokens.issue).toHaveBeenCalledWith('u1', 'PASSWORD_RESET');
+      expect(email.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('com conta, responde sem esperar a checagem de cooldown (anti-enumeração por latência)', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', company: null });
+      userTokens.hasRecentPending.mockImplementation(never);
+
+      await expect(settlesQuickly(service.forgotPassword('ana@teste.com'))).resolves.toBe('settled');
+    });
+
     it('falha ao emitir/enviar o e-mail nunca troca a mensagem genérica por um erro', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', company: null });
       userTokens.issue.mockRejectedValue(new Error('db down'));
@@ -1327,7 +1393,7 @@ describe('AuthService', () => {
       id: 'u1', email: 'ana@teste.com', status: 'ACTIVE', passwordHash: 'antigo', emailVerifiedAt: null,
     };
 
-    it('token válido troca a senha, zera o bloqueio, confirma o e-mail, revoga as sessões e envia o aviso', async () => {
+    it('token válido troca a senha, zera o bloqueio, confirma o e-mail e revoga as sessões — sem e-mail de aviso', async () => {
       userTokens.consume.mockResolvedValue('u1');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser });
 
@@ -1348,11 +1414,9 @@ describe('AuthService', () => {
         where: { userId: 'u1', revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
-      expect(email.send).toHaveBeenCalledTimes(1);
-      const [message, context] = email.send.mock.calls[0];
-      expect(message.to).toBe('ana@teste.com');
-      expect(message.subject).toMatch(/senha.*alterada/i);
-      expect(context).toBe('password-changed');
+      // A pessoa acabou de usar o link da própria caixa de entrada — um "senha alterada" seria um
+      // e-mail pago sem informação nova.
+      expect(email.send).not.toHaveBeenCalled();
     });
 
     it('mantém emailVerifiedAt já existente em vez de sobrescrever com a data de agora', async () => {
@@ -1567,6 +1631,29 @@ describe('AuthService', () => {
         await expect(service.resendVerification('u1')).rejects.toThrow(new BadRequestException('Seu e-mail já está confirmado.'));
         expect(userTokens.issue).not.toHaveBeenCalled();
         expect(email.send).not.toHaveBeenCalled();
+      });
+
+      it('link de confirmação emitido há menos de 5min → { sent: false } sem reemitir nem reenviar', async () => {
+        prisma.user.findUniqueOrThrow.mockResolvedValue({
+          id: 'u1', email: 'a@b.com', name: 'Ana', emailVerifiedAt: null, emailVerificationRequired: true,
+        });
+        userTokens.hasRecentPending.mockResolvedValue(true);
+
+        await expect(service.resendVerification('u1')).resolves.toEqual({ sent: false });
+        expect(userTokens.hasRecentPending).toHaveBeenCalledWith('u1', 'EMAIL_VERIFICATION', 5 * 60_000);
+        expect(userTokens.issue).not.toHaveBeenCalled();
+        expect(email.send).not.toHaveBeenCalled();
+      });
+
+      it('fora da janela de 5min → reemite e devolve { sent: true } quando o provedor aceita', async () => {
+        prisma.user.findUniqueOrThrow.mockResolvedValue({
+          id: 'u1', email: 'a@b.com', name: 'Ana', emailVerifiedAt: null, emailVerificationRequired: true,
+        });
+        email.send.mockResolvedValue(true);
+
+        await expect(service.resendVerification('u1')).resolves.toEqual({ sent: true });
+        expect(userTokens.hasRecentPending).toHaveBeenCalledWith('u1', 'EMAIL_VERIFICATION', 5 * 60_000);
+        expect(userTokens.issue).toHaveBeenCalledWith('u1', 'EMAIL_VERIFICATION');
       });
 
       it('pendente → reemite EMAIL_VERIFICATION, reenvia e devolve { sent }', async () => {

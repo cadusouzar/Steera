@@ -488,14 +488,22 @@ async function authedPost(path: string, isRetry = false): Promise<Response> {
   return res;
 }
 
+// Mostrado quando o backend responde `{ sent: false }`: na prática, o cooldown de 5 minutos entre
+// e-mails pedidos pela própria pessoa (e-mail é pago por mensagem) — o link anterior continua valendo.
+export const RESEND_VERIFICATION_COOLDOWN_MESSAGE =
+  'Já enviamos um e-mail há poucos minutos — confira sua caixa de entrada (e o spam).';
+
 // POST /auth/resend-verification — autenticada, 3/h por usuário; 400 se já confirmado, 429 (mensagem
-// amigável já traduzida pelo backend) se estourar o limite.
-export async function resendVerification(): Promise<void> {
+// amigável já traduzida pelo backend) se estourar o limite. Devolve `sent` do backend: `false` quando
+// nada novo foi enviado (cooldown de 5min — ver RESEND_VERIFICATION_COOLDOWN_MESSAGE).
+export async function resendVerification(): Promise<boolean> {
   const res = await authedPost('/auth/resend-verification');
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
     throw new ApiError(body.message || 'Não foi possível reenviar o e-mail de confirmação', res.status, body.code, body as Record<string, unknown>);
   }
+  const body = (await res.json().catch(() => ({}))) as { sent?: boolean };
+  return body.sent !== false;
 }
 
 async function applyProfileResponse(res: Response, fallbackMessage: string): Promise<CurrentUser> {

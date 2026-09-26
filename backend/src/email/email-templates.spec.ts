@@ -2,7 +2,6 @@ import {
   accountLockedTemplate,
   buildAppLink,
   inviteTemplate,
-  passwordChangedTemplate,
   passwordResetTemplate,
   verifyEmailTemplate,
 } from './email-templates';
@@ -62,13 +61,6 @@ describe('email templates', () => {
     expect(tpl.html).toContain(link);
     expect(tpl.text).toContain(link);
     expect(tpl.html).toContain('Steera');
-  });
-
-  it('passwordChangedTemplate mentions Steera and a Portuguese subject', () => {
-    const tpl = passwordChangedTemplate();
-    expect(tpl.subject).toBe('Sua senha da Steera foi alterada');
-    expect(tpl.html).toContain('Steera');
-    expect(tpl.text).toContain('Steera');
   });
 
   it('buildAppLink joins the frontend URL (without trailing slash), the path and the encoded token', () => {

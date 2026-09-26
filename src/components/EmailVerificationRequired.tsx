@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { LogOut, MailCheck, RefreshCw } from 'lucide-react';
 import FlowBackground from './FlowBackground';
 import { ApiError } from '../lib/apiError';
-import { logout, refreshCurrentUser, resendVerification } from '../lib/auth';
+import { logout, refreshCurrentUser, resendVerification, RESEND_VERIFICATION_COOLDOWN_MESSAGE } from '../lib/auth';
 
 interface EmailVerificationRequiredProps {
   email: string;
 }
 
-type ResendState = 'idle' | 'sending' | 'sent' | 'error';
+type ResendState = 'idle' | 'sending' | 'sent' | 'cooldown' | 'error';
 
 // Tela mínima (mesmo estilo de ForcedPasswordChange), mostrada por RequireAuth no lugar do app
 // inteiro sob /app/* quando `currentUser.emailVerificationRequired && !currentUser.emailVerified`
@@ -28,8 +28,7 @@ const EmailVerificationRequired: React.FC<EmailVerificationRequiredProps> = ({ e
     setResendError(null);
     setCheckNotice(null);
     try {
-      await resendVerification();
-      setResendState('sent');
+      setResendState((await resendVerification()) ? 'sent' : 'cooldown');
     } catch (err) {
       setResendState('error');
       // ApiError já traz a mensagem amigável do backend (ex.: 429 "Muitas tentativas. Tente
@@ -80,6 +79,11 @@ const EmailVerificationRequired: React.FC<EmailVerificationRequiredProps> = ({ e
           {resendState === 'sent' && (
             <div role="status" className="rounded-xl border border-primary/30 bg-primary/5 p-3 mb-4 text-sm text-foreground">
               E-mail reenviado. Confira sua caixa de entrada (e o spam).
+            </div>
+          )}
+          {resendState === 'cooldown' && (
+            <div role="status" className="rounded-xl border border-primary/30 bg-primary/5 p-3 mb-4 text-sm text-foreground">
+              {RESEND_VERIFICATION_COOLDOWN_MESSAGE}
             </div>
           )}
           {resendState === 'error' && resendError && (

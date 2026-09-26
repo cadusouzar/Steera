@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, CreditCard, LogOut, MailWarning, Shield, User } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../lib/apiError';
-import { logout, resendVerification, type CurrentUser } from '../lib/auth';
+import { logout, resendVerification, RESEND_VERIFICATION_COOLDOWN_MESSAGE, type CurrentUser } from '../lib/auth';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface SiteAccountMenuProps {
@@ -25,7 +25,7 @@ const SiteAccountMenu: React.FC<SiteAccountMenuProps> = ({ user, onLoggedOut }) 
   // entra confirmado) — ver EmailVerificationRequired.tsx, que bloqueia o /app inteiro pro mesmo
   // caso; aqui é só um lembrete visível no site, sem bloquear nada.
   const emailPending = user.emailVerificationRequired && !user.emailVerified;
-  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'cooldown' | 'error'>('idle');
   const [resendError, setResendError] = useState<string | null>(null);
 
   const close = useCallback(() => setIsOpen(false), []);
@@ -35,8 +35,7 @@ const SiteAccountMenu: React.FC<SiteAccountMenuProps> = ({ user, onLoggedOut }) 
     setResendState('sending');
     setResendError(null);
     try {
-      await resendVerification();
-      setResendState('sent');
+      setResendState((await resendVerification()) ? 'sent' : 'cooldown');
     } catch (err) {
       setResendState('error');
       setResendError(err instanceof ApiError ? err.message : 'Não foi possível reenviar o e-mail de confirmação.');
@@ -118,6 +117,9 @@ const SiteAccountMenu: React.FC<SiteAccountMenuProps> = ({ user, onLoggedOut }) 
                 </button>
                 {resendState === 'sent' && (
                   <p className="px-3 pt-1 text-xs text-muted">E-mail reenviado. Confira sua caixa de entrada.</p>
+                )}
+                {resendState === 'cooldown' && (
+                  <p className="px-3 pt-1 text-xs text-muted">{RESEND_VERIFICATION_COOLDOWN_MESSAGE}</p>
                 )}
                 {resendState === 'error' && resendError && (
                   <p className="px-3 pt-1 text-xs text-red-600 dark:text-red-400">{resendError}</p>

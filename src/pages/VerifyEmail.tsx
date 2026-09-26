@@ -7,6 +7,7 @@ import {
   getCurrentUser,
   refreshCurrentUser,
   resendVerification,
+  RESEND_VERIFICATION_COOLDOWN_MESSAGE,
   restoreSession,
   subscribeCurrentUser,
   verifyEmail,
@@ -14,7 +15,7 @@ import {
 } from '../lib/auth';
 
 type Status = 'loading' | 'success' | 'error';
-type ResendState = 'idle' | 'sending' | 'sent' | 'error';
+type ResendState = 'idle' | 'sending' | 'sent' | 'cooldown' | 'error';
 
 // Garante o usuário da sessão antes de decidir o que mostrar (fix final de "Acesso e sessões"): o
 // link costuma ser aberto numa aba nova, onde o access token em memória ainda não existe — sem
@@ -75,8 +76,7 @@ const VerifyEmail = () => {
   const handleResend = async () => {
     setResendState('sending');
     try {
-      await resendVerification();
-      setResendState('sent');
+      setResendState((await resendVerification()) ? 'sent' : 'cooldown');
     } catch {
       setResendState('error');
     }
@@ -125,6 +125,11 @@ const VerifyEmail = () => {
             {resendState === 'sent' && (
               <p role="status" className="text-sm text-foreground/60 mt-3">
                 E-mail reenviado. Confira sua caixa de entrada.
+              </p>
+            )}
+            {resendState === 'cooldown' && (
+              <p role="status" className="text-sm text-foreground/60 mt-3">
+                {RESEND_VERIFICATION_COOLDOWN_MESSAGE}
               </p>
             )}
             {resendState === 'error' && (

@@ -14,7 +14,7 @@ import { applyMigrations } from '../prisma/tenant-migration.util';
 import { normalizePhone } from '../common/phone.util';
 import { EmailService } from '../email/email.service';
 import {
-  accountLockedTemplate, buildAppLink, passwordChangedTemplate, passwordResetTemplate, verifyEmailTemplate,
+  accountLockedTemplate, buildAppLink, passwordResetTemplate, verifyEmailTemplate,
 } from '../email/email-templates';
 import { getPlan, lockedItemsFor, planLimit } from '../plans/plan-catalog';
 import { accountLockedError } from './account-lock.util';
@@ -27,7 +27,7 @@ import { getDummyPasswordHash, hashPassword, verifyPassword } from './password.u
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
-import { INVALID_OR_EXPIRED_MESSAGE, UserTokensService } from './user-tokens/user-tokens.service';
+import { INVALID_OR_EXPIRED_MESSAGE, SELF_SERVICE_EMAIL_COOLDOWN_MS, UserTokensService } from './user-tokens/user-tokens.service';
 import { InviteMailer } from './user-tokens/invite-mailer';
 
 // `RH` de propósito fora daqui — não é mais atribuído a login novo nenhum, nem o fundador (ver
@@ -580,7 +580,12 @@ export class AuthService {
 
   // Aviso de trava temporária com link de redefinição de senha. Sempre chamado via runInBackground:
   // a trava em si já foi gravada e vale mesmo sem o e-mail.
+  //
+  // Cooldown (SELF_SERVICE_EMAIL_COOLDOWN_MS): com um link de redefinição emitido há menos de 5min e
+  // ainda válido (ex.: a pessoa acabou de pedir "esqueci minha senha"), nada é emitido nem enviado —
+  // a trava vale igual e o link anterior continua servindo.
   private async sendAccountLockedEmail(userId: string, email: string): Promise<void> {
+    if (await this.userTokens.hasRecentPending(userId, 'PASSWORD_RESET', SELF_SERVICE_EMAIL_COOLDOWN_MS)) return;
     const raw = await this.userTokens.issue(userId, 'PASSWORD_RESET');
     const template = accountLockedTemplate(LOCK_DURATION_MS / 60_000, buildAppLink('/redefinir-senha', raw));
     await this.email.send({ to: email, ...template }, 'account-locked');
@@ -623,10 +628,18 @@ export class AuthService {
       const companyName = user.company?.name ?? '';
       // INVITED nunca tem senha própria pra redefinir — reenviar o convite é o equivalente correto
       // de "esqueci minha senha" pra esse status (mesmo link/token, apenas reemitido).
+      //
+      // Cooldown (SELF_SERVICE_EMAIL_COOLDOWN_MS): link do mesmo tipo emitido há menos de 5min e ainda
+      // válido → não emite nem envia de novo (e-mail é pago); a checagem roda DENTRO do segundo plano,
+      // então a resposta continua idêntica e sem diferença de latência.
       if (status === 'INVITED') {
-        this.runInBackground('invite', id, () => this.sendInviteEmail(id, to, companyName));
+        this.runInBackground('invite', id, async () => {
+          if (await this.userTokens.hasRecentPending(id, 'INVITE', SELF_SERVICE_EMAIL_COOLDOWN_MS)) return;
+          await this.sendInviteEmail(id, to, companyName);
+        });
       } else {
         this.runInBackground('password-reset', id, async () => {
+          if (await this.userTokens.hasRecentPending(id, 'PASSWORD_RESET', SELF_SERVICE_EMAIL_COOLDOWN_MS)) return;
           const raw = await this.userTokens.issue(id, 'PASSWORD_RESET');
           const template = passwordResetTemplate(buildAppLink('/redefinir-senha', raw));
           await this.email.send({ to, ...template }, 'password-reset');
@@ -689,8 +702,8 @@ export class AuthService {
         }),
       ),
     );
-
-    await this.email.send({ to: user.email, ...passwordChangedTemplate() }, 'password-changed');
+    // Sem e-mail de "senha alterada": a pessoa acabou de usar o link que chegou na própria caixa de
+    // entrada — seria um e-mail pago sem informação nova.
   }
 
   // Emite um token EMAIL_VERIFICATION (invalida os pendentes do mesmo usuário, ver
@@ -711,13 +724,18 @@ export class AuthService {
 
   // POST /auth/resend-verification (logado, liberado pelo EmailVerifiedGuard via
   // @AllowUnverifiedEmail). Aqui o envio é AGUARDADO (diferente de register()): a pessoa pediu o
-  // reenvio e a resposta diz se o provedor aceitou (`sent`). E-mail já confirmado → 400.
+  // reenvio e a resposta diz se o provedor aceitou (`sent`). E-mail já confirmado → 400. Cooldown
+  // (SELF_SERVICE_EMAIL_COOLDOWN_MS): link emitido há menos de 5min e ainda válido → `{ sent: false }`
+  // sem emitir nem enviar (o link anterior continua valendo; o frontend explica isso).
   async resendVerification(userId: string): Promise<{ sent: boolean }> {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     // Login que nem precisa confirmar (convidado que aceitou o convite, legado backfillado) recebe o
     // mesmo 400 — não há o que reenviar.
     if (user.emailVerifiedAt || !user.emailVerificationRequired) {
       throw new BadRequestException('Seu e-mail já está confirmado.');
+    }
+    if (await this.userTokens.hasRecentPending(user.id, 'EMAIL_VERIFICATION', SELF_SERVICE_EMAIL_COOLDOWN_MS)) {
+      return { sent: false };
     }
     const sent = await this.sendVerificationEmail(user.id, user.email, user.name ?? null);
     return { sent };

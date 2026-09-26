@@ -109,33 +109,3 @@ export function accountLockedTemplate(minutes: number, resetLink: string): Email
     text: `Detectamos várias tentativas de senha incorreta seguidas na sua conta Steera. Por segurança, sua conta ficou temporariamente bloqueada por ${minutes} minutos. Se preferir, redefina sua senha agora acessando o link abaixo.\n\n${resetLink}\n\n${FOOTER_TEXT}`,
   };
 }
-
-export function passwordChangedTemplate(): EmailTemplate {
-  return {
-    subject: 'Sua senha da Steera foi alterada',
-    html: `
-<!DOCTYPE html>
-<html lang="pt-BR">
-  <body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;padding:32px;">
-            <tr>
-              <td style="font-size:20px;font-weight:bold;color:#111827;padding-bottom:16px;">Steera</td>
-            </tr>
-            <tr>
-              <td style="font-size:15px;line-height:1.5;color:#27272a;padding-bottom:24px;">A senha da sua conta na Steera foi alterada com sucesso. Se você não fez essa alteração, entre em contato com o administrador da sua empresa imediatamente.</td>
-            </tr>
-            <tr>
-              <td style="font-size:12px;color:#71717a;padding-top:16px;border-top:1px solid #e4e4e7;">${FOOTER_TEXT}</td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`.trim(),
-    text: `A senha da sua conta na Steera foi alterada com sucesso. Se você não fez essa alteração, entre em contato com o administrador da sua empresa imediatamente.\n\n${FOOTER_TEXT}`,
-  };
-}

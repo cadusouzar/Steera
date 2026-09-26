@@ -10,6 +10,12 @@ export const TOKEN_TTL_MS: Record<UserTokenType, number> = {
   PASSWORD_RESET: 30 * 60 * 1000,
 };
 
+// Cooldown dos e-mails pedidos pela PRÓPRIA pessoa (esqueci minha senha, reenviar confirmação, aviso
+// de conta travada): e-mail é pago por mensagem, então com um link do mesmo tipo emitido há menos que
+// isso — e ainda válido — nada novo é emitido nem enviado; o link anterior continua valendo. Ações de
+// admin (criar/reenviar convite, redefinir senha de outro login) não passam por aqui.
+export const SELF_SERVICE_EMAIL_COOLDOWN_MS = 5 * 60 * 1000;
+
 // Exportada: AuthService reaproveita o MESMO texto quando um token válido cai num estado que não
 // pode usá-lo (reset de um INVITED, aceite de convite de um login que não é mais INVITED).
 export const INVALID_OR_EXPIRED_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
@@ -52,6 +58,26 @@ export class UserTokensService {
       });
 
       return raw;
+    });
+  }
+
+  // true se há um token do mesmo usuário+tipo emitido há menos de `withinMs`, ainda não usado e não
+  // expirado — ver SELF_SERVICE_EMAIL_COOLDOWN_MS. Não é atômico com issue() (duas requisições
+  // simultâneas podem ambas ver `false`); o objetivo é cortar reenvios repetidos, não ser uma trava.
+  async hasRecentPending(userId: string, type: UserTokenType, withinMs: number): Promise<boolean> {
+    return runAsSystem(async () => {
+      const now = Date.now();
+      const found = await this.prisma.userToken.findFirst({
+        where: {
+          userId,
+          type,
+          usedAt: null,
+          expiresAt: { gt: new Date(now) },
+          createdAt: { gt: new Date(now - withinMs) },
+        },
+        select: { id: true },
+      });
+      return found !== null;
     });
   }
 

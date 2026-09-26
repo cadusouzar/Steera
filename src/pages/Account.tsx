@@ -7,7 +7,13 @@ import AccountProfileEditForm from '../components/account/AccountProfileEditForm
 import AccountPasswordForm from '../components/account/AccountPasswordForm';
 import AccountSubscriptionDetails from '../components/account/AccountSubscriptionDetails';
 import { ApiError } from '../lib/apiError';
-import { getCurrentUser, resendVerification, subscribeCurrentUser, type CurrentUser } from '../lib/auth';
+import {
+  getCurrentUser,
+  resendVerification,
+  RESEND_VERIFICATION_COOLDOWN_MESSAGE,
+  subscribeCurrentUser,
+  type CurrentUser,
+} from '../lib/auth';
 
 type Tab = 'perfil' | 'seguranca' | 'assinatura';
 
@@ -29,7 +35,7 @@ const Account = () => {
   // Faixa de confirmação de e-mail pendente ("Acesso e sessões", 26/09/2026) — mesmo caso do
   // EmailVerificationRequired que bloqueia o /app inteiro, só que aqui /conta continua acessível
   // (é justamente daqui que a pessoa consegue reenviar sem entrar no sistema).
-  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'cooldown' | 'error'>('idle');
   const [resendError, setResendError] = useState<string | null>(null);
 
   useEffect(() => subscribeCurrentUser(setUser), []);
@@ -40,8 +46,7 @@ const Account = () => {
     setResendState('sending');
     setResendError(null);
     try {
-      await resendVerification();
-      setResendState('sent');
+      setResendState((await resendVerification()) ? 'sent' : 'cooldown');
     } catch (err) {
       setResendState('error');
       setResendError(err instanceof ApiError ? err.message : 'Não foi possível reenviar o e-mail de confirmação.');
@@ -94,6 +99,7 @@ const Account = () => {
                 {resendState === 'sending' ? 'Enviando...' : 'Reenviar'}
               </button>
               {resendState === 'sent' && <p className="text-xs text-muted">E-mail reenviado. Confira sua caixa de entrada.</p>}
+              {resendState === 'cooldown' && <p className="text-xs text-muted">{RESEND_VERIFICATION_COOLDOWN_MESSAGE}</p>}
               {resendState === 'error' && resendError && <p className="text-xs text-red-600 dark:text-red-400">{resendError}</p>}
             </div>
           </div>
