@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { PlanGuard } from './plans/plan.guard';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { CompanyModule } from './company/company.module';
 import { RolesModule } from './roles/roles.module';
@@ -92,6 +93,11 @@ import { ProfilesModule } from './profiles/profiles.module';
     // JwtAuthGuard já respeita @Public() (Task 3) — nega por padrão em toda
     // rota nova ou existente, sem precisar visitar/anotar cada controller.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Teto de PLANO da empresa: roda logo depois do JwtAuthGuard (APP_GUARDs
+    // executam na ordem de registro), barrando @RequireModule(...) fora do
+    // plano contratado (ver plan.guard.ts) — ortogonal ao ModulesGuard, que
+    // segue sendo a permissão da PESSOA dentro do módulo.
+    { provide: APP_GUARD, useClass: PlanGuard },
     // Backstop de RLS (defesa em profundidade): estabelece o contexto de
     // tenant (companyId autenticado) usado pela extensão do Prisma em
     // prisma/tenant-rls.extension.ts para escopar toda query por empresa a
