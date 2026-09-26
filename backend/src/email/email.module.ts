@@ -2,19 +2,37 @@ import { Global, Module } from '@nestjs/common';
 import { EMAIL_SENDER, EmailSender } from './email-sender';
 import { EmailService } from './email.service';
 import { LogEmailSender } from './log-email.sender';
-import { readResendApiKey } from './mail-config.util';
+import { SESv2Client } from '@aws-sdk/client-sesv2';
+import { AllowlistEmailSender } from './allowlist-email.sender';
+import { readResendApiKey, readSesRegion, resolveEmailSetup } from './mail-config.util';
 import { ResendEmailSender } from './resend-email.sender';
+import { SesEmailSender } from './ses-email.sender';
 
-// NODE_ENV=test (o Jest sempre seta) NUNCA monta o Resend, mesmo com uma chave no ambiente:
-// ConfigModule.forRoot() completa o process.env com o backend/.env de dev, então um e2e rodado com
-// --env-file=.env.test sem RESEND_API_KEY herdava a chave REAL e mandava e-mail de verdade (fix
-// final de "Acesso e sessões"). Sem chave (vazia/só espaços contam como ausente, ver
-// readResendApiKey): LogEmailSender, nunca uma chamada de rede. Ver mail-config.util.ts pra
-// checagem que impede o LogEmailSender em produção.
+const DEFAULT_FROM = 'Steera <no-reply@steera.com.br>';
+
+// Quem decide o provedor é resolveEmailSetup (mail-config.util.ts): NODE_ENV=test → sempre log (fix
+// final de "Acesso e sessões": ConfigModule completa o process.env com o backend/.env de dev, então
+// um e2e herdaria credenciais REAIS); produção → ses por padrão; qualquer outro ambiente → log, a
+// menos que EMAIL_PROVIDER peça um provedor real explicitamente. Provedor real sem credenciais →
+// log em dev (em produção validateMailConfig já barrou o boot). Fora de produção, o provedor real
+// SEMPRE vem embrulhado no AllowlistEmailSender: só EMAIL_DEV_ALLOWED_RECIPIENTS recebe de verdade.
 export function createEmailSender(env: NodeJS.ProcessEnv): EmailSender {
-  const apiKey = readResendApiKey(env);
-  if (env.NODE_ENV === 'test' || !apiKey) return new LogEmailSender();
-  return new ResendEmailSender(apiKey, env.MAIL_FROM || 'Steera <no-reply@steera.com.br>');
+  const setup = resolveEmailSetup(env);
+  if (setup.active === 'log') return new LogEmailSender(setup.reason);
+
+  const from = env.MAIL_FROM || DEFAULT_FROM;
+  const real: EmailSender =
+    setup.active === 'ses'
+      ? // Sem `credentials`: o SDK usa a cadeia padrão (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY do env).
+        new SesEmailSender(new SESv2Client({ region: readSesRegion(env) }), from)
+      : new ResendEmailSender(readResendApiKey(env) as string, from);
+
+  if (setup.production) return real;
+  return new AllowlistEmailSender(
+    real,
+    new LogEmailSender('destinatário fora de EMAIL_DEV_ALLOWED_RECIPIENTS'),
+    setup.allowedRecipients,
+  );
 }
 
 // Global: EmailService é consumido por módulos bem distintos entre si (auth,

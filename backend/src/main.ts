@@ -6,7 +6,7 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { validateJwtSecret } from './common/jwt-secret.util';
 import { translateValidationErrors } from './common/validation-message-translator.util';
-import { readResendApiKey, validateMailConfig } from './email/mail-config.util';
+import { describeEmailSetup, resolveEmailSetup, validateMailConfig } from './email/mail-config.util';
 
 async function bootstrap() {
   // Falha rápido, antes de qualquer outra coisa: um JWT_ACCESS_SECRET ausente,
@@ -15,14 +15,19 @@ async function bootstrap() {
   // empresa) sem nenhum outro sinal de erro no boot.
   validateJwtSecret(process.env.JWT_ACCESS_SECRET);
 
-  // Mesma lógica de falha rápida, agora para e-mail transacional: nunca deixa
-  // o backend subir em produção sem RESEND_API_KEY nem com um FRONTEND_URL que não seja https
-  // público (ver mail-config.util.ts).
-  // Em dev sem chave, o boot segue normalmente, só avisando — os e-mails
-  // vão parar no log (LogEmailSender, ver email.module.ts).
+  // Mesma lógica de falha rápida, agora para e-mail transacional: nunca deixa o backend subir em
+  // produção sem um provedor real configurado (ses por padrão, ou resend) nem com um FRONTEND_URL que
+  // não seja https público; EMAIL_PROVIDER desconhecido falha em qualquer ambiente (ver
+  // mail-config.util.ts). Uma linha de log diz qual provedor ficou ativo e, fora de produção, quantos
+  // destinatários a allowlist libera — nunca endereços nem valores de credenciais.
   validateMailConfig(process.env);
-  if (process.env.NODE_ENV !== 'production' && !readResendApiKey(process.env)) {
-    Logger.warn('RESEND_API_KEY ausente — e-mails serão só registrados no log', 'Bootstrap');
+  const emailSetup = resolveEmailSetup(process.env);
+  Logger.log(describeEmailSetup(emailSetup), 'Bootstrap');
+  if (!emailSetup.production && emailSetup.active !== 'log' && emailSetup.allowedRecipients.length === 0) {
+    Logger.warn(
+      'EMAIL_DEV_ALLOWED_RECIPIENTS vazio — nenhum e-mail será enviado de verdade fora de produção (só log)',
+      'Bootstrap',
+    );
   }
 
   // Erro que escapa de todo try/catch específico não deve derrubar o processo inteiro (e com ele,
