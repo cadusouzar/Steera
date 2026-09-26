@@ -1757,3 +1757,31 @@ export async function getCustomFieldOptionUsageCount(id: string, option: string)
 export async function deleteCustomFieldDefinition(id: string): Promise<void> {
   await request<void>(`/custom-fields/${id}`, { method: 'DELETE' });
 }
+
+// ---- Planos (GET /plans/me) ----
+export interface PlanLimits {
+  maxRoles: number | null; // null = sem limite
+  maxEmployees: number | null;
+  maxEmployeeLogins: number | null;
+}
+
+export interface PlanCatalogItem {
+  tier: 'GRATIS' | 'BASICO' | 'PRO' | 'EMPRESARIAL';
+  label: string;
+  priceLabel: string;
+  modules: string[];
+  features: string[];
+  limits: PlanLimits;
+}
+
+export interface MyPlan {
+  current: { tier: 'GRATIS' | 'BASICO' | 'PRO' | 'EMPRESARIAL'; label: string; limits: PlanLimits };
+  usage: { roles: number; employees: number; employeeLogins: number };
+  // Catálogo inteiro (4 planos), sempre na mesma ordem crescente — a aba Assinatura usa isso pra
+  // desenhar a comparação/upgrade de planos.
+  catalog: PlanCatalogItem[];
+}
+
+export async function getMyPlan(): Promise<MyPlan> {
+  return request<MyPlan>('/plans/me');
+}

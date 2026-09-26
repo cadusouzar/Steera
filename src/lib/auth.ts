@@ -47,6 +47,10 @@ export interface CurrentUser {
   // editar. companyAddress é null em empresas anteriores ao cadastro ampliado.
   companyPhone: string | null;
   companyAddress: CompanyAddress | null;
+  // Plano atual da empresa + módulos/recursos travados (ver UserPlan acima). `null` só no caso
+  // defensivo do backend (mock de teste sem company populada) — trate como "sem info de plano,
+  // não trava nada".
+  plan: UserPlan | null;
 }
 
 export interface CompanyAddress {
@@ -57,6 +61,18 @@ export interface CompanyAddress {
   district: string | null;
   city: string | null;
   state: string | null;
+}
+
+// Plano da empresa (Company.planTier) espelhado no payload do usuário (login/register/me) — ver
+// backend/src/plans/plan-catalog.ts (PLAN_CATALOG/lockedItemsFor), fonte única de verdade. `locked`
+// mapeia cada módulo/recurso que o plano atual NÃO inclui pro plano mínimo que libera —
+// AppLayout usa isso pra desenhar cadeado no menu e a tela de upgrade de rota travada.
+export interface UserPlan {
+  tier: 'GRATIS' | 'BASICO' | 'PRO' | 'EMPRESARIAL';
+  label: string;
+  modules: string[];
+  features: string[];
+  locked: Record<string, { tier: string; label: string }>;
 }
 
 interface ApiUser {
@@ -77,6 +93,9 @@ interface ApiUser {
   tradeName: string | null;
   companyPhone?: string | null;
   companyAddress?: CompanyAddress | null;
+  // Ausente/null só em mock antigo de teste do backend sem `company.planTier` — todo usuário real
+  // sempre tem uma Company com planTier (coluna NOT NULL, @default(GRATIS)).
+  plan?: UserPlan | null;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -129,6 +148,7 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     tradeName: user.tradeName ?? null,
     companyPhone: user.companyPhone ?? null,
     companyAddress: user.companyAddress ?? null,
+    plan: user.plan ?? null,
   };
 }
 

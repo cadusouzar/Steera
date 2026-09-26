@@ -4,8 +4,39 @@ import { useTheme } from '../components/ThemeProvider';
 import ThemeToggle from '../components/ThemeToggle';
 import UserProfileDropdown from '../components/UserProfileDropdown';
 import UserProfileDrawer from '../components/UserProfileDrawer';
+import LockedNavItem from '../components/LockedNavItem';
+import PlanUpgradeNotice from '../components/PlanUpgradeNotice';
 import { getCurrentUser } from '../lib/auth';
 import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield, Settings } from 'lucide-react';
+
+// Espelha FEATURE_LABELS do backend (backend/src/plans/plan-catalog.ts) — usado só pro rótulo da
+// tela de upgrade (PlanUpgradeNotice) quando uma rota travada pelo plano é aberta direto pela URL.
+const FEATURE_LABELS: Record<string, string> = {
+  DASHBOARD: 'Visão Geral',
+  CLIENTES: 'Clientes',
+  RH_CARGOS: 'Cargos',
+  RH_FUNCIONARIOS: 'Funcionários',
+  PONTO_REGISTRO: 'Ponto',
+  PONTO_ADMINISTRACAO: 'Administração do Ponto',
+  COMERCIAL: 'Comercial',
+  OPERACOES: 'Operações',
+  FINANCAS: 'Finanças',
+  ANALYTICS: 'Analytics e Dashboards',
+};
+
+// Mapa de prefixo de rota → item de plano (módulo/recurso) que a protege — checado do mais
+// específico pro mais genérico (ex.: /app/ponto-administracao antes de /app/ponto, que também
+// bateria por prefixo). Usado só pra decidir se a rota ATUAL está travada pelo plano (Task 6,
+// 26/09/2026) — a fronteira de segurança real é o PlanGuard no backend.
+function lockedItemForPath(pathname: string): string | null {
+  if (pathname.startsWith('/app/ponto-administracao')) return 'PONTO_ADMINISTRACAO';
+  if (pathname.startsWith('/app/ponto')) return 'PONTO_REGISTRO';
+  if (pathname.startsWith('/app/orcamentos')) return 'COMERCIAL';
+  if (pathname.startsWith('/app/estoque') || pathname.startsWith('/app/compras')) return 'OPERACOES';
+  if (pathname.startsWith('/app/financas')) return 'FINANCAS';
+  if (pathname.startsWith('/app/analytics')) return 'ANALYTICS';
+  return null;
+}
 
 // Espelha o enum `AppModule` do backend (backend/prisma/schema.prisma) — os valores já chegam em
 // maiúsculo de getCurrentUser()?.modules (vindos direto de /auth/login, /auth/me e do refresh),
@@ -30,6 +61,15 @@ const AppLayout = () => {
   const userModules = currentUser?.modules ?? [];
   const hasModule = (module: AppModule) => userModules.includes(module);
   const isAdmin = currentUser?.role === 'admin';
+
+  // Cadeado por plano (Task 6, 26/09/2026): módulo/recurso que o PERFIL do login concede mas o
+  // PLANO da empresa não inclui — ver UserPlan em src/lib/auth.ts. `null`/empresa sem info de
+  // plano nunca trava nada (currentUser?.plan?.locked ?? {}).
+  const locked = currentUser?.plan?.locked ?? {};
+  const lockOf = (item: string) => locked[item];
+
+  const lockedRouteItem = lockedItemForPath(location.pathname);
+  const lockedRoute = lockedRouteItem ? lockOf(lockedRouteItem) : undefined;
 
   const isActive = (path: string) => path === '/app' ? location.pathname === '/app' : (location.pathname === path || location.pathname.startsWith(`${path}/`));
 
@@ -151,6 +191,9 @@ const AppLayout = () => {
               INDEPENDENTES: dá pra conceder um sem o outro, ex. um login que só bate o próprio
               ponto, sem enxergar a administração. */}
           {(hasModule('PONTO_REGISTRO') || hasModule('PONTO_ADMINISTRACAO')) && (
+            lockOf('PONTO_REGISTRO') && lockOf('PONTO_ADMINISTRACAO') ? (
+              <LockedNavItem icon={Users} label="Ponto" planLabel={lockOf('PONTO_REGISTRO')!.label} />
+            ) : (
           <div className="space-y-1">
             <button
               onClick={() => setIsPontoOpen(!isPontoOpen)}
@@ -192,10 +235,14 @@ const AppLayout = () => {
               </div>
             </div>
           </div>
+            )
           )}
 
           {/* Comercial Submenu */}
           {hasModule('COMERCIAL') && (
+            lockOf('COMERCIAL') ? (
+              <LockedNavItem icon={TrendingUp} label="Comercial" planLabel={lockOf('COMERCIAL')!.label} />
+            ) : (
           <div className="space-y-1">
             <button
               onClick={() => setIsCommercialOpen(!isCommercialOpen)}
@@ -225,10 +272,14 @@ const AppLayout = () => {
               </div>
             </div>
           </div>
+            )
           )}
 
           {/* Operações Submenu */}
           {hasModule('OPERACOES') && (
+            lockOf('OPERACOES') ? (
+              <LockedNavItem icon={Package} label="Operações" planLabel={lockOf('OPERACOES')!.label} />
+            ) : (
           <div className="space-y-1">
             <button
               onClick={() => setIsOperationsOpen(!isOperationsOpen)}
@@ -269,8 +320,12 @@ const AppLayout = () => {
               </div>
             </div>
           </div>
+            )
           )}
           {hasModule('FINANCAS') && (
+            lockOf('FINANCAS') ? (
+              <LockedNavItem icon={BarChart3} label="Finanças" planLabel={lockOf('FINANCAS')!.label} />
+            ) : (
           <Link
             to="/app/financas"
             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
@@ -280,9 +335,13 @@ const AppLayout = () => {
             <BarChart3 size={18} />
             Finanças
           </Link>
+            )
           )}
 
           {hasModule('DASHBOARD') && (
+            lockOf('ANALYTICS') ? (
+              <LockedNavItem icon={LayoutDashboard} label="Analytics e Dashboards" planLabel={lockOf('ANALYTICS')!.label} />
+            ) : (
           <Link
             to="/app/analytics"
             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
@@ -292,6 +351,7 @@ const AppLayout = () => {
             <LayoutDashboard size={18} />
             Analytics e Dashboards
           </Link>
+            )
           )}
 
           {/* Seção Administração — achado num teste manual do usuário (17/09/2026): estava
@@ -357,7 +417,14 @@ const AppLayout = () => {
 
         {/* Dynamic Route Content */}
         <div className="flex-1 overflow-auto bg-background/50">
-          <Outlet />
+          {lockedRoute ? (
+            <PlanUpgradeNotice
+              featureLabel={FEATURE_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string)}
+              planLabel={lockedRoute.label}
+            />
+          ) : (
+            <Outlet />
+          )}
         </div>
       </main>
 
