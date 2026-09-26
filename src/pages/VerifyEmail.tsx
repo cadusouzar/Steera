@@ -97,11 +97,13 @@ const VerifyEmail = () => {
       <AuthCard title="E-mail confirmado" subtitle="Sua conta está pronta para uso.">
         <div className="text-center">
           <CheckCircle2 size={40} className="mx-auto text-primary mb-6" aria-hidden="true" />
+          {/* Sempre volta pra página inicial (pedido do usuário, 26/09/2026) — mesmo padrão do login:
+              de lá a pessoa usa "Entrar no sistema" (logada) ou "Entrar" (deslogada) na barra. */}
           <Link
-            to={loggedIn ? '/app' : '/login'}
+            to="/"
             className="inline-flex items-center justify-center w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20"
           >
-            {loggedIn ? 'Entrar no sistema' : 'Entrar'}
+            Voltar para a página inicial
           </Link>
         </div>
       </AuthCard>
