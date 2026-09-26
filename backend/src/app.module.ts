@@ -33,6 +33,7 @@ import { TimeAdjustmentsModule } from './time-adjustments/time-adjustments.modul
 import { TimeJustificationsModule } from './time-justifications/time-justifications.module';
 import { TenantMigrationModule } from './tenant-migration/tenant-migration.module';
 import { ProfilesModule } from './profiles/profiles.module';
+import { EmailModule } from './email/email.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { ProfilesModule } from './profiles/profiles.module';
       { name: 'login-email', ttl: 900_000, limit: 5 },
     ]),
     PrismaModule,
+    EmailModule,
     AuthModule,
     CompanyModule,
     RolesModule,

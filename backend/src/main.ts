@@ -1,4 +1,4 @@
-import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { validateJwtSecret } from './common/jwt-secret.util';
 import { translateValidationErrors } from './common/validation-message-translator.util';
+import { validateMailConfig } from './email/mail-config.util';
 
 async function bootstrap() {
   // Falha rápido, antes de qualquer outra coisa: um JWT_ACCESS_SECRET ausente,
@@ -13,6 +14,15 @@ async function bootstrap() {
   // isolamento multi-tenant (qualquer um forja um token de ADMIN de qualquer
   // empresa) sem nenhum outro sinal de erro no boot.
   validateJwtSecret(process.env.JWT_ACCESS_SECRET);
+
+  // Mesma lógica de falha rápida, agora para e-mail transacional: nunca deixa
+  // o backend subir em produção sem RESEND_API_KEY (ver mail-config.util.ts).
+  // Em dev sem chave, o boot segue normalmente, só avisando — os e-mails
+  // vão parar no log (LogEmailSender, ver email.module.ts).
+  validateMailConfig(process.env);
+  if (process.env.NODE_ENV !== 'production' && !process.env.RESEND_API_KEY) {
+    Logger.warn('RESEND_API_KEY ausente — e-mails serão só registrados no log', 'Bootstrap');
+  }
 
   // Erro que escapa de todo try/catch específico não deve derrubar o processo inteiro (e com ele,
   // toda requisição de outros usuários em voo) — só loga, pra investigação, e segue rodando.
