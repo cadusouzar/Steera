@@ -1,5 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma, UserStatus } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
@@ -12,6 +13,10 @@ import { assertNotLastAdminWithFullPontoAccess, assertNotLastHolderOfPermission 
 import { planLimit } from '../plans/plan-catalog';
 import { assertBelowPlanLimit } from '../plans/plan-limits.util';
 import { CreateUserDto } from './dto/create-user.dto';
+import { InviteMailer } from '../auth/user-tokens/invite-mailer';
+import { UserTokensService } from '../auth/user-tokens/user-tokens.service';
+import { EmailService } from '../email/email.service';
+import { buildAppLink, passwordResetTemplate } from '../email/email-templates';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 
 // Nunca inclui passwordHash — espelha o padrão já usado em AuthService
@@ -34,12 +39,32 @@ const SAFE_USER_SELECT = {
   updatedAt: true,
 } as const;
 
+// Convite pendente conta no teto de logins do plano ("Acesso e sessões", 26/09/2026) — senão dava pra
+// convidar além do limite e só "ativar" depois, quando cada um aceitasse.
+const PLAN_COUNTED_STATUSES: UserStatus[] = ['ACTIVE', 'INVITED'];
+
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly timeManagementAuth: TimeManagementAuthService,
+    private readonly inviteMailer: InviteMailer,
+    private readonly userTokens: UserTokensService,
+    private readonly email: EmailService,
   ) {}
+
+  private countPlanEmployeeLogins(companyId: string): Promise<number> {
+    return this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: { in: PLAN_COUNTED_STATUSES } } });
+  }
+
+  // Nome da empresa (vai no assunto/corpo do convite) + emissão/envio. Rota autenticada de ADMIN: o
+  // envio é AGUARDADO (sem preocupação de enumeração aqui) pra resposta poder dizer se saiu (`sent`).
+  private async sendInvite(companyId: string, userId: string, email: string) {
+    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { name: true } });
+    return this.inviteMailer.sendInvite(userId, email, company.name);
+  }
 
   // hasFullPontoAccess sempre normalizado antes de sair daqui (ver ponto-access.util.ts) — a
   // coluna crua nasce `true` pra TODA linha, inclusive logins EMPLOYEE, que nunca têm acesso total
@@ -69,26 +94,18 @@ export class UsersService {
       // Planos grátis e pagos (26/09/2026): o teto de logins de funcionário vem do catálogo
       // (plan-catalog.ts), lido a partir de Company.planTier — nunca mais de
       // Company.maxEmployeeLogins (coluna legada, mantida só por consistência em updatePlan()).
-      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () =>
-        this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' } }),
-      );
+      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () => this.countPlanEmployeeLogins(companyId));
     }
 
     const profile = await this.prisma.profile.findFirst({ where: { id: dto.profileId, companyId } });
     if (!profile) throw new BadRequestException(`Perfil ${dto.profileId} não encontrado nesta empresa`);
 
-    // Senha temporária FIXA (decisão explícita do produto, não mais gerada
-    // aleatoriamente) — devolvida uma única vez na resposta; o hash é o que
-    // persiste. Todo login novo criado por um admin nasce com esta mesma
-    // senha conhecida e é bloqueado de usar o sistema (JwtAuthGuard, ver
-    // esse arquivo) até trocá-la no primeiro acesso via
-    // PATCH /auth/me/password (mustChangePassword força esse fluxo — ver
-    // abaixo e AuthService.changePassword()). 'Mudar@123' satisfaz o
-    // @MinLength(8) que ChangePasswordDto exige de newPassword numa troca
-    // voluntária futura, mas isso é incidental — essa validação nunca é
-    // aplicada à própria senha temporária, só a uma troca posterior.
-    const temporaryPassword = 'Mudar@123';
-    const passwordHash = await hashPassword(temporaryPassword);
+    // Convite por e-mail ("Acesso e sessões", 26/09/2026) — substitui a antiga senha temporária fixa
+    // ('Mudar@123'), que qualquer um que soubesse o e-mail de um login recém-criado podia usar. O
+    // login nasce INVITED com o hash de um valor aleatório DESCARTADO na hora (ninguém o conhece; a
+    // coluna é NOT NULL, e login() nem chega a verificar senha de INVITED). A senha de verdade é
+    // definida pela própria pessoa em POST /auth/accept-invite.
+    const passwordHash = await hashPassword(randomBytes(32).toString('hex'));
 
     let user;
     try {
@@ -113,8 +130,9 @@ export class UsersService {
           // podia criar um Perfil com `ponto.administrar@EMPRESA` (inofensivo sozinho — perfil sem
           // ninguém atribuído não concede nada a ninguém) e em seguida criar aqui um login ADMIN
           // novo apontando pra ele, que já nascia com `hasFullPontoAccess: true`. Como a senha
-          // temporária é fixa e conhecida ('Mudar@123'), bastava entrar na conta nova. Três
-          // chamadas comuns de API, nenhum erro em lugar nenhum.
+          // temporária era fixa e conhecida ('Mudar@123', substituída por convite por e-mail em
+          // 26/09/2026 — o gate continua valendo: o convite pode ir pra um e-mail do próprio
+          // atacante), bastava entrar na conta nova. Três chamadas comuns de API, nenhum erro.
           //
           // Só o GATE, nunca o invariante: criar um usuário novo não pode REDUZIR a contagem de
           // admins de acesso total existentes, então `assertOtherAdminGrantsFullPontoAccess`/
@@ -133,11 +151,11 @@ export class UsersService {
               modules,
               profileId: dto.profileId,
               hasFullPontoAccess,
-              // Sempre true aqui: quem recebe uma senha gerada pelo sistema (em
-              // vez de escolher a própria, como em POST /auth/register) é
-              // obrigado a trocá-la no primeiro acesso. Mesmo bug/mesmo fix de
-              // AuthService.register() para P2002 abaixo — ver esse catch.
-              mustChangePassword: true,
+              // Convite: a pessoa escolhe a própria senha ao aceitar, então não há troca forçada.
+              // Aceitar o convite prova posse do e-mail (emailVerifiedAt passa a valer ali).
+              status: 'INVITED',
+              mustChangePassword: false,
+              emailVerifiedAt: null,
             },
             select: SAFE_USER_SELECT,
           });
@@ -160,7 +178,26 @@ export class UsersService {
       throw err;
     }
 
-    return { user: this.toPublicUser(user), temporaryPassword };
+    // O login já existe a partir daqui — uma falha ao preparar o convite (ex.: banco indisponível ao
+    // emitir o token) nunca desfaz a criação nem vira 500: devolve `inviteUrl: null, sent: false` e o
+    // admin usa "Reenviar convite". EmailService.send em si nunca lança (só devolve false).
+    let invite: { inviteUrl: string | null; sent: boolean } = { inviteUrl: null, sent: false };
+    try {
+      invite = await this.sendInvite(companyId, user.id, user.email);
+    } catch (err) {
+      this.logger.error(`Falha ao preparar o convite do login ${user.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return { user: this.toPublicUser(user), inviteUrl: invite.inviteUrl, sent: invite.sent };
+  }
+
+  // PATCH /companies/me/users/:id/resend-invite — só pra login ainda INVITED. Reemite o token (o link
+  // anterior deixa de valer) e reenvia; devolve o link pro admin poder copiar se o e-mail não chegar.
+  async resendInvite(companyId: string, userId: string): Promise<{ inviteUrl: string; sent: boolean }> {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
+    if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    if (user.status !== 'INVITED') throw new BadRequestException('Este login já aceitou o convite.');
+    return this.sendInvite(companyId, user.id, user.email);
   }
 
   async block(companyId: string, userId: string) {
@@ -195,21 +232,29 @@ export class UsersService {
   async unblock(companyId: string, userId: string) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    // Convite pendente: não há o que "reativar" (INVITED já conta no limite e ainda não tem senha) —
+    // só limpa uma eventual trava temporária. Promover pra ACTIVE deixaria um login com hash
+    // inutilizável e e-mail nunca confirmado, fora do fluxo de aceite.
+    if (user.status === 'INVITED') {
+      await this.prisma.user.update({ where: { id: userId }, data: { failedLoginAttempts: 0, lockedUntil: null } });
+      return;
+    }
     // Planos grátis e pagos (26/09/2026): reativar um login EMPLOYEE (de BLOCKED ou LOCKED de volta
     // pra ACTIVE) precisa respeitar o mesmo teto de logins do catálogo que create() já impõe pra um
     // login novo — sem isso, dava pra contornar o limite bloqueando/desbloqueando em vez de criar.
     // Só relevante se o login ainda não está ACTIVE (reativar um já ACTIVE, no-op, nunca é bloqueado
-    // por limite). ADMIN nunca é checado — o teto é só de logins EMPLOYEE.
+    // por limite). ADMIN nunca é checado — o teto é só de logins EMPLOYEE. A contagem inclui INVITED.
     if (user.role === 'EMPLOYEE' && user.status !== 'ACTIVE') {
-      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () =>
-        this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' } }),
-      );
+      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () => this.countPlanEmployeeLogins(companyId));
     }
-    // Reseta failedLoginAttempts também — cobre tanto um BLOCKED (ação de admin) quanto um LOCKED
-    // (travado pelo próprio backend por excesso de tentativas, ver AuthService.login()) com a mesma
-    // ação: sem isso, um login LOCKED desbloqueado voltaria a travar sozinho na primeira senha
-    // errada seguinte, porque o contador nunca foi zerado.
-    await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE', failedLoginAttempts: 0 } });
+    // Reseta failedLoginAttempts e lockedUntil também — "desbloquear" cobre tanto um BLOCKED (ação de
+    // admin) quanto a trava temporária por excesso de senha errada (lockedUntil, ver
+    // AuthService.login(); LOCKED é o legado disso): sem zerar, o login voltaria a travar na primeira
+    // senha errada seguinte, ou continuaria travado até lockedUntil expirar.
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
+    });
   }
 
   // Troca o Perfil de um login já existente (Fase 2a, 19/09/2026) — substitui tanto a antiga
@@ -314,41 +359,34 @@ export class UsersService {
     );
   }
 
-  // Redefinição de senha por um admin (17/09/2026) — mesmo padrão de senha temporária fixa de
-  // create(), devolvida uma única vez. Também reativa o login (ACTIVE) e zera
-  // failedLoginAttempts: é o caminho de saída de um login LOCKED por excesso de tentativas (a outra
-  // opção é só unblock(), que mantém a senha antiga — reset é pra quando a senha em si é o
-  // problema, ex.: o dono esqueceu ou suspeita que vazou).
-  async resetPassword(companyId: string, userId: string) {
+  // Redefinição de senha por um admin — "Acesso e sessões" (26/09/2026): em vez de gerar a senha
+  // temporária fixa ('Mudar@123'), envia um link de redefinição (PASSWORD_RESET, 30min) pro e-mail do
+  // próprio login. NADA muda no login aqui: senha, status e sessões só mudam quando a pessoa de fato
+  // redefine (AuthService.resetPassword, que revoga as sessões e nunca desfaz um BLOCKED). Um login
+  // INVITED não tem senha pra redefinir — recebe o convite de novo. Nunca devolve senha nenhuma.
+  async resetPassword(companyId: string, userId: string): Promise<{ sent: boolean; inviteUrl?: string }> {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
 
-    // Planos grátis e pagos (26/09/2026): resetPassword() também reativa o login pra ACTIVE (mesmo
-    // efeito de unblock() num login BLOCKED/LOCKED) — precisa do mesmo guard de teto de logins do
-    // catálogo que unblock() já tem, senão dava pra contornar o limite resetando a senha de um login
-    // travado em vez de desbloqueá-lo. Só relevante se o login ainda não está ACTIVE. ADMIN nunca é
-    // checado — o teto é só de logins EMPLOYEE.
-    if (user.role === 'EMPLOYEE' && user.status !== 'ACTIVE') {
-      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () =>
-        this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' } }),
-      );
+    if (user.status === 'INVITED') {
+      const { inviteUrl, sent } = await this.sendInvite(companyId, user.id, user.email);
+      return { sent, inviteUrl };
     }
 
-    const temporaryPassword = 'Mudar@123';
-    const passwordHash = await hashPassword(temporaryPassword);
+    // Planos grátis e pagos (26/09/2026): mantido do fluxo antigo (que reativava o login). O reset
+    // em si não muda mais o status, mas um login LOCKED legado volta a ACTIVE sozinho no próximo
+    // login certo (AuthService.login) — então entregar a ele uma senha nova ainda contornaria o teto
+    // de logins de funcionário. Só relevante se o login não está ACTIVE; ADMIN nunca é checado.
+    if (user.role === 'EMPLOYEE' && user.status !== 'ACTIVE') {
+      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () => this.countPlanEmployeeLogins(companyId));
+    }
 
-    await runInsideExplicitTenantTransaction(() =>
-      this.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
-        await tx.user.update({
-          where: { id: userId },
-          data: { passwordHash, mustChangePassword: true, status: 'ACTIVE', failedLoginAttempts: 0 },
-        });
-        await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
-      }),
+    const raw = await this.userTokens.issue(user.id, 'PASSWORD_RESET');
+    const sent = await this.email.send(
+      { to: user.email, ...passwordResetTemplate(buildAppLink('/redefinir-senha', raw)) },
+      'password-reset',
     );
-
-    return { temporaryPassword };
+    return { sent };
   }
 
   // Compartilhado por block()/remove() — nenhuma das duas pode deixar a empresa sem NENHUM login

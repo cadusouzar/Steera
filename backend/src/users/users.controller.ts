@@ -49,10 +49,21 @@ export class UsersController {
     return this.users.remove(user.companyId, id);
   }
 
+  // "Acesso e sessões" (26/09/2026): não devolve mais senha nenhuma — envia um link de redefinição
+  // pro e-mail do login (`{ sent }`), ou reenvia o convite se o login ainda é INVITED
+  // (`{ sent, inviteUrl }`).
   @Roles('ADMIN')
   @Patch(':id/reset-password')
   resetPassword(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.users.resetPassword(user.companyId, id);
+  }
+
+  // Só pra login INVITED (400 "Este login já aceitou o convite." caso contrário). Reemite o token (o
+  // link anterior deixa de valer), reenvia e devolve `{ inviteUrl, sent }` pro admin poder copiar o link.
+  @Roles('ADMIN')
+  @Patch(':id/resend-invite')
+  resendInvite(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.users.resendInvite(user.companyId, id);
   }
 
   @Roles('ADMIN')

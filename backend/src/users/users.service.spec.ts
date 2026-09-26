@@ -7,6 +7,9 @@ import * as lastPermissionHolderUtil from './last-permission-holder.util';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { UsersService } from './users.service';
+import { UserTokensService } from '../auth/user-tokens/user-tokens.service';
+import { InviteMailer } from '../auth/user-tokens/invite-mailer';
+import { EmailService } from '../email/email.service';
 
 // Chamador padrão dos testes: um ADMIN que JÁ tem acesso total ao Ponto — o caso que passa
 // livremente pelos gates de acesso total ao Ponto. Testes que exercitam um gate em si passam
@@ -33,8 +36,16 @@ function makeTimeAuth() {
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: any;
+  let inviteMailer: { sendInvite: jest.Mock };
+  let userTokens: { issue: jest.Mock; consume: jest.Mock };
+  let email: { send: jest.Mock };
 
   beforeEach(async () => {
+    inviteMailer = {
+      sendInvite: jest.fn().mockResolvedValue({ inviteUrl: 'http://localhost:5173/aceitar-convite?token=raw-invite', sent: true }),
+    };
+    userTokens = { issue: jest.fn().mockResolvedValue('raw-reset-token'), consume: jest.fn() };
+    email = { send: jest.fn().mockResolvedValue(true) };
     prisma = {
       employee: { findFirst: jest.fn() },
       user: {
@@ -80,6 +91,9 @@ describe('UsersService', () => {
         // `assertHasFullPontoAccess` pra restaurar o gate que morreu junto com
         // `PATCH .../ponto-access`. Só esse método do serviço é usado aqui.
         { provide: TimeManagementAuthService, useValue: { assertHasFullPontoAccess: jest.fn() } },
+        { provide: InviteMailer, useValue: inviteMailer },
+        { provide: UserTokensService, useValue: userTokens },
+        { provide: EmailService, useValue: email },
       ],
     }).compile();
     service = module.get(UsersService);
@@ -211,28 +225,59 @@ describe('UsersService', () => {
       .rejects.toThrow('Limite do plano Grátis: até 2 logins de funcionário ativos. Faça upgrade para cadastrar mais.');
   });
 
-  it('creates an EMPLOYEE login under the plan limit and returns the fixed temporary password', async () => {
+  // Task 7 ("Acesso e sessões", 26/09/2026): convite por e-mail em vez de senha temporária fixa.
+  it('creates an EMPLOYEE login as INVITED with an unusable random password hash and sends the invite', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO', name: 'Padaria Central' });
     prisma.user.count.mockResolvedValue(9);
     prisma.user.create.mockResolvedValue({ id: 'u1', email: 'a@a.com', role: 'EMPLOYEE' });
-    const result = await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any, makeCaller());
-    // Decisão de produto: senha temporária FIXA e conhecida ('Mudar@123'),
-    // não mais aleatória — o bloqueio de acesso até a troca fica a cargo de
-    // mustChangePassword (ver JwtAuthGuard), não da imprevisibilidade da
-    // senha em si.
-    expect(result.temporaryPassword).toBe('Mudar@123');
+
+    const result: any = await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any, makeCaller());
+
+    const data = prisma.user.create.mock.calls[0][0].data;
+    expect(data.status).toBe('INVITED');
+    expect(data.mustChangePassword).toBe(false);
+    expect(data.emailVerifiedAt).toBeNull();
+    expect(typeof data.passwordHash).toBe('string');
+    expect(data.passwordHash.length).toBeGreaterThan(0);
+    expect(data.passwordHash).not.toBe('Mudar@123');
+    expect(inviteMailer.sendInvite).toHaveBeenCalledWith('u1', 'a@a.com', 'Padaria Central');
+    expect(result.inviteUrl).toBe('http://localhost:5173/aceitar-convite?token=raw-invite');
+    expect(result.sent).toBe(true);
+    expect(result).not.toHaveProperty('temporaryPassword');
     expect(result.user.id).toBe('u1');
   });
 
-  it('hashes the fixed temporary password instead of persisting it in plaintext', async () => {
+  it('never reuses the same password hash between two created logins (random value, not a fixed password)', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
     prisma.user.create.mockImplementation(({ data }: any) => Promise.resolve({ id: 'u9', email: data.email, role: data.role }));
-    const result = await service.create('c1', { email: 'admin9@a.com', role: 'ADMIN', profileId: 'profile-1' } as any, makeCaller());
-    const createCall = prisma.user.create.mock.calls[0][0];
-    expect(createCall.data.passwordHash).not.toBe('Mudar@123');
-    expect(createCall.data.mustChangePassword).toBe(true);
-    expect(result.temporaryPassword).toBe('Mudar@123');
+    await service.create('c1', { email: 'admin9@a.com', role: 'ADMIN', profileId: 'profile-1' } as any, makeCaller());
+    await service.create('c1', { email: 'admin8@a.com', role: 'ADMIN', profileId: 'profile-1' } as any, makeCaller());
+    const [h1, h2] = prisma.user.create.mock.calls.map((c: any) => c[0].data.passwordHash);
+    expect(h1).not.toBe(h2);
+    expect(prisma.user.create.mock.calls[0][0].data.status).toBe('INVITED');
+  });
+
+  it('counts ACTIVE + INVITED EMPLOYEE logins against the plan limit on create', async () => {
+    prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS', name: 'X' });
+    prisma.user.count.mockResolvedValue(0);
+    prisma.user.create.mockResolvedValue({ id: 'u1', email: 'a@a.com', role: 'EMPLOYEE' });
+    await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any, makeCaller());
+    expect(prisma.user.count).toHaveBeenCalledWith({
+      where: { companyId: 'c1', role: 'EMPLOYEE', status: { in: ['ACTIVE', 'INVITED'] } },
+    });
+  });
+
+  it('still returns the created login (sent: false, inviteUrl: null) when the invite cannot even be prepared', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+    prisma.user.create.mockResolvedValue({ id: 'u2', email: 'x@a.com', role: 'ADMIN' });
+    inviteMailer.sendInvite.mockRejectedValue(new Error('db down'));
+    const result: any = await service.create('c1', { email: 'x@a.com', role: 'ADMIN', profileId: 'profile-1' } as any, makeCaller());
+    expect(result.user.id).toBe('u2');
+    expect(result).toMatchObject({ inviteUrl: null, sent: false });
   });
 
   it('rejects creating a login with an e-mail already used by ANY company with a clean 409 instead of an unhandled 500', async () => {
@@ -274,7 +319,10 @@ describe('UsersService', () => {
     prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin2@a.com', role: 'ADMIN' });
     const result = await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', profileId: 'profile-1' } as any, makeCaller());
     expect(result.user.id).toBe('u2');
-    expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+    // Única leitura de Company é o nome pro e-mail de convite — nunca o planTier do limite.
+    expect(prisma.company.findUniqueOrThrow).toHaveBeenCalledTimes(1);
+    expect(prisma.company.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'c1' }, select: { name: true } });
+    expect(prisma.user.count).not.toHaveBeenCalled();
   });
 
   it('block scopes the lookup to the current company and revokes active refresh tokens', async () => {
@@ -349,12 +397,34 @@ describe('UsersService', () => {
     expect(prisma.user.update).toHaveBeenCalled();
   });
 
-  it('unblock resets status to ACTIVE and zeroes the failed-login-attempts counter', async () => {
-    prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
+  it('unblock resets status to ACTIVE, zeroes the failed-login-attempts counter and clears lockedUntil', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', status: 'BLOCKED' });
     await service.unblock('c1', 'u1');
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
-      data: { status: 'ACTIVE', failedLoginAttempts: 0 },
+      data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
+    });
+  });
+
+  it('unblock counts ACTIVE + INVITED EMPLOYEE logins against the plan limit', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'BLOCKED' });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.user.count.mockResolvedValue(0);
+    await service.unblock('c1', 'u1');
+    expect(prisma.user.count).toHaveBeenCalledWith({
+      where: { companyId: 'c1', role: 'EMPLOYEE', status: { in: ['ACTIVE', 'INVITED'] } },
+    });
+  });
+
+  // INVITED já conta no limite e ainda não tem senha — "desbloquear" só limpa a trava temporária,
+  // nunca promove um convite pendente a ACTIVE (com um hash inutilizável e sem e-mail confirmado).
+  it('unblock keeps an INVITED login INVITED (only clears the temporary lock) and skips the plan check', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'INVITED' });
+    await service.unblock('c1', 'u1');
+    expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { failedLoginAttempts: 0, lockedUntil: null },
     });
   });
 
@@ -409,50 +479,94 @@ describe('UsersService', () => {
       await expect(service.resetPassword('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it('generates the same fixed temporary password used at creation, reactivates the login and zeroes the failed-attempt counter', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
-      const result = await service.resetPassword('c1', 'u1');
-      expect(result.temporaryPassword).toBe('Mudar@123');
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'u1' },
-        data: expect.objectContaining({
-          mustChangePassword: true,
-          status: 'ACTIVE',
-          failedLoginAttempts: 0,
-        }),
-      });
-      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
-        where: { userId: 'u1', revokedAt: null },
-        data: { revokedAt: expect.any(Date) },
-      });
+    // Task 7 ("Acesso e sessões"): em vez de gerar 'Mudar@123', envia um link de redefinição pro
+    // e-mail do login. Nada muda no login agora — a senha, o status e as sessões só mudam quando a
+    // pessoa de fato redefine (AuthService.resetPassword).
+    it('ACTIVE login: issues a PASSWORD_RESET token and e-mails the link, changing nothing on the login', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'ana@a.com', role: 'EMPLOYEE', status: 'ACTIVE' });
+
+      const result: any = await service.resetPassword('c1', 'u1');
+
+      expect(userTokens.issue).toHaveBeenCalledWith('u1', 'PASSWORD_RESET');
+      expect(email.send).toHaveBeenCalledTimes(1);
+      const [message, context] = email.send.mock.calls[0];
+      expect(message.to).toBe('ana@a.com');
+      expect(message.html).toContain('/redefinir-senha?token=raw-reset-token');
+      expect(context).toBe('password-reset');
+      expect(result).toEqual({ sent: true });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
     });
 
-    // Planos grátis e pagos (26/09/2026): resetPassword() também reativa o login pra ACTIVE (mesmo
-    // efeito de unblock() num login BLOCKED/LOCKED) — sem o mesmo guard, dava pra contornar o teto de
-    // logins de funcionário do plano resetando a senha de um login travado em vez de desbloqueá-lo.
-    it('rejects reactivating a blocked/LOCKED EMPLOYEE login once the GRATIS plan limit (2) is reached', async () => {
+    it('reports sent: false when the provider refuses', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'ana@a.com', role: 'ADMIN', status: 'ACTIVE' });
+      email.send.mockResolvedValue(false);
+      await expect(service.resetPassword('c1', 'u1')).resolves.toEqual({ sent: false });
+    });
+
+    it('INVITED login: re-sends the invite instead and returns { sent, inviteUrl }', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'ana@a.com', role: 'EMPLOYEE', status: 'INVITED' });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'Padaria Central' });
+
+      const result = await service.resetPassword('c1', 'u1');
+
+      expect(inviteMailer.sendInvite).toHaveBeenCalledWith('u1', 'ana@a.com', 'Padaria Central');
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(result).toEqual({ sent: true, inviteUrl: 'http://localhost:5173/aceitar-convite?token=raw-invite' });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    // Um login LOCKED legado volta a ACTIVE sozinho no próximo login certo (AuthService.login) — então
+    // mandar o link pra ele ainda precisa respeitar o teto do plano, como antes.
+    it('rejects a blocked/LOCKED EMPLOYEE login once the GRATIS plan limit (2) is reached, counting ACTIVE + INVITED', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'LOCKED' });
       prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
       prisma.user.count.mockResolvedValue(2);
       await expect(service.resetPassword('c1', 'u1')).rejects.toThrow(
         'Limite do plano Grátis: até 2 logins de funcionário ativos. Faça upgrade para cadastrar mais.',
       );
-      expect(prisma.user.update).not.toHaveBeenCalled();
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.user.count).toHaveBeenCalledWith({
+        where: { companyId: 'c1', role: 'EMPLOYEE', status: { in: ['ACTIVE', 'INVITED'] } },
+      });
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
     });
 
     it('does not check the plan limit for an already-ACTIVE EMPLOYEE login', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'ACTIVE' });
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', role: 'EMPLOYEE', status: 'ACTIVE' });
       await service.resetPassword('c1', 'u1');
       expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
-      expect(prisma.user.update).toHaveBeenCalled();
+      expect(email.send).toHaveBeenCalled();
     });
 
     it('never checks the plan limit for an ADMIN login', async () => {
-      prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED' });
+      prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1', email: 'a@a.com', role: 'ADMIN', status: 'BLOCKED' });
       await service.resetPassword('c1', 'admin1');
       expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
-      expect(prisma.user.update).toHaveBeenCalled();
+      expect(email.send).toHaveBeenCalled();
+    });
+  });
+
+  describe('resendInvite', () => {
+    it('404s for a login from another company', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.resendInvite('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it.each(['ACTIVE', 'BLOCKED', 'LOCKED'])('rejects a %s login with "Este login já aceitou o convite."', async (status) => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', status });
+      await expect(service.resendInvite('c1', 'u1')).rejects.toThrow(new BadRequestException('Este login já aceitou o convite.'));
+      expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
+    });
+
+    it('re-issues and re-sends the invite for an INVITED login, returning { inviteUrl, sent }', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', status: 'INVITED' });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'Padaria Central' });
+      const result = await service.resendInvite('c1', 'u1');
+      expect(inviteMailer.sendInvite).toHaveBeenCalledWith('u1', 'a@a.com', 'Padaria Central');
+      expect(result).toEqual({ inviteUrl: 'http://localhost:5173/aceitar-convite?token=raw-invite', sent: true });
     });
   });
 
@@ -471,7 +585,7 @@ describe('UsersService', () => {
     const FULL_PONTO_GRANTS = [{ permissionCode: 'ponto.administrar', scope: 'EMPRESA' }];
 
     function makeService() {
-      return new UsersService(prisma as any, makeTimeAuth());
+      return new UsersService(prisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
     }
 
     it('BARRA (404) um ADMIN restrito criando um login ADMIN novo com acesso total', async () => {
@@ -600,7 +714,7 @@ describe('UsersService', () => {
 
     it('lança NotFoundException se o login não existir na empresa', async () => {
       const localPrisma = { user: { findFirst: jest.fn().mockResolvedValue(null) }, profile: { findFirst: jest.fn() } };
-      const localService = new UsersService(localPrisma as any, makeTimeAuth());
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
       await expect(localService.assignProfile('company-1', 'missing', 'p2', makeCaller())).rejects.toThrow(
         NotFoundException,
@@ -612,7 +726,7 @@ describe('UsersService', () => {
         user: { findFirst: jest.fn().mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: 'p1' }) },
         profile: { findFirst: jest.fn().mockResolvedValue(null) },
       };
-      const localService = new UsersService(localPrisma as any, makeTimeAuth());
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
       await expect(localService.assignProfile('company-1', 'u1', 'missing', makeCaller())).rejects.toThrow(
         BadRequestException,
@@ -627,7 +741,7 @@ describe('UsersService', () => {
         .spyOn(profileAssignmentUtil, 'reassignUserProfile')
         .mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma(null);
-      const localService = new UsersService(localPrisma as any, makeTimeAuth());
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -639,7 +753,7 @@ describe('UsersService', () => {
       jest.spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission').mockResolvedValue(undefined);
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
-      const localService = new UsersService(localPrisma as any, makeTimeAuth());
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -653,7 +767,7 @@ describe('UsersService', () => {
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
       mockGrants(tx, [], [{ permissionCode: 'usuarios.gerenciar' }]);
-      const localService = new UsersService(localPrisma as any, makeTimeAuth());
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -667,7 +781,7 @@ describe('UsersService', () => {
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
       mockGrants(tx, [{ permissionCode: 'usuarios.gerenciar' }], [{ permissionCode: 'usuarios.gerenciar' }]);
-      const localService = new UsersService(localPrisma as any, makeTimeAuth());
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -691,7 +805,7 @@ describe('UsersService', () => {
       it('BARRA (404) um ADMIN restrito tentando GANHAR acesso total — a escalação demonstrada pelo revisor', async () => {
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, RESTRITO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await expect(
           localService.assignProfile(
@@ -706,7 +820,7 @@ describe('UsersService', () => {
       it('BARRA (404) um chamador EMPLOYEE mexendo no acesso total de um ADMIN', async () => {
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, RESTRITO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await expect(
           localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller({ role: 'EMPLOYEE' })),
@@ -719,7 +833,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, RESTRITO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -733,7 +847,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, RESTRITO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -746,7 +860,7 @@ describe('UsersService', () => {
           .mockRejectedValue(new BadRequestException('sem outro admin de acesso total'));
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, RESTRITO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await expect(
           localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller()),
@@ -759,7 +873,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'EMPLOYEE');
         mockGrants(tx, RESTRITO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         // Chamador sem acesso total: passaria batido só porque o alvo é EMPLOYEE.
         await localService.assignProfile(
@@ -779,7 +893,7 @@ describe('UsersService', () => {
       it('BARRA (404) promover um login SEM perfil (profileId null) a um perfil de acesso total', async () => {
         const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
         mockGrants(tx, FULL_PONTO, []);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await expect(
           localService.assignProfile(
@@ -797,7 +911,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
         mockGrants(tx, FULL_PONTO, []);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -810,7 +924,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
         mockGrants(tx, FULL_PONTO, []);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -823,7 +937,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth());
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
 
         await localService.assignProfile(
           'company-1',

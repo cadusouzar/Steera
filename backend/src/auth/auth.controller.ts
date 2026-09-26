@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res, UseGuards } fro
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LinkEmployeeDto } from './dto/link-employee.dto';
@@ -131,6 +132,20 @@ export class AuthController {
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.auth.resetPassword(dto.token, dto.newPassword);
+  }
+
+  // Aceite de convite ("Acesso e sessões", 26/09/2026): login criado por um admin nasce INVITED e a
+  // pessoa define a própria senha por aqui. Mesmas proteções de reset-password: @Public() (o link
+  // chega por e-mail, sem sessão), AntiCsrfHeaderGuard, sem e-mail no corpo (daí o @SkipThrottle do
+  // "login-email") e teto por IP de 10/15min. Não loga automaticamente.
+  @Public()
+  @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 10, ttl: 900_000 } })
+  @HttpCode(204)
+  @Post('accept-invite')
+  acceptInvite(@Body() dto: AcceptInviteDto) {
+    return this.auth.acceptInvite(dto.token, dto.password);
   }
 
   // Confirmação de e-mail ("Acesso e sessões", 26/09/2026). verify-email é @Public(): o link pode

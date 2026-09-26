@@ -14,7 +14,7 @@ import { applyMigrations } from '../prisma/tenant-migration.util';
 import { normalizePhone } from '../common/phone.util';
 import { EmailService } from '../email/email.service';
 import {
-  accountLockedTemplate, buildAppLink, inviteTemplate, passwordChangedTemplate, passwordResetTemplate, verifyEmailTemplate,
+  accountLockedTemplate, buildAppLink, passwordChangedTemplate, passwordResetTemplate, verifyEmailTemplate,
 } from '../email/email-templates';
 import { getPlan, lockedItemsFor, planLimit } from '../plans/plan-catalog';
 import { accountLockedError } from './account-lock.util';
@@ -28,6 +28,7 @@ import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
 import { UserTokensService } from './user-tokens/user-tokens.service';
+import { InviteMailer } from './user-tokens/invite-mailer';
 
 // `RH` de propósito fora daqui — não é mais atribuído a login novo nenhum, nem o fundador (ver
 // RH_CARGOS/RH_FUNCIONARIOS no schema). O fundador via /auth/register continua recebendo TODOS os
@@ -67,6 +68,9 @@ export const FORGOT_PASSWORD_MESSAGE = 'Se existir uma conta com esse e-mail, en
 // "redefinir" — o aceite de convite é outro fluxo (Task 7). Nunca revela essa distinção pro
 // cliente, que vê a mesma mensagem genérica de link inválido/expirado.
 const RESET_PASSWORD_INVITED_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
+// Mesmo texto genérico pra um token INVITE válido de um login que não está mais INVITED (já aceito,
+// ou BLOCKED por um admin) — nunca revela qual dos casos é.
+const ACCEPT_INVITE_INVALID_MESSAGE = 'Link inválido ou expirado. Peça um novo.';
 
 // process.cwd(), não __dirname: __dirname aponta pra dentro de `dist/src/auth` depois de compilado
 // (`npm run build` + `node dist/main.js`), onde `prisma/` não existe — mesmo padrão já usado em
@@ -95,6 +99,7 @@ export class AuthService {
     private readonly email: EmailService,
     private readonly userTokens: UserTokensService,
     private readonly unknownLoginFailures: UnknownLoginFailureTracker,
+    private readonly inviteMailer: InviteMailer,
   ) {}
 
   private async signAccessToken(user: {
@@ -690,15 +695,43 @@ export class AuthService {
   }
 
   // Emite um token INVITE e envia o e-mail de convite — usado por forgotPassword() acima (INVITED
-  // reenviando o próprio convite) e, mais adiante (Task 7), por UsersService ao criar um login
-  // INVITED novo. Esta função NÃO engole erro nenhum — quem chama decide como reagir (forgotPassword()
-  // a dispara via runInBackground, que pega e loga; um chamador futuro pode legitimamente precisar de outro
-  // comportamento, ex.: desfazer a criação do login se o convite não puder nem ser preparado).
-  async sendInviteEmail(userId: string, email: string, companyName: string): Promise<{ inviteUrl: string; sent: boolean }> {
-    const raw = await this.userTokens.issue(userId, 'INVITE');
-    const inviteUrl = buildAppLink('/aceitar-convite', raw);
-    const sent = await this.email.send({ to: email, ...inviteTemplate(companyName, inviteUrl) }, 'invite');
-    return { inviteUrl, sent };
+  // reenviando o próprio convite). A implementação mora em InviteMailer (Task 7), compartilhada com
+  // UsersService (admin cria/reenvia convite) sem UsersModule precisar importar AuthModule. NÃO engole
+  // erro nenhum — quem chama decide como reagir (forgotPassword() a dispara via runInBackground).
+  sendInviteEmail(userId: string, email: string, companyName: string): Promise<{ inviteUrl: string; sent: boolean }> {
+    return this.inviteMailer.sendInvite(userId, email, companyName);
+  }
+
+  // POST /auth/accept-invite (público — o link chega por e-mail, sem sessão). Define a primeira senha
+  // do login, ativa (INVITED → ACTIVE) e confirma o e-mail (quem abriu o link prova posse dele). Não
+  // loga automaticamente: a tela leva ao login.
+  //
+  // Só um login ainda INVITED pode aceitar: BLOCKED (ação de admin) NUNCA é desfeito por convite, e
+  // um login já ativo não tem o que aceitar — os dois recebem o mesmo 400 genérico sem nenhuma
+  // escrita. O `status: 'INVITED'` também vai no WHERE do update (não só na leitura acima): fecha a
+  // corrida com um block() concorrente entre a leitura e a escrita — se o admin bloqueou no meio, o
+  // update não casa nada e o BLOCKED fica. runAsSystem: rota @Public(), mesmo raciocínio de
+  // resetPassword().
+  async acceptInvite(rawToken: string, password: string): Promise<void> {
+    const userId = await this.userTokens.consume(rawToken, 'INVITE');
+    const user = await runAsSystem(() => this.prisma.user.findUniqueOrThrow({ where: { id: userId } }));
+    if (user.status !== 'INVITED') throw new BadRequestException(ACCEPT_INVITE_INVALID_MESSAGE);
+
+    const passwordHash = await hashPassword(password);
+    const { count } = await runAsSystem(() =>
+      this.prisma.user.updateMany({
+        where: { id: userId, status: 'INVITED' },
+        data: {
+          passwordHash,
+          status: 'ACTIVE',
+          emailVerifiedAt: new Date(),
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          mustChangePassword: false,
+        },
+      }),
+    );
+    if (count === 0) throw new BadRequestException(ACCEPT_INVITE_INVALID_MESSAGE);
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {

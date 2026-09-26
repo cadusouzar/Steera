@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { AuthService, FORGOT_PASSWORD_MESSAGE, LOCK_DURATION_MS } from './auth.service';
 import { UserTokensService } from './user-tokens/user-tokens.service';
+import { InviteMailer } from './user-tokens/invite-mailer';
 import { accountLockedError } from './account-lock.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
 import * as passwordUtil from './password.util';
@@ -91,6 +92,8 @@ describe('AuthService', () => {
         { provide: AuthorizationService, useValue: authorization },
         { provide: EmailService, useValue: email },
         { provide: UserTokensService, useValue: userTokens },
+        // Real (não mock): depende só de UserTokensService/EmailService, já mockados acima.
+        InviteMailer,
         // Instância nova por teste: a trava em memória de e-mail inexistente nunca vaza entre testes.
         { provide: UnknownLoginFailureTracker, useValue: new UnknownLoginFailureTracker() },
       ],
@@ -1166,6 +1169,64 @@ describe('AuthService', () => {
       expect(result.inviteUrl).toContain('raw-invite-token');
       expect(result.sent).toBe(true);
       expect(email.send).toHaveBeenCalledWith(expect.objectContaining({ to: 'novo@teste.com' }), 'invite');
+    });
+  });
+
+  // Task 7 ("Acesso e sessões"): aceite de convite — define a senha, ativa e confirma o e-mail.
+  describe('acceptInvite', () => {
+    const invitedUser = { id: 'u5', email: 'novo@teste.com', status: 'INVITED' };
+
+    it('token válido de usuário INVITED define a senha, ativa o login e confirma o e-mail', async () => {
+      userTokens.consume.mockResolvedValue('u5');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...invitedUser });
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.acceptInvite('token-valido', 'senhaNova12345');
+
+      expect(userTokens.consume).toHaveBeenCalledWith('token-valido', 'INVITE');
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        // status: 'INVITED' no where: aceite atômico — um block() concorrente nunca é desfeito.
+        where: { id: 'u5', status: 'INVITED' },
+        data: expect.objectContaining({
+          passwordHash: expect.any(String),
+          status: 'ACTIVE',
+          emailVerifiedAt: expect.any(Date),
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          mustChangePassword: false,
+        }),
+      });
+      const data = prisma.user.updateMany.mock.calls[0][0].data;
+      expect(data.passwordHash).not.toBe('senhaNova12345');
+    });
+
+    it.each(['BLOCKED', 'ACTIVE', 'LOCKED'])('usuário %s é recusado com o 400 genérico, sem alterar nada', async (status) => {
+      userTokens.consume.mockResolvedValue('u5');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...invitedUser, status });
+
+      await expect(service.acceptInvite('token-valido', 'senhaNova12345')).rejects.toThrow(
+        new BadRequestException('Link inválido ou expirado. Peça um novo.'),
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('corrida: bloqueado entre a leitura e a escrita (updateMany count 0) → mesmo 400', async () => {
+      userTokens.consume.mockResolvedValue('u5');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...invitedUser });
+      prisma.user.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.acceptInvite('token-valido', 'senhaNova12345')).rejects.toThrow(
+        'Link inválido ou expirado. Peça um novo.',
+      );
+    });
+
+    it('token inválido/expirado repassa a BadRequestException de consume()', async () => {
+      userTokens.consume.mockRejectedValue(new BadRequestException('Link inválido ou expirado. Peça um novo.'));
+
+      await expect(service.acceptInvite('token-invalido', 'senhaNova12345')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
   });
 
