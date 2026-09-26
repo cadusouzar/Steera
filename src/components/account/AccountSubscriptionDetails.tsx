@@ -2,35 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Check, CreditCard, Loader2 } from 'lucide-react';
 import type { CurrentUser } from '../../lib/auth';
 import { getMyPlan, type MyPlan } from '../../lib/api';
+import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../../lib/planCatalog';
 
 interface AccountSubscriptionDetailsProps {
   user: CurrentUser | null;
   // Ação extra abaixo do cartão do plano (ex.: "Ver planos" na área "Minha conta" do site).
   children?: React.ReactNode;
-}
-
-// Rótulos de módulos/recursos do catálogo de planos — cópia de frontend de
-// backend/src/plans/plan-catalog.ts (FEATURE_LABELS), mesmo padrão de duplicação intencional já
-// usado em src/lib/validation.ts (frontend nunca importa código do backend).
-const PLAN_ITEM_LABELS: Record<string, string> = {
-  DASHBOARD: 'Visão Geral',
-  CLIENTES: 'Clientes',
-  RH_CARGOS: 'Cargos',
-  RH_FUNCIONARIOS: 'Funcionários',
-  PONTO_REGISTRO: 'Ponto',
-  PONTO_ADMINISTRACAO: 'Administração do Ponto',
-  COMERCIAL: 'Comercial',
-  OPERACOES: 'Operações',
-  FINANCAS: 'Finanças',
-  ANALYTICS: 'Analytics e Dashboards',
-};
-
-// Ordem crescente do catálogo (do mais barato ao mais caro) — usada só pra saber quais planos
-// ficam "acima" do atual (candidatos a upgrade).
-const PLAN_ORDER = ['GRATIS', 'BASICO', 'PRO', 'EMPRESARIAL'];
-
-function formatLimit(value: number | null): string {
-  return value === null ? 'Ilimitado' : String(value);
 }
 
 interface UsageRowProps {

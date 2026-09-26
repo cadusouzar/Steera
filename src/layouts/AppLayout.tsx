@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useTheme } from '../components/ThemeProvider';
 import ThemeToggle from '../components/ThemeToggle';
@@ -6,23 +6,11 @@ import UserProfileDropdown from '../components/UserProfileDropdown';
 import UserProfileDrawer from '../components/UserProfileDrawer';
 import LockedNavItem from '../components/LockedNavItem';
 import PlanUpgradeNotice from '../components/PlanUpgradeNotice';
+import PlanUpgradeModal, { type PlanUpgradeTarget } from '../components/PlanUpgradeModal';
+import type { PlanCatalogItem } from '../lib/api';
 import { getCurrentUser } from '../lib/auth';
+import { PLAN_ITEM_LABELS } from '../lib/planCatalog';
 import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield, Settings } from 'lucide-react';
-
-// Espelha FEATURE_LABELS do backend (backend/src/plans/plan-catalog.ts) — usado só pro rótulo da
-// tela de upgrade (PlanUpgradeNotice) quando uma rota travada pelo plano é aberta direto pela URL.
-const FEATURE_LABELS: Record<string, string> = {
-  DASHBOARD: 'Visão Geral',
-  CLIENTES: 'Clientes',
-  RH_CARGOS: 'Cargos',
-  RH_FUNCIONARIOS: 'Funcionários',
-  PONTO_REGISTRO: 'Ponto',
-  PONTO_ADMINISTRACAO: 'Administração do Ponto',
-  COMERCIAL: 'Comercial',
-  OPERACOES: 'Operações',
-  FINANCAS: 'Finanças',
-  ANALYTICS: 'Analytics e Dashboards',
-};
 
 // Mapa de prefixo de rota → item de plano (módulo/recurso) que a protege — checado do mais
 // específico pro mais genérico (ex.: /app/ponto-administracao antes de /app/ponto, que também
@@ -74,6 +62,11 @@ const AppLayout = () => {
 
   const lockedRouteItem = lockedItemForPath(location.pathname);
   const lockedRoute = lockedRouteItem ? lockOf(lockedRouteItem) : undefined;
+  const openUpgrade = (featureLabel: string, item: string) => {
+    const lock = lockOf(item);
+    if (!lock) return;
+    setUpgradeTarget({ featureLabel, requiredTier: lock.tier as PlanCatalogItem['tier'], requiredLabel: lock.label });
+  };
 
   const isActive = (path: string) => path === '/app' ? location.pathname === '/app' : (location.pathname === path || location.pathname.startsWith(`${path}/`));
 
@@ -85,6 +78,10 @@ const AppLayout = () => {
   
   // State for profile drawer
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  // Oferta de upgrade aberta por cima da tela atual (clique num item travado ou em "Ver planos" da
+  // rota travada) — nunca navega.
+  const [upgradeTarget, setUpgradeTarget] = useState<PlanUpgradeTarget | null>(null);
+  const closeUpgrade = useCallback(() => setUpgradeTarget(null), []);
 
   // Auto-open submenu if active route is inside it
   useEffect(() => {
@@ -196,7 +193,7 @@ const AppLayout = () => {
               ponto, sem enxergar a administração. */}
           {(hasModule('PONTO_REGISTRO') || hasModule('PONTO_ADMINISTRACAO')) && (
             lockOf('PONTO_REGISTRO') && lockOf('PONTO_ADMINISTRACAO') ? (
-              <LockedNavItem icon={Users} label="Ponto" planLabel={lockOf('PONTO_REGISTRO')!.label} />
+              <LockedNavItem icon={Users} label="Ponto" planLabel={lockOf('PONTO_REGISTRO')!.label} onClick={() => openUpgrade('Ponto', 'PONTO_REGISTRO')} />
             ) : (
           <div className="space-y-1">
             <button
@@ -245,7 +242,7 @@ const AppLayout = () => {
           {/* Comercial Submenu */}
           {hasModule('COMERCIAL') && (
             lockOf('COMERCIAL') ? (
-              <LockedNavItem icon={TrendingUp} label="Comercial" planLabel={lockOf('COMERCIAL')!.label} />
+              <LockedNavItem icon={TrendingUp} label="Comercial" planLabel={lockOf('COMERCIAL')!.label} onClick={() => openUpgrade('Comercial', 'COMERCIAL')} />
             ) : (
           <div className="space-y-1">
             <button
@@ -282,7 +279,7 @@ const AppLayout = () => {
           {/* Operações Submenu */}
           {hasModule('OPERACOES') && (
             lockOf('OPERACOES') ? (
-              <LockedNavItem icon={Package} label="Operações" planLabel={lockOf('OPERACOES')!.label} />
+              <LockedNavItem icon={Package} label="Operações" planLabel={lockOf('OPERACOES')!.label} onClick={() => openUpgrade('Operações', 'OPERACOES')} />
             ) : (
           <div className="space-y-1">
             <button
@@ -328,7 +325,7 @@ const AppLayout = () => {
           )}
           {hasModule('FINANCAS') && (
             lockOf('FINANCAS') ? (
-              <LockedNavItem icon={BarChart3} label="Finanças" planLabel={lockOf('FINANCAS')!.label} />
+              <LockedNavItem icon={BarChart3} label="Finanças" planLabel={lockOf('FINANCAS')!.label} onClick={() => openUpgrade('Finanças', 'FINANCAS')} />
             ) : (
           <Link
             to="/app/financas"
@@ -344,7 +341,7 @@ const AppLayout = () => {
 
           {hasModule('DASHBOARD') && (
             lockOf('ANALYTICS') ? (
-              <LockedNavItem icon={LayoutDashboard} label="Analytics e Dashboards" planLabel={lockOf('ANALYTICS')!.label} />
+              <LockedNavItem icon={LayoutDashboard} label="Analytics e Dashboards" planLabel={lockOf('ANALYTICS')!.label} onClick={() => openUpgrade('Analytics e Dashboards', 'ANALYTICS')} />
             ) : (
           <Link
             to="/app/analytics"
@@ -423,8 +420,11 @@ const AppLayout = () => {
         <div className="flex-1 overflow-auto bg-background/50">
           {lockedRoute ? (
             <PlanUpgradeNotice
-              featureLabel={FEATURE_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string)}
+              featureLabel={PLAN_ITEM_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string)}
               planLabel={lockedRoute.label}
+              onShowPlans={() =>
+                openUpgrade(PLAN_ITEM_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string), lockedRouteItem as string)
+              }
             />
           ) : (
             <Outlet />
@@ -434,6 +434,7 @@ const AppLayout = () => {
 
       {/* User Profile Drawer */}
       {isProfileOpen && <UserProfileDrawer onClose={() => setIsProfileOpen(false)} />}
+      <PlanUpgradeModal target={upgradeTarget} onClose={closeUpgrade} />
     </div>
   );
 };
