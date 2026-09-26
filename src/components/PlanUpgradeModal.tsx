@@ -42,11 +42,6 @@ function gainsOver(plan: PlanCatalogItem, current: PlanCatalogItem | undefined):
   return [...items, ...limits];
 }
 
-// framer-motion 11 anima `opacity` via WAAPI (acelerado) e, ao terminar, deixa um quadro com o valor
-// errado (0 ao abrir, 1 ao fechar) — a janela "piscava" ao abrir e ao fechar (medido quadro a quadro).
-// Um `onUpdate` presente faz o framer usar a animação por JS, que não tem esse quadro.
-const noop = () => {};
-
 // O que o plano atual já inclui (módulos/recursos + limites) — card de referência ao lado das ofertas.
 function includedIn(plan: PlanCatalogItem): string[] {
   const items = [...plan.modules, ...plan.features].map((item) => PLAN_ITEM_LABELS[item] ?? item);
@@ -88,7 +83,6 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onUpdate={noop}
         onClick={onClose}
         className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
       />
@@ -98,8 +92,7 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
           aria-modal="true"
           aria-labelledby="plan-upgrade-title"
           initial={{ scale: 0.95, opacity: 0 }}
-          onUpdate={noop}
-          animate={{ scale: 1, opacity: 1 }}
+            animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.95, opacity: 0 }}
           className="w-full max-w-6xl max-h-[90vh] bg-background border border-border shadow-2xl rounded-3xl flex flex-col pointer-events-auto overflow-hidden"
         >
