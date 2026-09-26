@@ -1,4 +1,5 @@
 import { getAccessToken, refreshOnce } from './auth';
+import { ApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -36,12 +37,14 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
     if (res.status >= 500) {
       throw new Error('Não foi possível concluir a ação. Tente novamente em instantes.');
     }
-    const body = await res.json().catch(() => ({}) as { message?: string | string[] });
+    const body = await res.json().catch(() => ({}) as { message?: string | string[]; code?: string });
     // O backend hoje sempre devolve `message` como uma string única já traduzida — isto é uma
     // segunda camada de segurança, não a correção principal, pra nunca mostrar vírgulas cruas se
     // algo no futuro voltar a devolver uma lista.
     const message = Array.isArray(body.message) ? body.message.join('; ') : body.message;
-    throw new Error(message || `Erro ${res.status} ao chamar ${path}`);
+    // ApiError carrega status + code (ex.: ACCOUNT_TEMPORARILY_LOCKED) — quem chama pode reagir a um
+    // código específico sem depender do texto da mensagem; `err.message` continua funcionando igual.
+    throw new ApiError(message || `Erro ${res.status} ao chamar ${path}`, res.status, body.code, body as Record<string, unknown>);
   }
 
   if (res.status === 204) return undefined as T;

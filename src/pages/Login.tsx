@@ -4,7 +4,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import FlowBackground from '../components/FlowBackground';
-import { login } from '../lib/auth';
+import { forgotPassword, login } from '../lib/auth';
+import { ApiError } from '../lib/apiError';
 
 // Depois de entrar, a pessoa vai pra página inicial do site (de lá entra no sistema pelo botão
 // "Entrar no sistema") — decisão de produto de 25/09/2026. Exceção: se ela foi mandada pro login ao
@@ -24,18 +25,45 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Bloqueio temporário de conta (5 senhas erradas seguidas, ver ACCOUNT_TEMPORARILY_LOCKED) —
+  // oferece um atalho pra pedir o link de redefinição sem sair da tela de login.
+  const [lockedOut, setLockedOut] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [resetSentMessage, setResetSentMessage] = useState<string | null>(null);
+  // Aviso de sucesso vindo de outra tela (ex.: "Senha redefinida." de ResetPassword.tsx, "Senha
+  // criada." de AcceptInvite.tsx) — só lido uma vez, do state de navegação.
+  const [notice] = useState<string | null>((location.state as { notice?: string } | null)?.notice ?? null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setResetSentMessage(null);
     setIsSubmitting(true);
     try {
       await login(email, password);
       navigate(safeRedirectPath((location.state as { from?: unknown } | null)?.from), { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível entrar.');
+      if (err instanceof ApiError && err.code === 'ACCOUNT_TEMPORARILY_LOCKED') {
+        setLockedOut(true);
+        setError(err.message);
+      } else {
+        setLockedOut(false);
+        setError(err instanceof Error ? err.message : 'Não foi possível entrar.');
+      }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSendResetLink = async () => {
+    setIsSendingReset(true);
+    try {
+      const message = await forgotPassword(email);
+      setResetSentMessage(message);
+    } catch {
+      setResetSentMessage('Se existir uma conta com esse e-mail, enviamos um link para redefinir a senha.');
+    } finally {
+      setIsSendingReset(false);
     }
   };
 
@@ -69,9 +97,31 @@ const Login = () => {
             <p className="text-foreground/60">Acesse sua conta para continuar.</p>
           </div>
 
+          {notice && !error && (
+            <div role="status" className="rounded-xl border border-primary/30 bg-primary/5 p-4 mb-6 text-sm text-foreground">
+              {notice}
+            </div>
+          )}
+
           {error && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
               {error}
+              {lockedOut && (
+                <button
+                  type="button"
+                  onClick={handleSendResetLink}
+                  disabled={isSendingReset}
+                  className="mt-3 w-full bg-red-600 hover:bg-red-600/90 text-white font-medium py-2 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                >
+                  {isSendingReset ? 'Enviando...' : 'Enviar link de redefinição'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {resetSentMessage && (
+            <div role="status" className="rounded-xl border border-primary/30 bg-primary/5 p-4 mb-6 text-sm text-foreground">
+              {resetSentMessage}
             </div>
           )}
 
@@ -91,7 +141,12 @@ const Login = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-medium text-foreground/80">Senha</label>
-                <a href="#" className="text-xs text-primary hover:underline">Esqueceu a senha?</a>
+                <Link
+                  to={{ pathname: '/esqueci-senha', search: email.trim() ? `?email=${encodeURIComponent(email.trim())}` : '' }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Esqueci minha senha
+                </Link>
               </div>
               <input
                 type="password"

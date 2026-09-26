@@ -1,3 +1,5 @@
+import { ApiError } from './apiError';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export interface CurrentUser {
@@ -51,6 +53,13 @@ export interface CurrentUser {
   // defensivo do backend (mock de teste sem company populada) — trate como "sem info de plano,
   // não trava nada".
   plan: UserPlan | null;
+  // Confirmação de e-mail ("Acesso e sessões", 26/09/2026) — `emailVerificationRequired` é `false`
+  // pra login antigo (backfill: todo mundo considerado confirmado) e pra quem aceitou um convite
+  // (já entra confirmado); só o fundador que se registrou via POST /auth/register tem
+  // `emailVerificationRequired: true` até confirmar. `emailVerified` só importa quando
+  // `emailVerificationRequired` é true.
+  emailVerified: boolean;
+  emailVerificationRequired: boolean;
 }
 
 export interface CompanyAddress {
@@ -96,6 +105,8 @@ interface ApiUser {
   // Ausente/null só em mock antigo de teste do backend sem `company.planTier` — todo usuário real
   // sempre tem uma Company com planTier (coluna NOT NULL, @default(GRATIS)).
   plan?: UserPlan | null;
+  emailVerified?: boolean;
+  emailVerificationRequired?: boolean;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -149,6 +160,10 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     companyPhone: user.companyPhone ?? null,
     companyAddress: user.companyAddress ?? null,
     plan: user.plan ?? null,
+    // Default true/false (nunca bloqueia/nunca exige confirmação) se o backend não mandar o campo —
+    // defensivo, nunca deveria acontecer com um backend atualizado.
+    emailVerified: user.emailVerified ?? true,
+    emailVerificationRequired: user.emailVerificationRequired ?? false,
   };
 }
 
@@ -175,8 +190,10 @@ export async function login(email: string, password: string): Promise<CurrentUse
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}) as { message?: string });
-    throw new Error(body.message || 'Não foi possível entrar');
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    // ApiError carrega o `code` (ex.: ACCOUNT_TEMPORARILY_LOCKED) — Login.tsx usa isso pra oferecer
+    // "Enviar link de redefinição" sem depender do texto exato da mensagem.
+    throw new ApiError(body.message || 'Não foi possível entrar', res.status, body.code, body as Record<string, unknown>);
   }
   return applySession(await res.json());
 }
@@ -209,8 +226,8 @@ export async function register(payload: RegisterPayload): Promise<CurrentUser> {
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}) as { message?: string });
-    throw new Error(body.message || 'Não foi possível criar a conta');
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(body.message || 'Não foi possível criar a conta', res.status, body.code, body as Record<string, unknown>);
   }
   return applySession(await res.json());
 }
@@ -245,13 +262,82 @@ export async function changePassword(currentPassword: string, newPassword: strin
     body: JSON.stringify({ currentPassword, newPassword }),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}) as { message?: string });
-    throw new Error(body.message || 'Não foi possível trocar a senha');
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(body.message || 'Não foi possível trocar a senha', res.status, body.code, body as Record<string, unknown>);
   }
   const data = (await res.json()) as { accessToken: string };
   accessToken = data.accessToken;
   if (currentUser) {
     setCurrentUser({ ...currentUser, mustChangePassword: false });
+  }
+}
+
+// ---- Esqueci minha senha / redefinir / confirmar e-mail / aceitar convite ----
+// ("Acesso e sessões", 26/09/2026) — as 4 rotas abaixo são @Public() no backend (sem sessão),
+// exigem o mesmo cabeçalho anti-CSRF de login()/register() acima (AntiCsrfHeaderGuard) e
+// `credentials: 'include'` (algumas já chegam autenticadas — ex. verify-email clicado por quem já
+// está logado — e o cookie de refresh precisa continuar indo/voltando normalmente).
+
+// POST /auth/forgot-password — sempre 202 com uma mensagem genérica (não revela se o e-mail existe).
+// Devolve a mensagem do backend pra exibir na tela; ForgotPassword.tsx e o botão de bloqueio
+// temporário em Login.tsx reaproveitam o mesmo texto.
+export async function forgotPassword(email: string): Promise<string> {
+  const res = await fetch(`${API_URL}/auth/forgot-password`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({ email }),
+  });
+  const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+  if (!res.ok) {
+    throw new ApiError(body.message || 'Não foi possível enviar o link de redefinição', res.status, body.code, body as Record<string, unknown>);
+  }
+  return body.message ?? 'Se existir uma conta com esse e-mail, enviamos um link para redefinir a senha.';
+}
+
+// POST /auth/reset-password — 204 sem corpo. Token inválido/expirado/usado vem como 400 com
+// `message: 'Link inválido ou expirado. Peça um novo.'` (sem `code`) — ResetPassword.tsx trata
+// especificamente `err.status === 400` pra trocar a tela inteira pelo estado de link inválido.
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${API_URL}/auth/reset-password`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({ token, newPassword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(body.message || 'Não foi possível redefinir a senha', res.status, body.code, body as Record<string, unknown>);
+  }
+}
+
+// POST /auth/verify-email — 204 sem corpo. Mesmo formato de erro 400 de resetPassword() acima.
+export async function verifyEmail(token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/auth/verify-email`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(body.message || 'Não foi possível confirmar o e-mail', res.status, body.code, body as Record<string, unknown>);
+  }
+}
+
+// POST /auth/accept-invite — 204 sem corpo; login criado por um admin (INVITED) define a própria
+// senha por aqui. Não loga automaticamente (mesmo padrão do backend) — AcceptInvite.tsx manda pro
+// login depois de bem-sucedido, igual ResetPassword.tsx.
+export async function acceptInvite(token: string, password: string): Promise<void> {
+  const res = await fetch(`${API_URL}/auth/accept-invite`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(body.message || 'Não foi possível criar a senha', res.status, body.code, body as Record<string, unknown>);
   }
 }
 
@@ -385,6 +471,31 @@ async function authedPatch(path: string, body: unknown, isRetry = false): Promis
   });
   if (res.status === 401 && !isRetry && (await refreshOnce())) return authedPatch(path, body, true);
   return res;
+}
+
+// POST autenticado com a mesma renovação silenciosa de authedPatch() acima — usado por
+// resendVerification() abaixo (sem X-Requested-With: a rota é autenticada por JWT, não @Public(),
+// mesmo raciocínio de authedPatch()).
+async function authedPost(path: string, isRetry = false): Promise<Response> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+  if (res.status === 401 && !isRetry && (await refreshOnce())) return authedPost(path, true);
+  return res;
+}
+
+// POST /auth/resend-verification — autenticada, 3/h por usuário; 400 se já confirmado, 429 (mensagem
+// amigável já traduzida pelo backend) se estourar o limite.
+export async function resendVerification(): Promise<void> {
+  const res = await authedPost('/auth/resend-verification');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(body.message || 'Não foi possível reenviar o e-mail de confirmação', res.status, body.code, body as Record<string, unknown>);
+  }
 }
 
 async function applyProfileResponse(res: Response, fallbackMessage: string): Promise<CurrentUser> {

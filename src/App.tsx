@@ -3,6 +3,10 @@ import { ThemeProvider } from './components/ThemeProvider';
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import VerifyEmail from './pages/VerifyEmail';
+import AcceptInvite from './pages/AcceptInvite';
 import AppLayout from './layouts/AppLayout';
 import RequireAuth from './components/RequireAuth';
 import Account from './pages/Account';
@@ -33,7 +37,11 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          
+          <Route path="/esqueci-senha" element={<ForgotPassword />} />
+          <Route path="/redefinir-senha" element={<ResetPassword />} />
+          <Route path="/confirmar-email" element={<VerifyEmail />} />
+          <Route path="/aceitar-convite" element={<AcceptInvite />} />
+
           <Route element={<RequireAuth />}>
             {/* Área "Minha conta" do site (fora do ERP/AppLayout) — só leitura. */}
             <Route path="/conta" element={<Account />} />
