@@ -53,7 +53,9 @@ function renderLayout(bodyHtml: string, link: string, buttonLabel: string): stri
 }
 
 export function buildAppLink(path: string, token: string): string {
-  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  // trim(): mesma normalização do validateMailConfig — um valor com espaços passa na checagem de boot
+  // e não pode virar link quebrado aqui.
+  const frontendUrl = (process.env.FRONTEND_URL?.trim() || 'http://localhost:5173').replace(/\/+$/, '');
   return `${frontendUrl}${path}?token=${encodeURIComponent(token)}`;
 }
 

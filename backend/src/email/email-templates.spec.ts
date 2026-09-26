@@ -80,6 +80,15 @@ describe('email templates', () => {
     process.env.FRONTEND_URL = originalFrontendUrl;
   });
 
+  it('buildAppLink trims surrounding whitespace in FRONTEND_URL (the boot check trims too)', () => {
+    const originalFrontendUrl = process.env.FRONTEND_URL;
+    process.env.FRONTEND_URL = '  https://app.steera.com.br/  ';
+
+    expect(buildAppLink('/redefinir-senha', 'tok')).toBe('https://app.steera.com.br/redefinir-senha?token=tok');
+
+    process.env.FRONTEND_URL = originalFrontendUrl;
+  });
+
   it('buildAppLink defaults to localhost:5173 when FRONTEND_URL is unset', () => {
     const originalFrontendUrl = process.env.FRONTEND_URL;
     delete process.env.FRONTEND_URL;
