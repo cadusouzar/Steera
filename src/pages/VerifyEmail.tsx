@@ -1,62 +1,74 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import AuthCard from '../components/AuthCard';
-import { getCurrentUser, refreshCurrentUser, resendVerification, verifyEmail } from '../lib/auth';
+import { useUrlToken } from '../hooks/useUrlToken';
+import {
+  getCurrentUser,
+  refreshCurrentUser,
+  resendVerification,
+  restoreSession,
+  subscribeCurrentUser,
+  verifyEmail,
+  type CurrentUser,
+} from '../lib/auth';
 
 type Status = 'loading' | 'success' | 'error';
 type ResendState = 'idle' | 'sending' | 'sent' | 'error';
 
+// Garante o usuário da sessão antes de decidir o que mostrar (fix final de "Acesso e sessões"): o
+// link costuma ser aberto numa aba nova, onde o access token em memória ainda não existe — sem
+// restaurar a sessão (cookie HttpOnly) primeiro, um visitante logado via "Entrar" em vez de "Entrar
+// no sistema" e nunca via o "Reenviar e-mail". Com sessão já em memória, só relê o perfil (o
+// emailVerified mudou agora). Nunca lança: sem sessão (ou servidor indisponível) → null.
+async function loadSessionUser(): Promise<CurrentUser | null> {
+  if (getCurrentUser()) {
+    try {
+      return await refreshCurrentUser();
+    } catch {
+      return getCurrentUser();
+    }
+  }
+  return restoreSession();
+}
+
 const VerifyEmail = () => {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') ?? '';
+  const token = useUrlToken();
   const [status, setStatus] = useState<Status>('loading');
-  const [loggedIn, setLoggedIn] = useState(!!getCurrentUser());
+  // Segue o usuário atual (login/logout/restauração em qualquer outro componente, ex. a Navbar) —
+  // nunca uma foto tirada na montagem.
+  const [user, setUser] = useState<CurrentUser | null>(getCurrentUser());
+  const loggedIn = !!user;
   const [resendState, setResendState] = useState<ResendState>('idle');
   // Guarda contra o StrictMode montando o componente duas vezes em dev (e contra o próprio efeito
   // rodando de novo por qualquer outro motivo) — o segundo POST /auth/verify-email pra um token já
   // consumido pelo primeiro daria 400, mostrando "link inválido" logo depois de um sucesso real.
   const attempted = useRef(false);
 
+  useEffect(() => subscribeCurrentUser(setUser), []);
+
   useEffect(() => {
     if (attempted.current) return;
     attempted.current = true;
 
-    if (!token) {
-      setStatus('error');
-      return;
-    }
-
     (async () => {
-      try {
-        await verifyEmail(token);
-        setStatus('success');
-        if (getCurrentUser()) {
-          try {
-            await refreshCurrentUser();
-            setLoggedIn(true);
-          } catch {
-            // Confirmação já aconteceu no backend — não crítico não conseguir atualizar o perfil em
-            // memória agora (a próxima renovação de sessão traz o dado certo).
-          }
+      let verified = false;
+      if (token) {
+        try {
+          await verifyEmail(token);
+          verified = true;
+        } catch {
+          // Tratado abaixo, depois de saber se há sessão.
         }
-      } catch {
-        // Um clique duplo no link (StrictMode ou o próprio usuário reabrindo o e-mail) manda um
-        // segundo POST pra um token já consumido — o backend rejeita com 400 mesmo o e-mail já
-        // tendo sido confirmado da primeira vez. Se a pessoa estiver logada, confere o estado real
-        // via /auth/me antes de mostrar "link inválido": evita um falso negativo.
-        if (getCurrentUser()) {
-          try {
-            const refreshed = await refreshCurrentUser();
-            setLoggedIn(true);
-            setStatus(refreshed.emailVerified ? 'success' : 'error');
-            return;
-          } catch {
-            // segue pro estado de erro abaixo
-          }
-        }
-        setStatus('error');
       }
+      // Sempre DEPOIS do POST (o perfil relido já vem com o e-mail confirmado) e ANTES de sair do
+      // "loading" — a decisão entre os botões de logado/deslogado só acontece com a sessão resolvida.
+      const sessionUser = await loadSessionUser();
+      setUser(sessionUser);
+      // Um clique duplo no link (StrictMode ou o próprio usuário reabrindo o e-mail) manda um segundo
+      // POST pra um token já consumido — o backend rejeita com 400 mesmo o e-mail já tendo sido
+      // confirmado da primeira vez. Logado, o estado real do perfil decide: evita um falso negativo.
+      setStatus(verified || sessionUser?.emailVerified === true ? 'success' : 'error');
     })();
   }, [token]);
 

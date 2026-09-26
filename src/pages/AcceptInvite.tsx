@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import AuthCard from '../components/AuthCard';
 import FormField from '../components/FormField';
+import { useUrlToken } from '../hooks/useUrlToken';
 import { inputBorderClass } from '../lib/validation';
 import { acceptInvite } from '../lib/auth';
 import { ApiError } from '../lib/apiError';
@@ -15,9 +16,8 @@ interface Errors {
 // por um admin (INVITED) que ainda não tem senha nenhuma — daí o título "Crie sua senha" em vez de
 // "Redefinir senha", e não loga automaticamente ao terminar (mesmo comportamento do backend).
 const AcceptInvite = () => {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const token = searchParams.get('token') ?? '';
+  const token = useUrlToken();
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');

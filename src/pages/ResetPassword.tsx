@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import AuthCard from '../components/AuthCard';
 import FormField from '../components/FormField';
+import { useUrlToken } from '../hooks/useUrlToken';
 import { inputBorderClass } from '../lib/validation';
 import { resetPassword } from '../lib/auth';
 import { ApiError } from '../lib/apiError';
@@ -12,9 +13,8 @@ interface Errors {
 }
 
 const ResetPassword = () => {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const token = searchParams.get('token') ?? '';
+  const token = useUrlToken();
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
