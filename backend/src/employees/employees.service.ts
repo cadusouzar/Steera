@@ -5,6 +5,7 @@ import { parseDateOnly } from '../common/date.util';
 import { normalizePhone } from '../common/phone.util';
 import { CompanyContextService } from '../company/company-context.service';
 import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
+import { assertBelowPlanLimit } from '../plans/plan-limits.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -47,6 +48,10 @@ export class EmployeesService {
 
   async create(dto: CreateEmployeeDto): Promise<Employee> {
     const companyId = await this.companyContext.getCurrentCompanyId();
+    // Planos grátis e pagos (26/09/2026): teto de funcionários ativos do plano Grátis (ver plan-catalog.ts).
+    await assertBelowPlanLimit(this.prisma, companyId, 'employees', () =>
+      this.prisma.employee.count({ where: { companyId, status: EmployeeStatus.ACTIVE } }),
+    );
     await this.assertRoleUsable(dto.roleId, companyId);
     const cpf = normalizeCpf(dto.cpf);
 
@@ -220,6 +225,10 @@ export class EmployeesService {
     if (employee.status === EmployeeStatus.ACTIVE) {
       throw new ConflictException(`Funcionário ${id} já está ativo`);
     }
+    // Planos grátis e pagos (26/09/2026): teto de funcionários ativos do plano Grátis (ver plan-catalog.ts).
+    await assertBelowPlanLimit(this.prisma, employee.companyId, 'employees', () =>
+      this.prisma.employee.count({ where: { companyId: employee.companyId, status: EmployeeStatus.ACTIVE } }),
+    );
     return this.prisma.employee.update({
       where: { id },
       data: { status: EmployeeStatus.ACTIVE, terminationDate: null },

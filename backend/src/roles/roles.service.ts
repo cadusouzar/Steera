@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { Prisma, Role } from '@prisma/client';
 import { CompanyContextService } from '../company/company-context.service';
 import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
+import { assertBelowPlanLimit } from '../plans/plan-limits.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension';
 import { CreateRoleDto } from './dto/create-role.dto';
@@ -29,6 +30,10 @@ export class RolesService {
 
   async create(dto: CreateRoleDto): Promise<Role> {
     const companyId = await this.companyContext.getCurrentCompanyId();
+    // Planos grátis e pagos (26/09/2026): teto de cargos ativos do plano Grátis (ver plan-catalog.ts).
+    await assertBelowPlanLimit(this.prisma, companyId, 'roles', () =>
+      this.prisma.role.count({ where: { companyId, active: true } }),
+    );
     await this.assertNoActiveDuplicate(companyId, dto.name);
     const { customFields, ...nativeDto } = dto;
     const resolvedCustomFields = await this.customFieldValues.resolveValuesForCreate('role', customFields);
@@ -122,6 +127,10 @@ export class RolesService {
   async reactivate(id: string) {
     const role = await this.assertExists(id);
     if (role.active) throw new ConflictException(`Cargo ${id} já está ativo`);
+    // Planos grátis e pagos (26/09/2026): teto de cargos ativos do plano Grátis (ver plan-catalog.ts).
+    await assertBelowPlanLimit(this.prisma, role.companyId, 'roles', () =>
+      this.prisma.role.count({ where: { companyId: role.companyId, active: true } }),
+    );
     await this.assertNoActiveDuplicate(role.companyId, role.name, id);
     return this.prisma.role.update({ where: { id }, data: { active: true } });
   }

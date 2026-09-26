@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { CompanyContextService } from '../company/company-context.service';
 import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
@@ -11,6 +11,7 @@ describe('EmployeesService', () => {
     employee: Record<string, jest.Mock>;
     role: Record<string, jest.Mock>;
     employeeRecurringPayment: Record<string, jest.Mock>;
+    company: Record<string, jest.Mock>;
     $transaction: jest.Mock;
   };
   let customFieldValues: {
@@ -24,6 +25,9 @@ describe('EmployeesService', () => {
       employee: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn(), update: jest.fn() },
       role: { findFirst: jest.fn() },
       employeeRecurringPayment: { updateMany: jest.fn() },
+      // Padrão já usado por users.service.spec.ts: plano default PRO (sem teto), pra não afetar
+      // os testes existentes que não têm nada a ver com plano/limite.
+      company: { findUniqueOrThrow: jest.fn().mockResolvedValue({ planTier: 'PRO' }) },
       // Mirrors Prisma's interactive form: $transaction(async (tx) => ...) invokes the callback
       // with a `tx` — here the same mocked `prisma` object, so existing assertions against
       // `prisma.employee.create`/`prisma.employee.update` keep working unchanged.
@@ -221,5 +225,64 @@ describe('EmployeesService', () => {
       where: { employeeId: 'employee-1', status: 'ACTIVE' },
       data: { status: 'INACTIVE' },
     });
+  });
+
+  // Planos grátis e pagos (26/09/2026): teto de funcionários ativos do plano Grátis.
+  it('rejects creating an employee when the free plan is at its active employee limit', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.employee.count.mockResolvedValue(10);
+
+    await expect(
+      service.create({
+        fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
+        contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
+        baseValue: 5000, paymentDueDay: 5,
+      }),
+    ).rejects.toThrow(
+      new ForbiddenException('Limite do plano Grátis: até 10 funcionários ativos. Faça upgrade para cadastrar mais.'),
+    );
+    expect(prisma.employee.create).not.toHaveBeenCalled();
+  });
+
+  it('allows creating an employee on the free plan below the active employee limit', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.employee.count.mockResolvedValue(9);
+    prisma.role.findFirst.mockResolvedValue({ id: 'role-1', companyId: 'company-1', active: true });
+    prisma.employee.findFirst.mockResolvedValue(null);
+    prisma.employee.create.mockResolvedValue({ id: 'employee-1' });
+
+    await service.create({
+      fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
+      contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
+      baseValue: 5000, paymentDueDay: 5,
+    });
+
+    expect(prisma.employee.create).toHaveBeenCalled();
+  });
+
+  it('rejects reactivating an employee when the free plan is at its active employee limit', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'INACTIVE' });
+    prisma.employee.count.mockResolvedValue(10);
+
+    await expect(service.reactivate('employee-1')).rejects.toThrow(
+      new ForbiddenException('Limite do plano Grátis: até 10 funcionários ativos. Faça upgrade para cadastrar mais.'),
+    );
+    expect(prisma.employee.update).not.toHaveBeenCalled();
+  });
+
+  it('creates an employee on a paid plan without checking the active employee count', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
+    prisma.role.findFirst.mockResolvedValue({ id: 'role-1', companyId: 'company-1', active: true });
+    prisma.employee.findFirst.mockResolvedValue(null);
+    prisma.employee.create.mockResolvedValue({ id: 'employee-1' });
+
+    await service.create({
+      fullName: 'João Silva', cpf: '111.444.777-35', roleId: 'role-1',
+      contractType: 'CLT' as never, admissionDate: '2026-01-01', department: 'Tecnologia',
+      baseValue: 5000, paymentDueDay: 5,
+    });
+
+    expect(prisma.employee.count).not.toHaveBeenCalled();
   });
 });

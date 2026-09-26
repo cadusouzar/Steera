@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { CompanyContextService } from '../company/company-context.service';
 import { CustomFieldValuesService } from '../custom-fields/custom-field-values.service';
@@ -9,6 +9,7 @@ describe('RolesService', () => {
   let service: RolesService;
   let prisma: {
     role: Record<string, jest.Mock>;
+    company: Record<string, jest.Mock>;
     $transaction: jest.Mock;
   };
   let customFieldValues: {
@@ -20,6 +21,9 @@ describe('RolesService', () => {
   beforeEach(async () => {
     prisma = {
       role: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), create: jest.fn(), update: jest.fn() },
+      // Padrão já usado por users.service.spec.ts: plano default PRO (sem teto), pra não afetar
+      // os testes existentes que não têm nada a ver com plano/limite.
+      company: { findUniqueOrThrow: jest.fn().mockResolvedValue({ planTier: 'PRO' }) },
       // Mirrors Prisma's interactive form: $transaction(async (tx) => ...) invokes the callback
       // with a `tx` — here the same mocked `prisma` object, so existing assertions against
       // `prisma.role.create`/`prisma.role.update` keep working unchanged.
@@ -82,5 +86,49 @@ describe('RolesService', () => {
   it('rejects deactivating a role that is already inactive', async () => {
     prisma.role.findFirst.mockResolvedValue({ id: 'role-1', active: false, companyId: 'company-1' });
     await expect(service.deactivate('role-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  // Planos grátis e pagos (26/09/2026): teto de cargos ativos do plano Grátis.
+  it('rejects creating a role when the free plan is at its active role limit', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.role.findFirst.mockResolvedValue(null);
+    prisma.role.count.mockResolvedValue(5);
+
+    await expect(service.create({ name: 'Designer', department: 'Produto' })).rejects.toThrow(
+      new ForbiddenException('Limite do plano Grátis: até 5 cargos ativos. Faça upgrade para cadastrar mais.'),
+    );
+    expect(prisma.role.create).not.toHaveBeenCalled();
+  });
+
+  it('allows creating a role on the free plan below the active role limit', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.role.findFirst.mockResolvedValue(null);
+    prisma.role.count.mockResolvedValue(4);
+    prisma.role.create.mockResolvedValue({ id: 'role-1', companyId: 'company-1', name: 'Designer' });
+
+    await service.create({ name: 'Designer', department: 'Produto' });
+
+    expect(prisma.role.create).toHaveBeenCalled();
+  });
+
+  it('rejects reactivating a role when the free plan is at its active role limit', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.role.findFirst.mockResolvedValue({ id: 'role-1', active: false, companyId: 'company-1', name: 'Designer' });
+    prisma.role.count.mockResolvedValue(5);
+
+    await expect(service.reactivate('role-1')).rejects.toThrow(
+      new ForbiddenException('Limite do plano Grátis: até 5 cargos ativos. Faça upgrade para cadastrar mais.'),
+    );
+    expect(prisma.role.update).not.toHaveBeenCalled();
+  });
+
+  it('creates a role on a paid plan without checking the active role count', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
+    prisma.role.findFirst.mockResolvedValue(null);
+    prisma.role.create.mockResolvedValue({ id: 'role-1', companyId: 'company-1', name: 'Designer' });
+
+    await service.create({ name: 'Designer', department: 'Produto' });
+
+    expect(prisma.role.count).not.toHaveBeenCalled();
   });
 });
