@@ -396,6 +396,14 @@ describe('AuthService', () => {
       expect(prisma.user.create.mock.calls[0][0].data.name).toBe('Carlos Eduardo');
     });
 
+    // Planos grátis e pagos (26/09/2026): toda empresa nova nasce no plano GRATIS, nunca mais no
+    // antigo default BASICO — ver PLAN_CATALOG em plan-catalog.ts.
+    it('grava planTier GRATIS pra toda empresa nova', async () => {
+      await service.register({ ...baseRegisterDto }, fakeRes);
+      const data = prisma.company.create.mock.calls[0][0].data;
+      expect(data.planTier).toBe('GRATIS');
+    });
+
     it('PF sem fantasia usa o nome completo como nome de exibição e fonte do schema', async () => {
       await service.register(
         { ...baseRegisterDto, personType: 'PF', document: '529.982.247-25', legalName: 'Ana Souza', tradeName: undefined },

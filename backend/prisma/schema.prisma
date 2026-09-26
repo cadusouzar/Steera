@@ -142,6 +142,7 @@ enum AppModule {
 }
 
 enum CompanyPlanTier {
+  GRATIS
   BASICO
   PRO
   EMPRESARIAL
@@ -281,7 +282,7 @@ model Company {
   // Nome do schema físico da empresa — gravado UMA vez no cadastro, nunca muda (ver
   // tenant-schema.util.ts / tenant-schema-name-resolver.ts). Empresas anteriores: 'tenant_<id>'.
   schemaName             String                  @unique
-  planTier               CompanyPlanTier         @default(BASICO)
+  planTier               CompanyPlanTier         @default(GRATIS)
   maxEmployeeLogins      Int                     @default(10)
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt

@@ -33,7 +33,11 @@ export const NOOP_WHEN_REPLAYED_FROM_EMPTY = [
 // provisionamento inteira sofreria rollback. Mantida como lista manual (mesmo padrão de
 // `NOOP_WHEN_REPLAYED_FROM_EMPTY`) porque o gerador só processa texto SQL, sem saber quais enums
 // pertencem a quais models — cada enum novo genuinamente central precisa ser adicionado aqui à mão.
-export const CENTRAL_ONLY_ENUM_NAMES = ['AppModule', 'UserStatus'];
+// CompanyPlanTier (26/09/2026) — usado só por `Company`, tabela central — entrou nesta lista pelo
+// mesmo motivo de AppModule/UserStatus: a migration que adiciona GRATIS ao enum é um `ALTER TYPE`
+// contra um tipo global único, e replayá-la de novo em cada empresa provisionada depois da primeira
+// quebraria com "enum label already exists".
+export const CENTRAL_ONLY_ENUM_NAMES = ['AppModule', 'UserStatus', 'CompanyPlanTier'];
 
 // Views que existem só sobre tabelas CENTRAIS (nunca sobre nenhuma tabela de tenant) — achado em
 // 25/09/2026 ao gerar a migration que cria `tenant_directory` (lê "Company"/"User", as duas

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
@@ -9,10 +9,10 @@ import { reassignUserProfile } from '../permissions/profile-assignment.util';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { assertNotLastAdminWithFullPontoAccess, assertNotLastHolderOfPermission } from './last-permission-holder.util';
+import { planLimit } from '../plans/plan-catalog';
+import { assertBelowPlanLimit } from '../plans/plan-limits.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
-
-const PLAN_LIMITS: Record<string, number> = { BASICO: 10, PRO: 50, EMPRESARIAL: 999_999 };
 
 // Nunca inclui passwordHash — espelha o padrão já usado em AuthService
 // (login/register/getProfile), que sempre devolve um objeto montado à mão em
@@ -66,15 +66,12 @@ export class UsersService {
       const existingLogin = await this.prisma.user.findUnique({ where: { employeeId: dto.employeeId } });
       if (existingLogin) throw new BadRequestException('Este funcionário já possui um login');
 
-      const company = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId } });
-      const activeEmployeeLogins = await this.prisma.user.count({
-        where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' },
-      });
-      if (activeEmployeeLogins >= company.maxEmployeeLogins) {
-        throw new ForbiddenException(
-          `Limite de logins de funcionário do plano atual (${company.maxEmployeeLogins}) já foi atingido`,
-        );
-      }
+      // Planos grátis e pagos (26/09/2026): o teto de logins de funcionário vem do catálogo
+      // (plan-catalog.ts), lido a partir de Company.planTier — nunca mais de
+      // Company.maxEmployeeLogins (coluna legada, mantida só por consistência em updatePlan()).
+      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () =>
+        this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' } }),
+      );
     }
 
     const profile = await this.prisma.profile.findFirst({ where: { id: dto.profileId, companyId } });
@@ -198,6 +195,16 @@ export class UsersService {
   async unblock(companyId: string, userId: string) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    // Planos grátis e pagos (26/09/2026): reativar um login EMPLOYEE (de BLOCKED ou LOCKED de volta
+    // pra ACTIVE) precisa respeitar o mesmo teto de logins do catálogo que create() já impõe pra um
+    // login novo — sem isso, dava pra contornar o limite bloqueando/desbloqueando em vez de criar.
+    // Só relevante se o login ainda não está ACTIVE (reativar um já ACTIVE, no-op, nunca é bloqueado
+    // por limite). ADMIN nunca é checado — o teto é só de logins EMPLOYEE.
+    if (user.role === 'EMPLOYEE' && user.status !== 'ACTIVE') {
+      await assertBelowPlanLimit(this.prisma, companyId, 'employeeLogins', () =>
+        this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: 'ACTIVE' } }),
+      );
+    }
     // Reseta failedLoginAttempts também — cobre tanto um BLOCKED (ação de admin) quanto um LOCKED
     // (travado pelo próprio backend por excesso de tentativas, ver AuthService.login()) com a mesma
     // ação: sem isso, um login LOCKED desbloqueado voltaria a travar sozinho na primeira senha
@@ -361,7 +368,9 @@ export class UsersService {
   updatePlan(companyId: string, dto: UpdatePlanDto) {
     return this.prisma.company.update({
       where: { id: companyId },
-      data: { planTier: dto.planTier, maxEmployeeLogins: PLAN_LIMITS[dto.planTier] },
+      // maxEmployeeLogins: coluna legada, mantida só por consistência (nada mais lê dela desde que
+      // create()/unblock() passaram a usar planLimit(...) direto — ver plan-catalog.ts).
+      data: { planTier: dto.planTier, maxEmployeeLogins: planLimit(dto.planTier, 'employeeLogins') ?? 999_999 },
     });
   }
 }

@@ -112,6 +112,18 @@ describe('splitMigrationSqlByTenant', () => {
     expect(splitMigrationSqlByTenant(sql, TENANT_TABLES)).toContain('ClientStatus');
   });
 
+  // Achado em 26/09/2026 ao gerar a migration que adiciona GRATIS a CompanyPlanTier (usado só por
+  // `Company`, tabela central) — mesmo padrão de AppModule/UserStatus acima: sem isso, a segunda
+  // empresa provisionada em diante quebraria com "enum label already exists".
+  it('remove ALTER TYPE de CompanyPlanTier (sem aviso — classificado, não é o caso "desconhecido")', () => {
+    const sql = 'ALTER TYPE "CompanyPlanTier" ADD VALUE IF NOT EXISTS \'GRATIS\' BEFORE \'BASICO\';';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result).not.toContain('CompanyPlanTier');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
   // Achado em 17/09/2026 investigando um admin real vendo "sem acesso ao módulo": a migration de
   // backfill dos módulos granulares tinha `SELECT set_config('app.rls_bypass', ...)` antes dos
   // UPDATEs em "User" (tabela central com FORCE RLS) — sem esse classificador, o comando caía no
@@ -288,8 +300,8 @@ describe('CENTRAL_ONLY_VIEW_NAMES', () => {
 });
 
 describe('CENTRAL_ONLY_ENUM_NAMES', () => {
-  it('contém AppModule e UserStatus, os dois únicos enums usados só por User hoje', () => {
-    expect(CENTRAL_ONLY_ENUM_NAMES).toEqual(['AppModule', 'UserStatus']);
+  it('contém AppModule, UserStatus e CompanyPlanTier, os enums usados só por tabelas centrais hoje', () => {
+    expect(CENTRAL_ONLY_ENUM_NAMES).toEqual(['AppModule', 'UserStatus', 'CompanyPlanTier']);
   });
 });
 

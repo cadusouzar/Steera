@@ -272,6 +272,10 @@ export class AuthService {
               id: companyId,
               name: displayName,
               schemaName,
+              // Planos grátis e pagos (26/09/2026): toda empresa nova nasce no plano GRATIS — ver
+              // PLAN_CATALOG em plan-catalog.ts. Já era o @default(GRATIS) da coluna, mas gravado
+              // explicitamente aqui pra nunca depender silenciosamente do default do schema.
+              planTier: 'GRATIS',
               personType: dto.personType,
               document,
               legalName,

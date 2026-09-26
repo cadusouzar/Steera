@@ -116,7 +116,7 @@ describe('UsersService', () => {
   it('create returns the EFFECTIVE hasFullPontoAccess for a newly created EMPLOYEE login', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'emp-1', companyId: 'c1' });
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.company.findUniqueOrThrow.mockResolvedValue({ id: 'c1', maxEmployeeLogins: 10 });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ id: 'c1', planTier: 'BASICO' });
     prisma.user.count.mockResolvedValue(0);
     prisma.user.create.mockResolvedValue({ id: 'u9', role: 'EMPLOYEE', hasFullPontoAccess: true });
 
@@ -194,16 +194,27 @@ describe('UsersService', () => {
   it('rejects creating an EMPLOYEE login once the plan limit is reached', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.company.findUniqueOrThrow.mockResolvedValue({ maxEmployeeLogins: 10 });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
     prisma.user.count.mockResolvedValue(10);
     await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any, makeCaller()))
       .rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  // Planos grátis e pagos (26/09/2026): o limite de logins de funcionário agora vem do catálogo
+  // (plan-catalog.ts), não mais de Company.maxEmployeeLogins lido cru — GRATIS tem teto 2.
+  it('rejects creating an EMPLOYEE login once the GRATIS plan limit (2) is reached, with the catalog message', async () => {
+    prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.user.count.mockResolvedValue(2);
+    await expect(service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any, makeCaller()))
+      .rejects.toThrow('Limite do plano Grátis: até 2 logins de funcionário ativos. Faça upgrade para cadastrar mais.');
+  });
+
   it('creates an EMPLOYEE login under the plan limit and returns the fixed temporary password', async () => {
     prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.company.findUniqueOrThrow.mockResolvedValue({ maxEmployeeLogins: 10 });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
     prisma.user.count.mockResolvedValue(9);
     prisma.user.create.mockResolvedValue({ id: 'u1', email: 'a@a.com', role: 'EMPLOYEE' });
     const result = await service.create('c1', { email: 'a@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any, makeCaller());
@@ -245,7 +256,7 @@ describe('UsersService', () => {
     // err.meta.target em vez de assumir sempre que um P2002 aqui é sobre e-mail.
     prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.company.findUniqueOrThrow.mockResolvedValue({ maxEmployeeLogins: 10 });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
     prisma.user.count.mockResolvedValue(0);
     prisma.user.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`employeeId`)', {
@@ -318,6 +329,24 @@ describe('UsersService', () => {
   it('unblock 404s for a user from another company', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
     await expect(service.unblock('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  // Planos grátis e pagos (26/09/2026): reativar um login EMPLOYEE (block→unblock ou
+  // LOCKED→unblock) também precisa respeitar o teto de logins do plano — sem isso, um admin
+  // desbloqueava de volta um funcionário além do limite que create() já impediria pra um login novo.
+  it('unblock rejects reactivating a LOCKED EMPLOYEE login once the GRATIS plan limit (2) is reached', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'LOCKED' });
+    prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
+    prisma.user.count.mockResolvedValue(2);
+    await expect(service.unblock('c1', 'u1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('unblock never checks the plan limit for an ADMIN login', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED' });
+    await service.unblock('c1', 'admin1');
+    expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prisma.user.update).toHaveBeenCalled();
   });
 
   it('unblock resets status to ACTIVE and zeroes the failed-login-attempts counter', async () => {
@@ -487,7 +516,7 @@ describe('UsersService', () => {
       prisma.profilePermission.findMany.mockResolvedValue(FULL_PONTO_GRANTS);
       prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
       prisma.user.findUnique.mockResolvedValue(null);
-      prisma.company.findUniqueOrThrow.mockResolvedValue({ id: 'c1', maxEmployeeLogins: 10 });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ id: 'c1', planTier: 'BASICO' });
       prisma.user.count.mockResolvedValue(0);
       prisma.user.create.mockResolvedValue({ id: 'u-novo', role: 'EMPLOYEE', hasFullPontoAccess: true });
       const service2 = makeService();
