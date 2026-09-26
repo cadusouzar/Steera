@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Loader2, Lock, Plus, Sparkles, X } from 'lucide-react';
+import { Check, Loader2, Lock, Plus, Sparkles, X } from 'lucide-react';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { getMyPlan, type MyPlan, type PlanCatalogItem, type PlanLimits } from '../lib/api';
 import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../lib/planCatalog';
@@ -12,7 +11,8 @@ import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../lib/planCatalog';
 // (PlanUpgradeNotice) — nunca navega, fechar deixa a pessoa exatamente onde estava. Mostra só os
 // planos que liberam o módulo (acima do atual), com o plano mínimo em destaque. Dados de
 // GET /plans/me (mesma fonte da aba Assinatura), então preço/limite nunca divergem do backend. Sem
-// pagamento nesta versão: o botão de compra fica desabilitado com "Em breve".
+// pagamento nesta versão: o botão de compra fica desabilitado com "Em breve". O plano atual aparece
+// primeiro, como referência (sem botão).
 export interface PlanUpgradeTarget {
   featureLabel: string; // o que a pessoa tentou abrir, ex. "Ponto"
   requiredTier: PlanCatalogItem['tier']; // plano mínimo que libera
@@ -42,6 +42,18 @@ function gainsOver(plan: PlanCatalogItem, current: PlanCatalogItem | undefined):
   return [...items, ...limits];
 }
 
+// framer-motion 11 anima `opacity` via WAAPI (acelerado) e, ao terminar, deixa um quadro com o valor
+// errado (0 ao abrir, 1 ao fechar) — a janela "piscava" ao abrir e ao fechar (medido quadro a quadro).
+// Um `onUpdate` presente faz o framer usar a animação por JS, que não tem esse quadro.
+const noop = () => {};
+
+// O que o plano atual já inclui (módulos/recursos + limites) — card de referência ao lado das ofertas.
+function includedIn(plan: PlanCatalogItem): string[] {
+  const items = [...plan.modules, ...plan.features].map((item) => PLAN_ITEM_LABELS[item] ?? item);
+  const limits = LIMIT_ROWS.map(({ key, label }) => `${label}: ${formatLimit(plan.limits[key])}`);
+  return [...items, ...limits];
+}
+
 const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarget; onClose: () => void }) => {
   const [plan, setPlan] = useState<MyPlan | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -68,6 +80,7 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
   // Básico, que não libera Comercial).
   const minIndex = Math.max(currentIndex + 1, PLAN_ORDER.indexOf(target.requiredTier));
   const upgrades = plan ? plan.catalog.filter((item) => PLAN_ORDER.indexOf(item.tier) >= minIndex) : [];
+  const cardCount = upgrades.length + (currentItem ? 1 : 0);
 
   return (
     <>
@@ -75,6 +88,7 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
+        onUpdate={noop}
         onClick={onClose}
         className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
       />
@@ -84,9 +98,10 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
           aria-modal="true"
           aria-labelledby="plan-upgrade-title"
           initial={{ scale: 0.95, opacity: 0 }}
+          onUpdate={noop}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.95, opacity: 0 }}
-          className="w-full max-w-4xl max-h-[90vh] bg-background border border-border shadow-2xl rounded-3xl flex flex-col pointer-events-auto overflow-hidden"
+          className="w-full max-w-6xl max-h-[90vh] bg-background border border-border shadow-2xl rounded-3xl flex flex-col pointer-events-auto overflow-hidden"
         >
           <div className="p-6 border-b border-border flex items-start justify-between gap-4 bg-secondary/10 shrink-0">
             <div className="flex items-start gap-4">
@@ -116,15 +131,44 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
             {loadError ? (
               <p className="text-sm text-muted">Não foi possível carregar os planos agora.</p>
             ) : !plan ? (
-              <p className="text-sm text-muted flex items-center gap-2">
+              <p className="min-h-[24rem] text-sm text-muted flex items-center justify-center gap-2">
                 <Loader2 size={14} className="animate-spin" /> Carregando planos...
               </p>
             ) : (
               <div
                 className={`grid grid-cols-1 gap-4 ${
-                  upgrades.length >= 3 ? 'md:grid-cols-3' : upgrades.length === 2 ? 'md:grid-cols-2' : ''
+                  cardCount >= 4
+                    ? 'md:grid-cols-2 lg:grid-cols-4'
+                    : cardCount === 3
+                      ? 'md:grid-cols-3'
+                      : cardCount === 2
+                        ? 'md:grid-cols-2'
+                        : ''
                 }`}
               >
+                {currentItem && (
+                  <div className="relative flex flex-col rounded-2xl border border-border p-5 bg-secondary/20">
+                    <span className="absolute -top-3 left-5 inline-flex items-center px-2.5 py-1 rounded-full bg-panel border border-border text-muted text-[11px] font-bold uppercase tracking-wide">
+                      Plano atual
+                    </span>
+                    <div className="text-lg font-heading font-bold text-foreground">{currentItem.label}</div>
+                    <div className="text-sm text-muted mb-4">{currentItem.priceLabel}</div>
+
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted mb-2">Inclui</div>
+                    <ul className="flex-1 space-y-1.5 mb-5">
+                      {includedIn(currentItem).map((line) => (
+                        <li key={line} className="flex items-start gap-2 text-sm text-muted">
+                          <Check size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <div className="w-full py-2.5 rounded-xl text-sm text-center font-medium text-muted border border-dashed border-border">
+                      Seu plano hoje
+                    </div>
+                  </div>
+                )}
                 {upgrades.map((item) => {
                   const recommended = item.tier === target.requiredTier;
                   return (
@@ -175,15 +219,6 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
             )}
           </div>
 
-          <div className="px-6 py-4 border-t border-border flex justify-end shrink-0">
-            <Link
-              to="/conta/assinatura"
-              onClick={onClose}
-              className="text-sm font-medium text-primary hover:underline"
-            >
-              Comparar todos os planos
-            </Link>
-          </div>
         </motion.div>
       </div>
     </>
