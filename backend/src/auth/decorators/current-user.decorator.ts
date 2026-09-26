@@ -8,6 +8,9 @@ export interface AuthenticatedUser {
   mustChangePassword: boolean;
   hasFullPontoAccess: boolean;
   permissions: Record<string, string | null>;
+  // Opcional só pra não obrigar todo fixture de teste existente a declarar o campo — JwtStrategy
+  // sempre popula (true/false). Ver EmailVerifiedGuard.
+  emailVerificationPending?: boolean;
 }
 
 export const CurrentUser = createParamDecorator(

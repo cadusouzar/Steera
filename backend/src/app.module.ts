@@ -4,6 +4,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
+import { EmailVerifiedGuard } from './auth/guards/email-verified.guard';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PlanGuard } from './plans/plan.guard';
 import { PlansModule } from './plans/plans.module';
@@ -100,6 +101,10 @@ import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
     // executam na ordem de registro), barrando @RequireModule(...) fora do
     // plano contratado (ver plan.guard.ts) — ortogonal ao ModulesGuard, que
     // segue sendo a permissão da PESSOA dentro do módulo.
+    // Confirmação de e-mail do fundador: logo depois do JwtAuthGuard (precisa de req.user) e antes
+    // do PlanGuard — enquanto o e-mail não for confirmado, só as rotas @AllowUnverifiedEmail()/
+    // @Public() passam (ver email-verified.guard.ts).
+    { provide: APP_GUARD, useClass: EmailVerifiedGuard },
     { provide: APP_GUARD, useClass: PlanGuard },
     // Backstop de RLS (defesa em profundidade): estabelece o contexto de
     // tenant (companyId autenticado) usado pela extensão do Prisma em

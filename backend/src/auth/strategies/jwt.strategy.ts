@@ -10,6 +10,8 @@ export interface JwtPayload {
   mustChangePassword: boolean;
   hasFullPontoAccess: boolean;
   permissions: Record<string, string | null>;
+  // emailVerificationRequired && !emailVerifiedAt no momento da emissão — ver EmailVerifiedGuard.
+  emailVerificationPending: boolean;
 }
 
 @Injectable()
@@ -34,6 +36,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       mustChangePassword: payload.mustChangePassword,
       hasFullPontoAccess: payload.hasFullPontoAccess,
       permissions: payload.permissions,
+      // Tokens emitidos antes desta claim existir não a carregam: `?? false` = tratar como
+      // confirmado (todos os logins anteriores foram marcados confirmados no backfill).
+      emailVerificationPending: payload.emailVerificationPending ?? false,
     };
   }
 }

@@ -1244,4 +1244,181 @@ describe('AuthService', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
+  // Task 6 ("Acesso e sessões", 26/09/2026): confirmação de e-mail de quem cria a empresa.
+  describe('confirmação de e-mail', () => {
+    describe('register', () => {
+      beforeEach(() => {
+        prisma.company.create.mockImplementation(async ({ data }: any) => ({ id: 'companyreg1234567890123456', ...data }));
+        prisma.profile.create.mockResolvedValue({ id: 'p1' });
+        prisma.user.create.mockImplementation(async ({ data }: any) => ({
+          id: 'u1', employeeId: null, mustChangePassword: false, hasFullPontoAccess: true, emailVerifiedAt: null, ...data,
+        }));
+        userTokens.issue.mockResolvedValue('raw-verify-token');
+      });
+
+      it('cria o fundador com emailVerificationRequired: true e emailVerifiedAt: null', async () => {
+        await service.register({ ...baseRegisterDto }, fakeRes);
+        expect(prisma.user.create.mock.calls[0][0].data).toMatchObject({ emailVerificationRequired: true, emailVerifiedAt: null });
+      });
+
+      it('emite EMAIL_VERIFICATION e envia o link /confirmar-email?token= depois da transação', async () => {
+        await service.register({ ...baseRegisterDto }, fakeRes);
+        await flush();
+
+        expect(userTokens.issue).toHaveBeenCalledWith('u1', 'EMAIL_VERIFICATION');
+        expect(userTokens.issue.mock.invocationCallOrder[0]).toBeGreaterThan(prisma.user.create.mock.invocationCallOrder[0]);
+        expect(email.send).toHaveBeenCalledTimes(1);
+        const [message, context] = email.send.mock.calls[0];
+        expect(message.to).toBe('a@b.com');
+        expect(message.subject).toMatch(/confirme seu e-mail/i);
+        expect(message.html).toContain('/confirmar-email?token=raw-verify-token');
+        expect(context).toBe('email-verification');
+      });
+
+      it('falha ao emitir o token/enviar o e-mail não falha o cadastro (só loga)', async () => {
+        userTokens.issue.mockRejectedValue(new Error('db down'));
+        const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+        const result = await service.register({ ...baseRegisterDto }, fakeRes);
+        await flush();
+
+        expect(result.accessToken).toBe('signed.jwt.token');
+        expect(logError).toHaveBeenCalledTimes(1);
+        expect(logError.mock.calls[0][0]).not.toContain('raw-verify-token');
+        logError.mockRestore();
+      });
+
+      it('o cadastro não espera o envio: send que nunca termina não segura a resposta', async () => {
+        email.send.mockImplementation(never);
+        await expect(settlesQuickly(service.register({ ...baseRegisterDto }, fakeRes))).resolves.toBe('settled');
+      });
+
+      it('nunca emite/envia nada se a transação de cadastro falhar', async () => {
+        prisma.user.create.mockRejectedValue(new Error('boom'));
+        await expect(service.register({ ...baseRegisterDto }, fakeRes)).rejects.toThrow('boom');
+        await flush();
+        expect(userTokens.issue).not.toHaveBeenCalled();
+        expect(email.send).not.toHaveBeenCalled();
+      });
+
+      it('devolve emailVerified: false / emailVerificationRequired: true e assina emailVerificationPending: true', async () => {
+        const result = await service.register({ ...baseRegisterDto }, fakeRes);
+        expect(result.user.emailVerified).toBe(false);
+        expect(result.user.emailVerificationRequired).toBe(true);
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.objectContaining({ emailVerificationPending: true }),
+          expect.anything(),
+        );
+      });
+    });
+
+    it('login de um usuário confirmado assina emailVerificationPending: false e expõe emailVerified: true', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1', companyId: 'c1', role: 'ADMIN', modules: [], status: 'ACTIVE', passwordHash: 'h',
+        mustChangePassword: false, hasFullPontoAccess: true, failedLoginAttempts: 0, lockedUntil: null,
+        emailVerificationRequired: true, emailVerifiedAt: new Date(),
+      });
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+      const result = await service.login({ email: 'x@x.com', password: 'y' }, fakeRes);
+
+      expect(result.user.emailVerified).toBe(true);
+      expect(result.user.emailVerificationRequired).toBe(true);
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ emailVerificationPending: false }),
+        expect.anything(),
+      );
+    });
+
+    it('login não-confirmado mas sem exigência (legado/convidado) nunca fica pendente', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1', companyId: 'c1', role: 'EMPLOYEE', modules: [], status: 'ACTIVE', passwordHash: 'h',
+        mustChangePassword: false, hasFullPontoAccess: true, failedLoginAttempts: 0, lockedUntil: null,
+        emailVerificationRequired: false, emailVerifiedAt: null,
+      });
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+      await service.login({ email: 'x@x.com', password: 'y' }, fakeRes);
+
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ emailVerificationPending: false }),
+        expect.anything(),
+      );
+    });
+
+    it('refresh relê o usuário e assina o estado ATUAL da confirmação', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt1', userId: 'u1', expiresAt: new Date(Date.now() + 10_000), revokedAt: null, replacedByTokenId: null,
+        user: {
+          id: 'u1', companyId: 'c1', role: 'ADMIN', modules: [], status: 'ACTIVE', hasFullPontoAccess: true,
+          emailVerificationRequired: true, emailVerifiedAt: null,
+        },
+      });
+      prisma.refreshToken.create.mockResolvedValue({ id: 'rt2' });
+
+      await service.refresh('algum-valor', fakeRes);
+
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ emailVerificationPending: true }),
+        expect.anything(),
+      );
+    });
+
+    it('getProfile expõe emailVerified/emailVerificationRequired', async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        id: 'u1', email: 'a@b.com', companyId: 'c1', role: 'ADMIN', modules: [], mustChangePassword: false,
+        employeeId: null, hasFullPontoAccess: true, emailVerificationRequired: true, emailVerifiedAt: null,
+      });
+
+      const profile = await service.getProfile('u1');
+
+      expect(profile.emailVerified).toBe(false);
+      expect(profile.emailVerificationRequired).toBe(true);
+    });
+
+    describe('verifyEmail', () => {
+      it('consome o token EMAIL_VERIFICATION e grava emailVerifiedAt', async () => {
+        userTokens.consume.mockResolvedValue('u1');
+
+        await service.verifyEmail('token-valido');
+
+        expect(userTokens.consume).toHaveBeenCalledWith('token-valido', 'EMAIL_VERIFICATION');
+        expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { emailVerifiedAt: expect.any(Date) } });
+      });
+
+      it('token inválido/expirado repassa a BadRequestException de consume() sem gravar nada', async () => {
+        userTokens.consume.mockRejectedValue(new BadRequestException('Link inválido ou expirado. Peça um novo.'));
+
+        await expect(service.verifyEmail('token-invalido')).rejects.toThrow('Link inválido ou expirado. Peça um novo.');
+        expect(prisma.user.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('resendVerification', () => {
+      it('já confirmado → 400 "Seu e-mail já está confirmado." sem emitir nada', async () => {
+        prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', email: 'a@b.com', name: 'Ana', emailVerifiedAt: new Date() });
+
+        await expect(service.resendVerification('u1')).rejects.toThrow(new BadRequestException('Seu e-mail já está confirmado.'));
+        expect(userTokens.issue).not.toHaveBeenCalled();
+        expect(email.send).not.toHaveBeenCalled();
+      });
+
+      it('pendente → reemite EMAIL_VERIFICATION, reenvia e devolve { sent }', async () => {
+        prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', email: 'a@b.com', name: 'Ana', emailVerifiedAt: null });
+        userTokens.issue.mockResolvedValue('raw-verify-token-2');
+        email.send.mockResolvedValue(false);
+
+        const result = await service.resendVerification('u1');
+
+        expect(result).toEqual({ sent: false });
+        expect(userTokens.issue).toHaveBeenCalledWith('u1', 'EMAIL_VERIFICATION');
+        const [message, context] = email.send.mock.calls[0];
+        expect(message.to).toBe('a@b.com');
+        expect(message.html).toContain('/confirmar-email?token=raw-verify-token-2');
+        expect(context).toBe('email-verification');
+      });
+    });
+  });
 });

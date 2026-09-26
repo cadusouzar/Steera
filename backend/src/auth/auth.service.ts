@@ -13,7 +13,9 @@ import { runTenantInteractiveTransaction } from '../prisma/tenant-rls.extension'
 import { applyMigrations } from '../prisma/tenant-migration.util';
 import { normalizePhone } from '../common/phone.util';
 import { EmailService } from '../email/email.service';
-import { accountLockedTemplate, buildAppLink, inviteTemplate, passwordChangedTemplate, passwordResetTemplate } from '../email/email-templates';
+import {
+  accountLockedTemplate, buildAppLink, inviteTemplate, passwordChangedTemplate, passwordResetTemplate, verifyEmailTemplate,
+} from '../email/email-templates';
 import { getPlan, lockedItemsFor, planLimit } from '../plans/plan-catalog';
 import { accountLockedError } from './account-lock.util';
 import { maskDocument, normalizeDocument, PersonType } from './document.util';
@@ -73,6 +75,15 @@ const RESET_PASSWORD_INVITED_MESSAGE = 'Link inválido ou expirado. Peça um nov
 // (garantido pelo próprio npm, que sempre executa scripts com CWD = pasta do package.json).
 const TENANT_MIGRATIONS_DIR = join(process.cwd(), 'prisma', 'tenant-migrations');
 
+// Confirmação de e-mail ("Acesso e sessões", 26/09/2026): o login só fica BLOQUEADO (ver
+// EmailVerifiedGuard) quando a confirmação é exigida (só o fundador, via register()) e ainda não
+// aconteceu. Logins antigos (backfill: todos confirmados) e convidados (emailVerificationRequired
+// false) nunca ficam pendentes. `?` nos campos: mocks antigos de teste sem as colunas contam como
+// "não pendente" — todo row real do Prisma sempre traz as duas.
+function isEmailVerificationPending(user: { emailVerificationRequired?: boolean; emailVerifiedAt?: Date | null }): boolean {
+  return !!user.emailVerificationRequired && !user.emailVerifiedAt;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -93,6 +104,10 @@ export class AuthService {
     modules: string[];
     mustChangePassword: boolean;
     hasFullPontoAccess: boolean;
+    // Obrigatórios de propósito: um caller novo que esquecesse de passar o row completo assinaria
+    // "confirmado" em silêncio e o EmailVerifiedGuard nunca bloquearia esse login.
+    emailVerificationRequired: boolean;
+    emailVerifiedAt: Date | null;
   }) {
     return this.jwt.sign(
       {
@@ -108,6 +123,11 @@ export class AuthService {
         // Permissões efetivas do perfil atual (Task 5, ver AuthorizationService) — carregadas no
         // JWT pra PermissionsGuard nunca precisar de uma consulta extra ao banco por requisição.
         permissions: await this.getEffectivePermissionsAsSystem(user.id),
+        // Só decide se EmailVerifiedGuard precisa consultar o banco (pendente) ou não (confirmado).
+        // Todo caller passa o row do banco lido nesta mesma requisição (register: o recém-criado;
+        // login/refresh/changePassword: relido agora), então a claim nunca herda um estado velho de
+        // um token anterior.
+        emailVerificationPending: isEmailVerificationPending(user),
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m', algorithm: 'HS256' },
     );
@@ -143,6 +163,8 @@ export class AuthService {
     employeeId: string | null;
     hasFullPontoAccess: boolean;
     name?: string | null;
+    emailVerificationRequired: boolean;
+    emailVerifiedAt: Date | null;
     company?: {
       name: string; planTier: string; maxEmployeeLogins: number;
       personType: PersonType | null; document: string | null; legalName: string | null; tradeName: string | null;
@@ -160,6 +182,10 @@ export class AuthService {
       employeeId: user.employeeId,
       hasFullPontoAccess: effectiveHasFullPontoAccess(user),
       permissions,
+      // Confirmação de e-mail: o frontend decide por estes dois se mostra o aviso "confirme seu
+      // e-mail" (bloqueante só quando emailVerificationRequired && !emailVerified).
+      emailVerified: !!user.emailVerifiedAt,
+      emailVerificationRequired: !!user.emailVerificationRequired,
       companyName: user.company?.name ?? null,
       planTier: user.company?.planTier ?? null,
       // Fix pós-revisão (26/09/2026): derivado do catálogo por planTier — nunca mais da coluna
@@ -273,7 +299,11 @@ export class AuthService {
     await this.assertRegisterIdentityAvailable(dto, document);
     const passwordHash = await hashPassword(dto.password);
     let result: {
-      user: { id: string; companyId: string; email: string; role: string; modules: string[]; mustChangePassword: boolean; employeeId: string | null; hasFullPontoAccess: boolean; name: string | null };
+      user: {
+        id: string; companyId: string; email: string; role: string; modules: string[]; mustChangePassword: boolean;
+        employeeId: string | null; hasFullPontoAccess: boolean; name: string | null;
+        emailVerificationRequired: boolean; emailVerifiedAt: Date | null;
+      };
       company: {
         name: string; planTier: string; maxEmployeeLogins: number;
         personType: PersonType | null; document: string | null; legalName: string | null; tradeName: string | null;
@@ -375,6 +405,10 @@ export class AuthService {
               modules: ALL_MODULES,
               profileId: profile.id,
               name: dto.name.trim(),
+              // Quem cria a empresa precisa confirmar o e-mail antes de entrar no sistema (ver
+              // EmailVerifiedGuard) — o link sai DEPOIS da transação, logo abaixo.
+              emailVerificationRequired: true,
+              emailVerifiedAt: null,
             },
           });
           return { user: createdUser, company };
@@ -386,6 +420,11 @@ export class AuthService {
       throw await this.resolveRegisterConflict(err, dto, document);
     }
     const { user, company } = result;
+    // Só DEPOIS do commit (nunca um e-mail com link pra um usuário que um rollback apagou) e em
+    // segundo plano (runInBackground): o cadastro não espera o provedor de e-mail, e uma falha ao
+    // emitir o token/enviar só é logada — a pessoa pede um novo pela área "Minha conta"
+    // (POST /auth/resend-verification).
+    this.runInBackground('email-verification', user.id, () => this.sendVerificationEmail(user.id, user.email, user.name));
     const accessToken = await this.signAccessToken(user);
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
@@ -622,6 +661,32 @@ export class AuthService {
     );
 
     await this.email.send({ to: user.email, ...passwordChangedTemplate() }, 'password-changed');
+  }
+
+  // Emite um token EMAIL_VERIFICATION (invalida os pendentes do mesmo usuário, ver
+  // UserTokensService.issue) e envia o link /confirmar-email. Devolve se o provedor aceitou o envio.
+  private async sendVerificationEmail(userId: string, email: string, name: string | null): Promise<boolean> {
+    const raw = await this.userTokens.issue(userId, 'EMAIL_VERIFICATION');
+    const template = verifyEmailTemplate(name, buildAppLink('/confirmar-email', raw));
+    return this.email.send({ to: email, ...template }, 'email-verification');
+  }
+
+  // POST /auth/verify-email (público — o link pode ser aberto em outro dispositivo, sem sessão).
+  // consume() já lança o 400 "Link inválido ou expirado. Peça um novo." pra token ausente/tipo
+  // errado/expirado/usado. runAsSystem: rota @Public(), nenhum contexto de tenant.
+  async verifyEmail(rawToken: string): Promise<void> {
+    const userId = await this.userTokens.consume(rawToken, 'EMAIL_VERIFICATION');
+    await runAsSystem(() => this.prisma.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } }));
+  }
+
+  // POST /auth/resend-verification (logado, liberado pelo EmailVerifiedGuard via
+  // @AllowUnverifiedEmail). Aqui o envio é AGUARDADO (diferente de register()): a pessoa pediu o
+  // reenvio e a resposta diz se o provedor aceitou (`sent`). E-mail já confirmado → 400.
+  async resendVerification(userId: string): Promise<{ sent: boolean }> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.emailVerifiedAt) throw new BadRequestException('Seu e-mail já está confirmado.');
+    const sent = await this.sendVerificationEmail(user.id, user.email, user.name ?? null);
+    return { sent };
   }
 
   // Emite um token INVITE e envia o e-mail de convite — usado por forgotPassword() acima (INVITED

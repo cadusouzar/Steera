@@ -8,12 +8,14 @@ import { LinkEmployeeDto } from './dto/link-employee.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { TokenDto } from './dto/token.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
 import { AllowDuringForcedPasswordChange } from './decorators/allow-during-forced-password-change.decorator';
+import { AllowUnverifiedEmail } from './decorators/allow-unverified-email.decorator';
 import { Public } from './decorators/public.decorator';
 import { AntiCsrfHeaderGuard } from './guards/anti-csrf-header.guard';
 import { FriendlyThrottlerGuard } from './guards/friendly-throttler.guard';
@@ -131,6 +133,34 @@ export class AuthController {
     return this.auth.resetPassword(dto.token, dto.newPassword);
   }
 
+  // Confirmação de e-mail ("Acesso e sessões", 26/09/2026). verify-email é @Public(): o link pode
+  // ser aberto em outro dispositivo, sem sessão nenhuma — mesmo teto por IP de reset-password
+  // (10/15min), AntiCsrfHeaderGuard pelo mesmo motivo de register()/login().
+  @Public()
+  @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 10, ttl: 900_000 } })
+  @HttpCode(204)
+  @Post('verify-email')
+  verifyEmail(@Body() dto: TokenDto) {
+    return this.auth.verifyEmail(dto.token);
+  }
+
+  // resend-verification: logado (o fundador ainda não confirmado está exatamente nesse estado, daí
+  // @AllowUnverifiedEmail), 3/h POR USUÁRIO. req.user já existe quando o getTracker roda: guards
+  // globais (APP_GUARD — JwtAuthGuard, que popula req.user via JwtStrategy) sempre executam antes
+  // dos guards de método, e dentro do @UseGuards abaixo o JwtAuthGuard ainda vem antes do
+  // FriendlyThrottlerGuard. O `?? req.ip` é só uma rede de segurança que nunca deveria disparar.
+  @AllowUnverifiedEmail()
+  @UseGuards(JwtAuthGuard, FriendlyThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 3, ttl: 3_600_000, getTracker: (req) => `user:${req.user?.userId ?? req.ip}` } })
+  @HttpCode(202)
+  @Post('resend-verification')
+  resendVerification(@CurrentUser() user: AuthenticatedUser) {
+    return this.auth.resendVerification(user.userId);
+  }
+
   @Public()
   @Post('logout')
   logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
@@ -144,7 +174,10 @@ export class AuthController {
   // mustChangePassword: true nunca conseguiria nem descobrir essa flag via
   // GET /auth/me (JwtAuthGuard bloquearia a própria rota que existe pra
   // informar isso ao frontend).
+  // @AllowUnverifiedEmail(): o frontend precisa ler o perfil (emailVerified/
+  // emailVerificationRequired) pra mostrar o aviso de confirmação — ver EmailVerifiedGuard.
   @AllowDuringForcedPasswordChange()
+  @AllowUnverifiedEmail()
   @UseGuards(JwtAuthGuard)
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
@@ -162,6 +195,7 @@ export class AuthController {
   // desse estado — bloqueá-la junto do resto das rotas de negócio deixaria o
   // usuário travado sem saída (ver JwtAuthGuard).
   @AllowDuringForcedPasswordChange()
+  @AllowUnverifiedEmail()
   @UseGuards(JwtAuthGuard, FriendlyThrottlerGuard)
   @SkipThrottle({ 'login-email': true })
   @Throttle({ default: { limit: 10, ttl: 900_000 } })
@@ -172,6 +206,7 @@ export class AuthController {
 
   // Área "Minha conta" do site: o próprio login edita o nome. Identidade só de req.user (nunca do
   // body); e-mail não é editável.
+  @AllowUnverifiedEmail()
   @UseGuards(JwtAuthGuard)
   @Patch('me')
   updateMe(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateMeDto) {
@@ -180,6 +215,7 @@ export class AuthController {
 
   // Dados cadastrais da empresa (razão social, fantasia, telefone, endereço) — só ADMIN; documento
   // e tipo de pessoa nunca mudam por aqui. companyId vem do JWT, nunca do body.
+  @AllowUnverifiedEmail()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Patch('me/company')
