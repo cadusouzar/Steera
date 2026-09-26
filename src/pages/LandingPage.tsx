@@ -217,22 +217,28 @@ const LandingPage = () => {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             <PricingCard
-              name="Starter"
+              name="Grátis"
+              price="R$ 0"
+              ctaLabel="Comece agora"
+              features={["Clientes e RH", "Até 5 cargos e 10 funcionários", "2 logins de funcionário"]}
+            />
+            <PricingCard
+              name="Básico"
               price="R$ 99"
-              features={["Até 10 funcionários", "Controle de Ponto", "Gestão de Cargos", "Suporte Email"]}
+              features={["Clientes, RH e Controle de Ponto", "Cargos e funcionários ilimitados", "10 logins de funcionário"]}
             />
             <PricingCard
               name="Pro"
               price="R$ 299"
               isPopular={true}
-              features={["Até 50 funcionários", "Estoque e Fornecedores", "Dashboards Financeiros", "Suporte Prioritário"]}
+              features={["Tudo do Básico + Comercial, Operações e Finanças", "Analytics e Dashboards", "50 logins de funcionário"]}
             />
             <PricingCard
-              name="Enterprise"
-              price="Custom"
-              features={["Funcionários Ilimitados", "Cursos Online LMS", "Acesso à API", "Gerente de Contas Dedicado"]}
+              name="Empresarial"
+              price="Sob consulta"
+              features={["Tudo do Pro", "Logins de funcionário ilimitados", "Suporte dedicado"]}
             />
           </div>
         </div>

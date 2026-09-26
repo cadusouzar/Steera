@@ -7,9 +7,11 @@ interface PricingCardProps {
   price: string;
   features: string[];
   isPopular?: boolean;
+  // Texto do botão de ação — "Selecionar Plano" por padrão, "Comece agora" no plano Grátis.
+  ctaLabel?: string;
 }
 
-const PricingCard: React.FC<PricingCardProps> = ({ name, price, features, isPopular }) => {
+const PricingCard: React.FC<PricingCardProps> = ({ name, price, features, isPopular, ctaLabel = 'Selecionar Plano' }) => {
   return (
     <div className={`relative glass-panel rounded-3xl p-8 flex flex-col ${isPopular ? 'border-primary shadow-xl shadow-primary/10 scale-105 z-10' : ''}`}>
       {isPopular && (
@@ -22,7 +24,7 @@ const PricingCard: React.FC<PricingCardProps> = ({ name, price, features, isPopu
         <h3 className="text-xl font-heading font-semibold text-foreground mb-2">{name}</h3>
         <div className="flex items-baseline gap-1">
           <span className="text-4xl font-heading font-bold text-foreground">{price}</span>
-          {price !== 'Custom' && <span className="text-foreground/50 text-sm">/mês</span>}
+          {price !== 'R$ 0' && price !== 'Sob consulta' && <span className="text-foreground/50 text-sm">/mês</span>}
         </div>
       </div>
       
@@ -43,7 +45,7 @@ const PricingCard: React.FC<PricingCardProps> = ({ name, price, features, isPopu
             : 'bg-background hover:bg-secondary/50 text-foreground border border-border shadow-sm'
         }`}
       >
-        Selecionar Plano
+        {ctaLabel}
       </Link>
     </div>
   );
