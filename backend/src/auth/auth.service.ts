@@ -24,6 +24,7 @@ import { UpdateMeDto } from './dto/update-me.dto';
 import { hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
+import { UnknownLoginFailureTracker } from './unknown-login-failures';
 import { UserTokensService } from './user-tokens/user-tokens.service';
 
 // `RH` de propósito fora daqui — não é mais atribuído a login novo nenhum, nem o fundador (ver
@@ -82,6 +83,7 @@ export class AuthService {
     private readonly authorization: AuthorizationService,
     private readonly email: EmailService,
     private readonly userTokens: UserTokensService,
+    private readonly unknownLoginFailures: UnknownLoginFailureTracker,
   ) {}
 
   private async signAccessToken(user: {
@@ -409,14 +411,25 @@ export class AuthService {
         include: { company: { select: PUBLIC_COMPANY_SELECT } },
       }),
     );
-    if (!user) throw new UnauthorizedException('E-mail ou senha inválidos');
+    // Anti-enumeração ("Acesso e sessões", 26/09/2026): as respostas pra um e-mail SEM conta seguem
+    // exatamente a mesma sequência de uma conta real — tentativas 1-5 erradas → 401 genérico, a
+    // partir da 6ª → o mesmo accountLockedError(...) por 15min. A contagem do e-mail inexistente é
+    // em memória (UnknownLoginFailureTracker); a da conta real é persistida (User.lockedUntil). Só
+    // tentativa ERRADA conta nos dois caminhos — o throttler por e-mail que existia antes rodava
+    // antes do handler e contava login certo também (fix round 1).
+    if (!user) {
+      this.unknownLoginFailures.assertNotLocked(dto.email);
+      this.unknownLoginFailures.recordFailure(dto.email);
+      throw new UnauthorizedException('E-mail ou senha inválidos');
+    }
 
-    // Bloqueio temporário por conta (26/09/2026, "Acesso e sessões"): checado ANTES da senha e com
-    // a mesma resposta que o throttler por e-mail dá pra e-mail inexistente (LoginThrottlerGuard) —
-    // quem está chutando não distingue conta real bloqueada de e-mail inventado. Checar antes da
-    // senha também é o que impede o chute de continuar durante a trava (nem a senha certa entra).
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      throw accountLockedError(Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000));
+    // Bloqueio temporário por conta: checado ANTES da senha e com a mesma resposta que um e-mail
+    // inexistente travado recebe (acima) — quem está chutando não distingue conta real bloqueada de
+    // e-mail inventado. Checar antes da senha também é o que impede o chute de continuar durante a
+    // trava (nem a senha certa entra).
+    const now = new Date();
+    if (user.lockedUntil && user.lockedUntil > now) {
+      throw accountLockedError(Math.ceil((user.lockedUntil.getTime() - now.getTime()) / 1000));
     }
 
     // Confirma a senha ANTES de checar o status — auditoria de segurança (17/09/2026): revelar
@@ -429,21 +442,11 @@ export class AuthService {
       // Só conta pra ACTIVE (e o LOCKED legado, tratado como ACTIVE) — BLOCKED é ação de admin e
       // INVITED não tem senha própria ainda; nenhum dos dois precisa acumular tentativas.
       if (user.status === 'ACTIVE' || user.status === 'LOCKED') {
-        const attempts = user.failedLoginAttempts + 1;
-        const locking = attempts >= MAX_FAILED_LOGIN_ATTEMPTS;
-        await runAsSystem(() =>
-          this.prisma.user.update({
-            where: { id: user.id },
-            data: locking
-              ? { failedLoginAttempts: 0, lockedUntil: new Date(Date.now() + LOCK_DURATION_MS) }
-              : { failedLoginAttempts: attempts },
-          }),
-        );
-        if (locking) await this.sendAccountLockedEmail(user.id, user.email);
+        await this.recordFailedLogin(user.id, user.email, now);
       }
       // Mesma mensagem genérica sempre, mesmo na tentativa que acabou de travar a conta — nunca
       // revelar o estado da conta pra uma senha errada (a 6ª tentativa, com a trava já ativa, é que
-      // recebe o 403 — igual ao que o throttler por e-mail dá pra um e-mail inventado).
+      // recebe o 403 — igual ao e-mail inventado).
       throw new UnauthorizedException('E-mail ou senha inválidos');
     }
 
@@ -473,22 +476,66 @@ export class AuthService {
     return { accessToken, user: this.toPublicUser(user, permissions) };
   }
 
-  // Aviso de trava temporária com link de redefinição de senha. Nunca derruba o login (que já vai
-  // responder o 401 genérico): EmailService.send nunca lança, e uma falha ao emitir o token cai no
-  // catch — a trava em si já foi gravada e vale mesmo sem o e-mail. Nunca loga o token.
-  private async sendAccountLockedEmail(userId: string, email: string): Promise<void> {
-    try {
-      const raw = await this.userTokens.issue(userId, 'PASSWORD_RESET');
-      const template = accountLockedTemplate(LOCK_DURATION_MS / 60_000, buildAppLink('/redefinir-senha', raw));
-      await this.email.send({ to: email, ...template }, 'account-locked');
-    } catch (err) {
-      this.logger.error(`Falha ao preparar o e-mail de conta travada (user ${userId}): ${(err as Error).message}`);
+  // Contador de senha errada ATÔMICO (fix round 1): antes era ler failedLoginAttempts no findUnique
+  // e gravar +1 — duas tentativas simultâneas liam o mesmo valor e uma se perdia, e as duas podiam
+  // "cruzar" o limite e mandar dois e-mails. Agora são dois UPDATE condicionais, cada um reavaliado
+  // pelo Postgres contra a versão ATUAL da linha (READ COMMITTED reavalia o WHERE depois de esperar
+  // a trava de linha):
+  //   1. incrementa só se a conta não está numa trava ativa (lockedUntil nulo ou vencido);
+  //   2. trava (lockedUntil = agora + 15min, contador volta a 0) só se o contador chegou ao limite e
+  //      ainda não há trava ativa — então só UMA requisição consegue (count === 1) e só ela manda o
+  //      e-mail de aviso; a concorrente vê a trava recém-gravada e não casa.
+  // runAsSystem: mesmo motivo do findUnique de login() (rota pública, sem tenant no contexto).
+  private async recordFailedLogin(userId: string, email: string, now: Date): Promise<void> {
+    const notLocked = [{ lockedUntil: null }, { lockedUntil: { lte: now } }];
+    const incremented = await runAsSystem(() =>
+      this.prisma.user.updateMany({
+        where: { id: userId, status: { in: ['ACTIVE', 'LOCKED'] }, OR: notLocked },
+        data: { failedLoginAttempts: { increment: 1 } },
+      }),
+    );
+    if (incremented.count === 0) return;
+
+    const locked = await runAsSystem(() =>
+      this.prisma.user.updateMany({
+        where: { id: userId, failedLoginAttempts: { gte: MAX_FAILED_LOGIN_ATTEMPTS }, OR: notLocked },
+        data: { failedLoginAttempts: 0, lockedUntil: new Date(Date.now() + LOCK_DURATION_MS) },
+      }),
+    );
+    // Em segundo plano: o 401 não espera o e-mail (nem um provedor lento/travado segura a resposta,
+    // nem a latência da 5ª tentativa denuncia que existe uma conta ali).
+    if (locked.count === 1) {
+      this.runInBackground('account-locked', userId, () => this.sendAccountLockedEmail(userId, email));
     }
+  }
+
+  // Aviso de trava temporária com link de redefinição de senha. Sempre chamado via runInBackground:
+  // a trava em si já foi gravada e vale mesmo sem o e-mail.
+  private async sendAccountLockedEmail(userId: string, email: string): Promise<void> {
+    const raw = await this.userTokens.issue(userId, 'PASSWORD_RESET');
+    const template = accountLockedTemplate(LOCK_DURATION_MS / 60_000, buildAppLink('/redefinir-senha', raw));
+    await this.email.send({ to: email, ...template }, 'account-locked');
+  }
+
+  // Dispara um efeito colateral (emitir token + mandar e-mail) SEM a resposta esperar por ele —
+  // anti-enumeração por latência (review da Task 5, fix round 1 da Task 4): se forgotPassword()/
+  // login() esperassem issue()/send() só quando a conta existe, o tempo de resposta revelaria quais
+  // e-mails têm conta. `Promise.resolve().then(work)` garante que nem um throw síncrono escape, e o
+  // `.catch` loga só contexto + userId (nunca o token/link, nunca o corpo do e-mail) — nenhuma
+  // unhandled rejection. E-mail é efeito colateral, nunca a fonte de verdade da ação principal.
+  private runInBackground(context: string, userId: string, work: () => Promise<unknown>): void {
+    void Promise.resolve()
+      .then(work)
+      .catch((err: unknown) => {
+        this.logger.error(
+          `Falha no envio em segundo plano (${context}, user ${userId}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
   }
 
   // POST /auth/forgot-password — sempre 202 com a mesma mensagem genérica (FORGOT_PASSWORD_MESSAGE),
   // exista ou não a conta: nunca revela a existência de um e-mail (anti-enumeração, mesma filosofia
-  // já usada pelo 401 genérico de login() e pelo 403 idêntico do throttler "login-email"). E-mail
+  // já usada pelo 401 genérico de login() e pelo 403 idêntico da trava de e-mail inexistente). E-mail
   // inexistente literalmente não chama issue()/send() nenhum — não é só "a mesma resposta", é o
   // mesmo NÚMERO de operações de negócio (nada a esconder atrás de um await artificial).
   //
@@ -499,21 +546,22 @@ export class AuthService {
       this.prisma.user.findUnique({ where: { email }, include: { company: { select: { name: true } } } }),
     );
 
+    // Em segundo plano (runInBackground): com ou sem conta, a resposta sai logo depois do MESMO
+    // findUnique acima — nunca espera issue()/send(), que só existem no ramo com conta e por isso
+    // denunciariam a conta pela latência. Falha é pega e logada lá dentro, nunca derruba o 202.
     if (user) {
-      try {
-        // INVITED nunca tem senha própria pra redefinir — reenviar o convite é o equivalente
-        // correto de "esqueci minha senha" pra esse status (mesmo link/token, apenas reemitido).
-        if (user.status === 'INVITED') {
-          await this.sendInviteEmail(user.id, user.email, user.company?.name ?? '');
-        } else {
-          const raw = await this.userTokens.issue(user.id, 'PASSWORD_RESET');
+      const { id, email: to, status } = user;
+      const companyName = user.company?.name ?? '';
+      // INVITED nunca tem senha própria pra redefinir — reenviar o convite é o equivalente correto
+      // de "esqueci minha senha" pra esse status (mesmo link/token, apenas reemitido).
+      if (status === 'INVITED') {
+        this.runInBackground('invite', id, () => this.sendInviteEmail(id, to, companyName));
+      } else {
+        this.runInBackground('password-reset', id, async () => {
+          const raw = await this.userTokens.issue(id, 'PASSWORD_RESET');
           const template = passwordResetTemplate(buildAppLink('/redefinir-senha', raw));
-          await this.email.send({ to: user.email, ...template }, 'password-reset');
-        }
-      } catch (err) {
-        // Nunca derruba a resposta genérica — mesma filosofia de sendAccountLockedEmail acima
-        // (e-mail é sempre efeito colateral, nunca a fonte de verdade da ação principal).
-        this.logger.error(`Falha ao preparar o e-mail de esqueci-minha-senha (user ${user.id}): ${(err as Error).message}`);
+          await this.email.send({ to, ...template }, 'password-reset');
+        });
       }
     }
 
@@ -578,9 +626,8 @@ export class AuthService {
 
   // Emite um token INVITE e envia o e-mail de convite — usado por forgotPassword() acima (INVITED
   // reenviando o próprio convite) e, mais adiante (Task 7), por UsersService ao criar um login
-  // INVITED novo. Ao contrário de sendAccountLockedEmail()/do bloco try/catch de forgotPassword(),
-  // esta função NÃO engole erro nenhum — quem chama decide como reagir (forgotPassword() já embrulha
-  // a própria chamada num try/catch; um chamador futuro pode legitimamente precisar de outro
+  // INVITED novo. Esta função NÃO engole erro nenhum — quem chama decide como reagir (forgotPassword()
+  // a dispara via runInBackground, que pega e loga; um chamador futuro pode legitimamente precisar de outro
   // comportamento, ex.: desfazer a criação do login se o convite não puder nem ser preparado).
   async sendInviteEmail(userId: string, email: string, companyName: string): Promise<{ inviteUrl: string; sent: boolean }> {
     const raw = await this.userTokens.issue(userId, 'INVITE');

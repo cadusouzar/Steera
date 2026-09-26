@@ -17,7 +17,6 @@ import { AllowDuringForcedPasswordChange } from './decorators/allow-during-force
 import { Public } from './decorators/public.decorator';
 import { AntiCsrfHeaderGuard } from './guards/anti-csrf-header.guard';
 import { FriendlyThrottlerGuard } from './guards/friendly-throttler.guard';
-import { LoginThrottlerGuard } from './guards/login-throttler.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { loginEmailTracker } from './login-throttle.util';
 import { refreshSessionTracker } from './refresh-throttle.util';
@@ -60,23 +59,21 @@ export class AuthController {
     return this.auth.register(dto, res);
   }
 
-  // Dois throttlers em paralelo aqui (ver login-throttle.util.ts e app.module.ts):
-  // - "default", por IP: 100/15min ("Acesso e sessões", 26/09/2026 — era 5/5min). Um escritório
-  //   inteiro atrás do mesmo IP errando senha de manhã estourava o limite de todo mundo; a proteção
-  //   de verdade contra chute de senha agora é por CONTA (abaixo e AuthService.login), então o
-  //   limite por IP fica só como teto contra abuso grosseiro (password spraying em massa).
-  // - "login-email", por e-mail, sem IP na chave: 5/15min com bloqueio de 15min — fecha a lacuna
-  //   de um atacante que faz brute-force de UM e-mail rotacionando IPs, e conta e-mail inexistente
-  //   também. LoginThrottlerGuard responde esse caso com o MESMO 403 ACCOUNT_TEMPORARILY_LOCKED da
-  //   trava de conta real (anti-enumeração, ver login-throttler.guard.ts/account-lock.util.ts).
-  // AntiCsrfHeaderGuard (ver register acima e anti-csrf-header.guard.ts) roda antes dos throttlers
+  // Só o throttler "default", por IP: 100/15min ("Acesso e sessões", 26/09/2026 — era 5/5min). Um
+  // escritório inteiro atrás do mesmo IP errando senha de manhã estourava o limite de todo mundo; a
+  // proteção de verdade contra chute de senha é por CONTA, dentro de AuthService.login (trava de 15min
+  // na 5ª senha errada, com um espelho em memória idêntico pra e-mail sem conta — anti-enumeração),
+  // então o limite por IP fica só como teto contra abuso grosseiro (password spraying em massa).
+  // @SkipThrottle({'login-email': true}) (fix round 1): o throttler por e-mail rodava ANTES do
+  // handler e por isso contava login CERTO também — 6 logins legítimos em 15min (várias abas/
+  // aparelhos) davam 403 sem nenhuma senha errada. A contagem por e-mail agora vive no AuthService,
+  // que só enxerga (e só conta) falhas.
+  // AntiCsrfHeaderGuard (ver register acima e anti-csrf-header.guard.ts) roda antes do throttler
   // pelo mesmo motivo.
   @Public()
-  @UseGuards(AntiCsrfHeaderGuard, LoginThrottlerGuard)
-  @Throttle({
-    default: { limit: 100, ttl: 900_000 },
-    'login-email': { limit: 5, ttl: 900_000, blockDuration: 900_000, getTracker: loginEmailTracker },
-  })
+  @UseGuards(AntiCsrfHeaderGuard, FriendlyThrottlerGuard)
+  @SkipThrottle({ 'login-email': true })
+  @Throttle({ default: { limit: 100, ttl: 900_000 } })
   @Post('login')
   login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     return this.auth.login(dto, res);
@@ -103,7 +100,7 @@ export class AuthController {
   // sessão nenhuma ainda. AntiCsrfHeaderGuard nos dois pelo mesmo motivo de register()/login()
   // acima (um <form> cross-site não consegue setar o cabeçalho custom).
   //
-  // forgot-password: dois throttlers em paralelo, mesmo padrão de login() — "default" por IP
+  // forgot-password: dois throttlers em paralelo — "default" por IP
   // (5/15min, mais apertado que o de login porque aqui cada chamada bem-sucedida DISPARA um e-mail
   // de verdade, então o teto contra abuso grosseiro precisa ser mais baixo) e "login-email" por
   // e-mail (3/15min — mais apertado que os 5/15min do próprio login, pra não deixar alguém inundar

@@ -49,20 +49,18 @@ import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
     // sobrescreve limite/ttl/tracker via @Throttle({...}).
     //
     // "login-email" é um segundo throttler nomeado, keyed só por e-mail
-    // (nunca por IP — ver login-throttle.util.ts), usado só em POST
-    // /auth/login pra fechar a lacuna de um atacante que faz brute-force de
-    // UM e-mail conhecido rotacionando IPs. Todas as outras rotas com
-    // throttle pulam esse nome via @SkipThrottle. O valor usado em runtime
-    // vem do @Throttle({'login-email': {...}}) do login (5/15min, bloqueio de
-    // 15min); este aqui é o mínimo pra esse nome existir em
-    // `this.throttlers` do guard. setHeaders: false ("Acesso e sessões",
-    // 26/09/2026): quando esse throttler estoura, LoginThrottlerGuard responde
-    // o mesmo 403 da trava de conta real (AuthService.login) — um cabeçalho
-    // Retry-After-login-email/X-RateLimit-*-login-email só existiria num dos
-    // dois caminhos e denunciaria qual respondeu (anti-enumeração).
+    // (nunca por IP — ver login-throttle.util.ts), usado hoje só em POST
+    // /auth/forgot-password (3/15min por e-mail, pra ninguém inundar a caixa
+    // de entrada de uma conta). Todas as outras rotas com throttle pulam esse
+    // nome via @SkipThrottle — inclusive POST /auth/login desde 26/09/2026
+    // ("Acesso e sessões", fix round 1): lá ele rodava antes do handler e
+    // contava login CERTO também; a contagem por e-mail do login agora vive
+    // em AuthService.login, que só conta falhas. O valor usado em runtime vem
+    // do @Throttle({'login-email': {...}}) de cada handler; este aqui é o
+    // mínimo pra esse nome existir em `this.throttlers` do guard.
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 900_000, limit: 5 },
-      { name: 'login-email', ttl: 900_000, limit: 5, setHeaders: false },
+      { name: 'login-email', ttl: 900_000, limit: 5 },
     ]),
     PrismaModule,
     EmailModule,
