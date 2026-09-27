@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Loader2, Lock, Pencil, Plus, Shield, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Loader2, Lock, Pencil, Plus, Shield, Trash2, X } from 'lucide-react';
 import CustomSelect from '../../components/CustomSelect';
 import * as api from '../../lib/api';
 import type { PermissionCatalogEntry, Profile, ProfileGrant } from '../../lib/api';
+import { buildPermissionGroups, type PermissionGroup, type PermissionRow } from '../../lib/permissionGroups';
 
 const SCOPE_OPTIONS = [
   { value: 'PROPRIO', label: 'Só eu' },
@@ -10,6 +11,12 @@ const SCOPE_OPTIONS = [
   { value: 'DEPARTAMENTO', label: 'Meu departamento' },
   { value: 'EMPRESA', label: 'Empresa toda' },
 ];
+
+function scopeOptionsFor(codes: string[]) {
+  return codes.map((code) => SCOPE_OPTIONS.find((o) => o.value === code)).filter((o): o is (typeof SCOPE_OPTIONS)[number] => !!o);
+}
+
+type LevelValue = 'none' | 'ver' | 'gerenciar';
 
 interface GrantFormState {
   permissionCode: string;
@@ -28,6 +35,109 @@ function buildInitialGrants(catalog: PermissionCatalogEntry[], existing: Profile
   });
 }
 
+function computeInitialExpanded(groups: PermissionGroup[], grants: GrantFormState[]): Record<string, boolean> {
+  const byCode = new Map(grants.map((g) => [g.permissionCode, g]));
+  const result: Record<string, boolean> = {};
+  for (const group of groups) {
+    result[group.key] = group.rows.some((row) =>
+      row.kind === 'toggle' ? !!byCode.get(row.code)?.enabled : !!byCode.get(row.verCode)?.enabled || !!byCode.get(row.manageCode)?.enabled,
+    );
+  }
+  return result;
+}
+
+const LEVEL_LABELS: Record<LevelValue, string> = { none: 'Sem acesso', ver: 'Ver', gerenciar: 'Gerenciar' };
+
+interface PermissionRowViewProps {
+  row: PermissionRow;
+  catalogByCode: Map<string, PermissionCatalogEntry>;
+  grantsByCode: Map<string, GrantFormState>;
+  getLevel: (verCode: string, manageCode: string) => LevelValue;
+  levelScopeCodes: (verCode: string, manageCode: string, level: LevelValue) => string[];
+  toggleGrant: (code: string) => void;
+  setGrantScope: (code: string, scope: string) => void;
+  setLevel: (verCode: string, manageCode: string, level: LevelValue) => void;
+  setLevelScope: (verCode: string, manageCode: string, level: LevelValue, scope: string) => void;
+}
+
+// Uma linha do editor de permissões agrupado — checkbox simples para ações únicas, ou um segmented
+// control "Sem acesso | Ver | Gerenciar" para recursos com os dois códigos. Puramente de
+// apresentação: o formato de `ProfileGrant` salvo continua idêntico ao da lista plana de toggles
+// anterior.
+function PermissionRowView({
+  row,
+  catalogByCode,
+  grantsByCode,
+  getLevel,
+  levelScopeCodes,
+  toggleGrant,
+  setGrantScope,
+  setLevel,
+  setLevelScope,
+}: PermissionRowViewProps) {
+  if (row.kind === 'toggle') {
+    const entry = catalogByCode.get(row.code);
+    const grant = grantsByCode.get(row.code);
+    const enabled = !!grant?.enabled;
+    const scopeCodes = entry?.validScopes ?? [];
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+        <label className="flex items-center gap-3 flex-1 min-w-[180px] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={() => toggleGrant(row.code)}
+            className="w-4 h-4 rounded accent-primary shrink-0"
+          />
+          <span className="text-sm text-foreground">{row.label}</span>
+        </label>
+        {enabled && scopeCodes.length > 0 && (
+          <div className="w-full sm:w-44 shrink-0">
+            <CustomSelect value={grant?.scope ?? scopeCodes[0]} onChange={(val) => setGrantScope(row.code, val)} options={scopeOptionsFor(scopeCodes)} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const level = getLevel(row.verCode, row.manageCode);
+  const scopeCodes = levelScopeCodes(row.verCode, row.manageCode, level);
+  const currentGrant = level === 'gerenciar' ? grantsByCode.get(row.manageCode) : grantsByCode.get(row.verCode);
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+      <span className="text-sm text-foreground flex-1 min-w-[180px]">{row.label}</span>
+      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+        <div role="radiogroup" aria-label={`Nível de acesso: ${row.label}`} className="inline-flex rounded-lg border border-border overflow-hidden shrink-0">
+          {(['none', 'ver', 'gerenciar'] as const).map((lvl) => (
+            <button
+              key={lvl}
+              type="button"
+              role="radio"
+              aria-checked={level === lvl}
+              onClick={() => setLevel(row.verCode, row.manageCode, lvl)}
+              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${lvl !== 'none' ? 'border-l border-border' : ''} ${
+                level === lvl ? 'bg-primary text-white' : 'bg-secondary/20 text-foreground hover:bg-secondary/40'
+              }`}
+            >
+              {LEVEL_LABELS[lvl]}
+            </button>
+          ))}
+        </div>
+        {level !== 'none' && scopeCodes.length > 0 && (
+          <div className="w-44 shrink-0">
+            <CustomSelect
+              value={currentGrant?.scope ?? scopeCodes[0]}
+              onChange={(val) => setLevelScope(row.verCode, row.manageCode, level, val)}
+              options={scopeOptionsFor(scopeCodes)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const Profiles: React.FC = () => {
   const [catalog, setCatalog] = useState<PermissionCatalogEntry[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -37,8 +147,13 @@ const Profiles: React.FC = () => {
   const [editingProfile, setEditingProfile] = useState<Profile | 'new' | null>(null);
   const [formName, setFormName] = useState('');
   const [formGrants, setFormGrants] = useState<GrantFormState[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const groups = useMemo(() => buildPermissionGroups(catalog), [catalog]);
+  const catalogByCode = useMemo(() => new Map(catalog.map((e) => [e.code, e])), [catalog]);
+  const grantsByCode = useMemo(() => new Map(formGrants.map((g) => [g.permissionCode, g])), [formGrants]);
 
   const [deletingProfile, setDeletingProfile] = useState<Profile | null>(null);
   const [reassignTargetId, setReassignTargetId] = useState('');
@@ -62,15 +177,19 @@ const Profiles: React.FC = () => {
   useEffect(() => { loadAll(); }, []);
 
   const openCreate = () => {
+    const grants = buildInitialGrants(catalog, []);
     setFormName('');
-    setFormGrants(buildInitialGrants(catalog, []));
+    setFormGrants(grants);
+    setExpandedGroups(computeInitialExpanded(groups, grants));
     setFormError(null);
     setEditingProfile('new');
   };
 
   const openEdit = (profile: Profile) => {
+    const grants = buildInitialGrants(catalog, profile.grants);
     setFormName(profile.name);
-    setFormGrants(buildInitialGrants(catalog, profile.grants));
+    setFormGrants(grants);
+    setExpandedGroups(computeInitialExpanded(groups, grants));
     setFormError(null);
     setEditingProfile(profile);
   };
@@ -84,6 +203,73 @@ const Profiles: React.FC = () => {
   const setGrantScope = (code: string, scope: string) => {
     setFormGrants((prev) => prev.map((g) => (g.permissionCode === code ? { ...g, scope } : g)));
   };
+
+  const getLevel = (verCode: string, manageCode: string): LevelValue => {
+    const manageGrant = grantsByCode.get(manageCode);
+    const verGrant = grantsByCode.get(verCode);
+    if (manageGrant?.enabled) return 'gerenciar';
+    if (verGrant?.enabled) return 'ver';
+    return 'none';
+  };
+
+  const levelScopeCodes = (verCode: string, manageCode: string, level: LevelValue): string[] => {
+    const verScopes = catalogByCode.get(verCode)?.validScopes ?? [];
+    const manageScopes = catalogByCode.get(manageCode)?.validScopes ?? [];
+    if (level === 'ver') return verScopes;
+    if (level === 'gerenciar') return manageScopes.filter((s) => verScopes.includes(s));
+    return [];
+  };
+
+  const setLevel = (verCode: string, manageCode: string, newLevel: LevelValue) => {
+    setFormGrants((prev) => {
+      const verEntry = catalogByCode.get(verCode);
+      const manageEntry = catalogByCode.get(manageCode);
+      const verGrant = prev.find((g) => g.permissionCode === verCode);
+      const manageGrant = prev.find((g) => g.permissionCode === manageCode);
+
+      if (newLevel === 'none') {
+        return prev.map((g) => (g.permissionCode === verCode || g.permissionCode === manageCode ? { ...g, enabled: false } : g));
+      }
+      if (newLevel === 'ver') {
+        const scope = verGrant?.scope ?? verEntry?.validScopes[0] ?? null;
+        return prev.map((g) => {
+          if (g.permissionCode === verCode) return { ...g, enabled: true, scope };
+          if (g.permissionCode === manageCode) return { ...g, enabled: false };
+          return g;
+        });
+      }
+      // 'gerenciar' concede os dois códigos (ver + gerenciar) com o mesmo escopo — mesmo shape de
+      // grants que marcar os dois toggles manualmente na UI antiga.
+      const verScopes = verEntry?.validScopes ?? [];
+      const manageScopes = manageEntry?.validScopes ?? [];
+      const intersection = manageScopes.filter((s) => verScopes.includes(s));
+      const scope = manageGrant?.scope ?? intersection[0] ?? null;
+      return prev.map((g) => {
+        if (g.permissionCode === verCode || g.permissionCode === manageCode) return { ...g, enabled: true, scope };
+        return g;
+      });
+    });
+  };
+
+  const setLevelScope = (verCode: string, manageCode: string, level: LevelValue, scope: string) => {
+    setFormGrants((prev) =>
+      prev.map((g) => {
+        if (level === 'ver' && g.permissionCode === verCode) return { ...g, scope };
+        if (level === 'gerenciar' && (g.permissionCode === verCode || g.permissionCode === manageCode)) return { ...g, scope };
+        return g;
+      }),
+    );
+  };
+
+  const toggleGroup = (key: string) => setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  const expandAllGroups = () => setExpandedGroups(Object.fromEntries(groups.map((g) => [g.key, true])));
+  const collapseAllGroups = () => setExpandedGroups(Object.fromEntries(groups.map((g) => [g.key, false])));
+
+  const countEnabledInGroup = (group: PermissionGroup): number =>
+    group.rows.reduce((count, row) => {
+      if (row.kind === 'toggle') return count + (grantsByCode.get(row.code)?.enabled ? 1 : 0);
+      return count + (getLevel(row.verCode, row.manageCode) !== 'none' ? 1 : 0);
+    }, 0);
 
   const hasViewWithoutManage = useMemo(() => {
     // Aviso da "limitação temporária conhecida" (ver spec): sob o ModulesGuard, marcar só "ver"
@@ -249,28 +435,49 @@ const Profiles: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-1">
-                {catalog.map((entry) => {
-                  const grant = formGrants.find((g) => g.permissionCode === entry.code)!;
+              <div className="flex items-center justify-end gap-2 text-xs font-bold text-primary">
+                <button type="button" onClick={expandAllGroups} className="hover:underline">Expandir tudo</button>
+                <span className="text-border">|</span>
+                <button type="button" onClick={collapseAllGroups} className="hover:underline">Recolher tudo</button>
+              </div>
+
+              <div className="space-y-2 max-h-[26rem] overflow-y-auto custom-scrollbar pr-1">
+                {groups.map((group) => {
+                  const isExpanded = !!expandedGroups[group.key];
+                  const enabledCount = countEnabledInGroup(group);
                   return (
-                    <div key={entry.code} className="flex items-center justify-between gap-3 border border-border/40 rounded-xl p-3">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => toggleGrant(entry.code)}
-                          className={`w-10 h-6 rounded-full shrink-0 transition-colors relative ${grant.enabled ? 'bg-primary' : 'bg-secondary border border-border'}`}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${grant.enabled ? 'translate-x-4' : ''}`} />
-                        </button>
-                        <span className="text-sm text-foreground truncate">{entry.labelPt}</span>
-                      </div>
-                      {grant.enabled && entry.validScopes.length > 0 && (
-                        <div className="w-44 shrink-0">
-                          <CustomSelect
-                            value={grant.scope ?? entry.validScopes[0]}
-                            onChange={(val) => setGrantScope(entry.code, val)}
-                            options={entry.validScopes.map((s) => SCOPE_OPTIONS.find((o) => o.value === s)!)}
-                          />
+                    <div key={group.key} className="border border-border/40 rounded-xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.key)}
+                        aria-expanded={isExpanded}
+                        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-secondary/20 hover:bg-secondary/30 transition-colors text-left"
+                      >
+                        <span className="flex items-center gap-2 text-sm font-bold text-foreground">
+                          {isExpanded ? <ChevronDown size={16} className="text-muted shrink-0" /> : <ChevronRight size={16} className="text-muted shrink-0" />}
+                          {group.label}
+                        </span>
+                        <span className="text-xs font-bold text-muted bg-secondary/50 px-2 py-0.5 rounded-full shrink-0">
+                          {enabledCount} de {group.rows.length}
+                        </span>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="divide-y divide-border/30 px-3">
+                          {group.rows.map((row) => (
+                            <PermissionRowView
+                              key={row.key}
+                              row={row}
+                              catalogByCode={catalogByCode}
+                              grantsByCode={grantsByCode}
+                              getLevel={getLevel}
+                              levelScopeCodes={levelScopeCodes}
+                              toggleGrant={toggleGrant}
+                              setGrantScope={setGrantScope}
+                              setLevel={setLevel}
+                              setLevelScope={setLevelScope}
+                            />
+                          ))}
                         </div>
                       )}
                     </div>
