@@ -46,6 +46,12 @@ export class EmployeeRecurringPaymentsService {
     return found;
   }
 
+  // Permissões por ação e alcance (Task 4): o controller descobre o funcionário dono da recorrência
+  // antes de checar o alcance. Mesmo 404 de assertExists pra registro inexistente/de outra empresa.
+  async findEmployeeIdOf(id: string): Promise<string> {
+    return (await this.assertExists(id)).employeeId;
+  }
+
   findOne(id: string) {
     return this.assertExists(id);
   }

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthorizationModule } from '../authorization/authorization.module';
 import { CompanyModule } from '../company/company.module';
 import { EmployeesModule } from '../employees/employees.module';
 import { EmployeeRecurringPaymentsController } from './employee-recurring-payments.controller';
@@ -6,7 +7,7 @@ import { EmployeeRecurringPaymentsService } from './employee-recurring-payments.
 import { EmployeeRecurringPaymentsBillingService } from './employee-recurring-payments-billing.service';
 
 @Module({
-  imports: [EmployeesModule, CompanyModule],
+  imports: [AuthorizationModule, EmployeesModule, CompanyModule],
   controllers: [EmployeeRecurringPaymentsController],
   providers: [EmployeeRecurringPaymentsService, EmployeeRecurringPaymentsBillingService],
   exports: [EmployeeRecurringPaymentsService, EmployeeRecurringPaymentsBillingService],

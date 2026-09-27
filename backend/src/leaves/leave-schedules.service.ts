@@ -78,6 +78,15 @@ export class LeaveSchedulesService {
 
   // Rota top-level (leave-schedules/:id/cancel, sem employeeId na URL) —
   // mesmo motivo do filtro por companyId em VacationSchedulesService.cancel.
+  // Permissões por ação e alcance (Task 4): o controller descobre o funcionário dono do agendamento
+  // antes de checar o alcance. Mesma consulta (escopada por empresa) e mesmo 404 de cancel/resume.
+  async findEmployeeIdOf(id: string): Promise<string> {
+    const companyId = await this.companyContext.getCurrentCompanyId();
+    const schedule = await this.prisma.leaveSchedule.findFirst({ where: { id, companyId }, select: { employeeId: true } });
+    if (!schedule) throw new NotFoundException(`Agendamento de afastamento ${id} não encontrado`);
+    return schedule.employeeId;
+  }
+
   async cancel(id: string) {
     const companyId = await this.companyContext.getCurrentCompanyId();
     const schedule = await this.prisma.leaveSchedule.findFirst({ where: { id, companyId } });

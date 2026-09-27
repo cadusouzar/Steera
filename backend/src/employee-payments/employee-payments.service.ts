@@ -73,6 +73,12 @@ export class EmployeePaymentsService {
     return found;
   }
 
+  // Permissões por ação e alcance (Task 4): o controller descobre o funcionário dono do pagamento
+  // antes de checar o alcance. Mesmo 404 de assertExists pra registro inexistente/de outra empresa.
+  async findEmployeeIdOf(id: string): Promise<string> {
+    return (await this.assertExists(id)).employeeId;
+  }
+
   async findOne(id: string) {
     return toResponse(await this.assertExists(id));
   }

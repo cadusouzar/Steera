@@ -91,6 +91,16 @@ describe('EmployeeScopeService', () => {
       const { service } = await buildService(buildUser({}));
       await expect(service.assertEmployeeInScope('funcionarios.ver', 'emp-1')).rejects.toThrow(NotFoundException);
     });
+
+    // Task 4: rotas endereçadas pelo id de um registro dependente (pagamento, agendamento...) usam
+    // a mensagem de "não encontrado" do PRÓPRIO recurso, nunca a de funcionário.
+    it('uses the given not-found message instead of the employee one when provided', async () => {
+      const authorizationMock = { resolveScope: jest.fn().mockResolvedValue(['emp-1']) };
+      const { service } = await buildService(buildUser({ 'pagamentos.gerenciar': Scope.PROPRIO }), authorizationMock);
+      await expect(
+        service.assertEmployeeInScope('pagamentos.gerenciar', 'emp-2', 'Pagamento p-1 não encontrado'),
+      ).rejects.toThrow(new NotFoundException('Pagamento p-1 não encontrado'));
+    });
   });
 
   describe('whereEmployeeIn', () => {

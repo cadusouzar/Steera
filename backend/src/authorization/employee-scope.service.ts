@@ -49,13 +49,16 @@ export class EmployeeScopeService {
     return this.authorization.resolveScope(scope as Scope, user);
   }
 
-  async assertEmployeeInScope(permissionCode: string, employeeId: string): Promise<void> {
+  // `notFoundMessage` opcional: rotas endereçadas pelo id de um registro dependente (pagamento,
+  // agendamento de férias etc.) passam a mensagem de "não encontrado" do PRÓPRIO recurso, pra quem
+  // está fora do alcance não descobrir que aquele registro existe.
+  async assertEmployeeInScope(permissionCode: string, employeeId: string, notFoundMessage?: string): Promise<void> {
     const ids = await this.allowedEmployeeIds(permissionCode);
     if (ids === 'ALL') return;
     if (ids.includes(employeeId)) return;
     // Mesma mensagem exata de EmployeesService.findOne — fora do alcance nunca revela que o
     // funcionário existe (404, nunca 403), mesmo padrão já usado em todo o resto do backend.
-    throw new NotFoundException(`Funcionário ${employeeId} não encontrado`);
+    throw new NotFoundException(notFoundMessage ?? `Funcionário ${employeeId} não encontrado`);
   }
 
   async whereEmployeeIn(permissionCode: string, field = 'id'): Promise<Record<string, unknown>> {

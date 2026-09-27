@@ -354,4 +354,19 @@ describe('VacationSchedulesService', () => {
     prisma.vacationSchedule.findFirst.mockResolvedValue(null);
     await expect(service.resume('schedule-other-company', {})).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  // Permissões por ação e alcance (Task 4): o controller resolve o funcionário dono do registro
+  // antes de checar o alcance; registro inexistente/de outra empresa usa o 404 do próprio recurso.
+  describe('findEmployeeIdOf', () => {
+    it('devolve o employeeId do registro, filtrando por companyId', async () => {
+      prisma.vacationSchedule.findFirst.mockResolvedValue({ id: 'vac-9', employeeId: 'employee-7', companyId: 'company-1' });
+      await expect(service.findEmployeeIdOf('vac-9')).resolves.toBe('employee-7');
+      expect(prisma.vacationSchedule.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'vac-9', companyId: 'company-1' } }));
+    });
+
+    it('registro inexistente -> 404 com a mensagem do próprio recurso', async () => {
+      prisma.vacationSchedule.findFirst.mockResolvedValue(null);
+      await expect(service.findEmployeeIdOf('vac-9')).rejects.toThrow(new NotFoundException('Agendamento de férias vac-9 não encontrado'));
+    });
+  });
 });
