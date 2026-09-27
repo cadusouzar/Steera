@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,9 +22,9 @@ import { UpdatePlanDto } from './dto/update-plan.dto';
 
 // Nunca inclui passwordHash — espelha o padrão já usado em AuthService
 // (login/register/getProfile), que sempre devolve um objeto montado à mão em
-// vez do row cru do Prisma. GET /companies/me/users não tem @Roles('ADMIN')
-// (qualquer login autenticado da empresa pode listar), então isso vale tanto
-// pra não vazar hash pra admin quanto pra um login EMPLOYEE comum.
+// vez do row cru do Prisma. GET /companies/me/users exige `usuarios.gerenciar`
+// (Task 6, 27/09/2026), que pode estar num login EMPLOYEE — então isso vale tanto
+// pra não vazar hash pra admin quanto pra um login EMPLOYEE com a permissão.
 const SAFE_USER_SELECT = {
   id: true,
   companyId: true,
@@ -80,7 +80,35 @@ export class UsersService {
     return users.map((u) => this.toPublicUser(u));
   }
 
+  // Permissões por ação e alcance (Task 6, 27/09/2026): as rotas de Usuários passaram a exigir a
+  // permissão `usuarios.gerenciar` em vez do papel ADMIN, então um login EMPLOYEE com essa
+  // permissão administra logins. Sem esta regra, ele poderia se promover indiretamente: criar um
+  // login ADMIN novo (com convite pro próprio e-mail) ou atribuir o perfil protegido
+  // (Administrador Geral, com todas as permissões). Chamador ADMIN segue como antes.
+  private assertCallerCanCreateRole(role: 'ADMIN' | 'EMPLOYEE', currentUser: AuthenticatedUser): void {
+    if (role === 'ADMIN' && currentUser.role !== 'ADMIN') {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'PERMISSION_REQUIRED',
+        message: 'Só um administrador pode criar outro login de administrador.',
+      });
+    }
+  }
+
+  private assertCallerCanAssignProfile(profile: { name: string; isProtected: boolean }, currentUser: AuthenticatedUser): void {
+    if (profile.isProtected && currentUser.role !== 'ADMIN') {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'PERMISSION_REQUIRED',
+        message: `Só um administrador pode atribuir o perfil ${profile.name}.`,
+      });
+    }
+  }
+
   async create(companyId: string, dto: CreateUserDto, currentUser: AuthenticatedUser) {
+    // Antes de qualquer leitura: recusa barata e sem efeito colateral.
+    this.assertCallerCanCreateRole(dto.role, currentUser);
+
     if (dto.role === 'EMPLOYEE') {
       if (!dto.employeeId) throw new BadRequestException('employeeId é obrigatório para login do tipo EMPLOYEE');
       const employee = await this.prisma.employee.findFirst({ where: { id: dto.employeeId, companyId } });
@@ -96,6 +124,7 @@ export class UsersService {
 
     const profile = await this.prisma.profile.findFirst({ where: { id: dto.profileId, companyId } });
     if (!profile) throw new BadRequestException(`Perfil ${dto.profileId} não encontrado nesta empresa`);
+    this.assertCallerCanAssignProfile(profile, currentUser);
 
     // Convite por e-mail ("Acesso e sessões", 26/09/2026) — substitui a antiga senha temporária fixa
     // ('Mudar@123'), que qualquer um que soubesse o e-mail de um login recém-criado podia usar. O
@@ -279,6 +308,7 @@ export class UsersService {
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     const newProfile = await this.prisma.profile.findFirst({ where: { id: profileId, companyId } });
     if (!newProfile) throw new BadRequestException(`Perfil ${profileId} não encontrado nesta empresa`);
+    this.assertCallerCanAssignProfile(newProfile, currentUser);
 
     await runInsideExplicitTenantTransaction(() =>
       this.prisma.$transaction(async (tx) => {

@@ -1,16 +1,19 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { ReassignAndDeleteDto } from './dto/reassign-and-delete.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ProfilesService } from './profiles.service';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+// Permissões por ação e alcance (Task 6, 27/09/2026): Perfis seguem a permissão
+// `usuarios.gerenciar` (a mesma área "Usuários e perfis"), não mais o papel ADMIN — declarada no
+// nível da classe, vale pra toda rota, leituras inclusive.
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission('usuarios.gerenciar')
 @Controller('profiles')
 export class ProfilesController {
   constructor(private readonly profiles: ProfilesService) {}

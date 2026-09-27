@@ -60,4 +60,41 @@ describe('PermissionsGuard', () => {
       });
     }
   });
+
+  // Task 6: rotas administrativas (Usuários/Perfis/Campos) seguem a permissão do perfil, nunca o
+  // papel — o guard não olha `role` em nenhum momento.
+  it('allows a role EMPLOYEE login that holds usuarios.gerenciar', () => {
+    const { context, reflector } = makeContext({ role: 'EMPLOYEE', permissions: { 'usuarios.gerenciar': null } }, ['usuarios.gerenciar']);
+    const guard = new PermissionsGuard(reflector);
+    expect(guard.canActivate(context)).toBe(true);
+  });
+
+  it('refuses a role ADMIN login WITHOUT usuarios.gerenciar, with the Usuários e perfis message', () => {
+    const { context, reflector } = makeContext({ role: 'ADMIN', permissions: { 'clientes.ver': 'EMPRESA' } }, ['usuarios.gerenciar']);
+    const guard = new PermissionsGuard(reflector);
+    try {
+      guard.canActivate(context);
+      fail('expected canActivate to throw');
+    } catch (err) {
+      expect((err as ForbiddenException).getResponse()).toEqual({
+        statusCode: 403,
+        code: 'PERMISSION_REQUIRED',
+        message: 'Seu perfil não permite alterar Usuários e perfis. Fale com quem administra os acessos da empresa.',
+      });
+    }
+  });
+
+  it('refuses a role ADMIN login WITHOUT campos-personalizados.gerenciar, with the Campos personalizados message', () => {
+    const { context, reflector } = makeContext({ role: 'ADMIN', permissions: {} }, ['campos-personalizados.gerenciar']);
+    const guard = new PermissionsGuard(reflector);
+    try {
+      guard.canActivate(context);
+      fail('expected canActivate to throw');
+    } catch (err) {
+      expect((err as ForbiddenException).getResponse()).toMatchObject({
+        code: 'PERMISSION_REQUIRED',
+        message: 'Seu perfil não permite alterar Campos personalizados. Fale com quem administra os acessos da empresa.',
+      });
+    }
+  });
 });

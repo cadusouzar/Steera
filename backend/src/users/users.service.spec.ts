@@ -686,7 +686,9 @@ describe('UsersService', () => {
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
 
-    it('BARRA (404) um chamador EMPLOYEE fazendo o mesmo', async () => {
+    // Task 6 (permissões por ação e alcance): um chamador EMPLOYEE agora é barrado ANTES, pela regra
+    // de escalação de papel (403 PERMISSION_REQUIRED) — nunca chega no gate de acesso total (404).
+    it('BARRA (403) um chamador EMPLOYEE fazendo o mesmo, pela regra de escalação de papel', async () => {
       prisma.profilePermission.findMany.mockResolvedValue(FULL_PONTO_GRANTS);
       const service2 = makeService();
 
@@ -696,7 +698,7 @@ describe('UsersService', () => {
           { email: 'novo-admin@a.com', role: 'ADMIN', profileId: 'profile-1' } as any,
           makeCaller({ role: 'EMPLOYEE' }),
         ),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(ForbiddenException);
 
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
@@ -754,6 +756,77 @@ describe('UsersService', () => {
 
       expect(prisma.user.create).toHaveBeenCalled();
       expect(user.hasFullPontoAccess).toBe(false); // valor EFETIVO, sempre false pra EMPLOYEE
+    });
+  });
+
+  // Task 6 (permissões por ação e alcance): Usuários passou a exigir `usuarios.gerenciar` em vez do
+  // papel ADMIN — um login EMPLOYEE com essa permissão administra logins, mas nunca cria um login
+  // ADMIN nem atribui o perfil protegido (Administrador Geral). Chamador ADMIN segue como antes.
+  describe('escalação de papel por quem não é ADMIN', () => {
+    const ESCALATION_BODY = {
+      statusCode: 403,
+      code: 'PERMISSION_REQUIRED',
+      message: 'Só um administrador pode criar outro login de administrador.',
+    };
+
+    it('create: chamador EMPLOYEE com usuarios.gerenciar criando login ADMIN → 403 PERMISSION_REQUIRED, nada gravado', async () => {
+      const caller = makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false, permissions: { 'usuarios.gerenciar': null } });
+      const err = await service
+        .create('c1', { email: 'novo-admin@a.com', role: 'ADMIN', profileId: 'profile-1' } as any, caller)
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toEqual(ESCALATION_BODY);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('create: chamador ADMIN criando login ADMIN continua permitido', async () => {
+      prisma.user.create.mockResolvedValue({ id: 'u2', email: 'admin2@a.com', role: 'ADMIN', hasFullPontoAccess: false });
+      const result = await service.create('c1', { email: 'admin2@a.com', role: 'ADMIN', profileId: 'profile-1' } as any, makeCaller());
+      expect(result.user.id).toBe('u2');
+      expect(prisma.user.create).toHaveBeenCalled();
+    });
+
+    it('create: chamador EMPLOYEE com usuarios.gerenciar criando login EMPLOYEE continua permitido', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ id: 'c1', planTier: 'BASICO', name: 'Empresa' });
+      prisma.user.count.mockResolvedValue(0);
+      prisma.user.create.mockResolvedValue({ id: 'u3', role: 'EMPLOYEE', hasFullPontoAccess: true });
+      const caller = makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false, permissions: { 'usuarios.gerenciar': null } });
+      await service.create('c1', { email: 'func@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-1' } as any, caller);
+      expect(prisma.user.create).toHaveBeenCalled();
+    });
+
+    it('create: chamador EMPLOYEE atribuindo o perfil protegido (Administrador Geral) → 403 PERMISSION_REQUIRED', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'e1', companyId: 'c1' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ id: 'c1', planTier: 'BASICO' });
+      prisma.user.count.mockResolvedValue(0);
+      prisma.profile.findFirst.mockResolvedValue({ id: 'profile-admin', companyId: 'c1', name: 'Administrador Geral', isProtected: true });
+      const caller = makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false, permissions: { 'usuarios.gerenciar': null } });
+      const err = await service
+        .create('c1', { email: 'func@a.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'profile-admin' } as any, caller)
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toMatchObject({ statusCode: 403, code: 'PERMISSION_REQUIRED' });
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('create: chamador ADMIN atribuindo o perfil protegido continua permitido', async () => {
+      prisma.profile.findFirst.mockResolvedValue({ id: 'profile-admin', companyId: 'c1', name: 'Administrador Geral', isProtected: true });
+      prisma.user.create.mockResolvedValue({ id: 'u4', role: 'ADMIN', hasFullPontoAccess: false });
+      await service.create('c1', { email: 'admin3@a.com', role: 'ADMIN', profileId: 'profile-admin' } as any, makeCaller());
+      expect(prisma.user.create).toHaveBeenCalled();
+    });
+
+    it('assignProfile: chamador EMPLOYEE atribuindo o perfil protegido → 403 PERMISSION_REQUIRED, sem transação', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', profileId: 'p-old', role: 'EMPLOYEE' });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'profile-admin', companyId: 'c1', name: 'Administrador Geral', isProtected: true });
+      const caller = makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false, permissions: { 'usuarios.gerenciar': null } });
+      const err = await service.assignProfile('c1', 'u1', 'profile-admin', caller).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toMatchObject({ statusCode: 403, code: 'PERMISSION_REQUIRED' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 

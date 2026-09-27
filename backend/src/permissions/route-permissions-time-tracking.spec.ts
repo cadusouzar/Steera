@@ -2,6 +2,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { REQUIRED_PERMISSIONS_KEY } from '../auth/decorators/require-permission.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { EmployeesController } from '../employees/employees.controller';
 import { HolidaysController } from '../holidays/holidays.controller';
 import { TimeAdjustmentsController } from '../time-adjustments/time-adjustments.controller';
@@ -102,6 +103,16 @@ describe('Mapa rota -> permissão: Controle de Ponto e Feriados', () => {
 
     it('HolidaysController#findAll (GET) has no @RequirePermission — module gate only', () => {
       expect(requiredPermissions(HolidaysController, 'findAll')).toBeUndefined();
+    });
+
+    // Task 6: o @Roles('ADMIN') de classe saiu — quem tem o módulo lê; POST/DELETE dependem só da
+    // permissão ponto.feriados.gerenciar, não mais do papel.
+    it('HolidaysController has no @Roles and no RolesGuard left', () => {
+      const proto = (HolidaysController as any).prototype;
+      for (const handler of ['create', 'findAll', 'remove']) {
+        expect(reflector.getAllAndOverride<string[]>('roles', [proto[handler], HolidaysController])).toBeUndefined();
+      }
+      expect(Reflect.getMetadata(GUARDS_METADATA, HolidaysController)).not.toContain(RolesGuard);
     });
   });
 
