@@ -1035,6 +1035,41 @@ describe('AuthService', () => {
   });
 
   describe('linkCurrentUserToEmployee', () => {
+    // Achado 1 da revisão final (27/09/2026): sem esta trava, um login de alcance restrito escolhia a
+    // própria raiz de alcance (vinculando-se a um gerente, por exemplo).
+    it('recusa com 403 PERMISSION_REQUIRED, antes de qualquer leitura, quando o login tem alcance restrito sem usuarios.gerenciar', async () => {
+      authorization.getEffectivePermissions.mockResolvedValue({ 'funcionarios.ver': 'EQUIPE', 'ponto.registrar': null });
+      const err = await service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2').catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toEqual({
+        statusCode: 403,
+        code: 'PERMISSION_REQUIRED',
+        message:
+          'Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário. Peça a quem administra os acessos para vincular.',
+      });
+      expect(prisma.employee.findFirst).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('permite alcance restrito quando o login também tem usuarios.gerenciar', async () => {
+      authorization.getEffectivePermissions.mockResolvedValue({ 'funcionarios.ver': 'EQUIPE', 'usuarios.gerenciar': null });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.findUniqueOrThrow
+        .mockResolvedValueOnce({ id: 'user-1', employeeId: null })
+        .mockResolvedValueOnce({ id: 'user-1', email: 'a@b.com', role: 'ADMIN', modules: [], mustChangePassword: false, employeeId: 'employee-2' });
+      const profile = await service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2');
+      expect(profile.employeeId).toBe('employee-2');
+      expect(profile.canSelfLinkEmployee).toBe(true);
+    });
+
+    it('o usuário público expõe canSelfLinkEmployee calculado das permissões', async () => {
+      authorization.getEffectivePermissions.mockResolvedValue({ 'funcionarios.ver': 'PROPRIO' });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'user-1', email: 'a@b.com', role: 'EMPLOYEE', modules: [], mustChangePassword: false, employeeId: null });
+      const profile = await service.getProfile('user-1');
+      expect(profile.canSelfLinkEmployee).toBe(false);
+    });
+
     it('rejects when the target employee does not exist in the caller company', async () => {
       prisma.employee.findFirst.mockResolvedValue(null);
       await expect(

@@ -47,7 +47,7 @@ describe('UsersService', () => {
     userTokens = { issue: jest.fn().mockResolvedValue('raw-reset-token'), consume: jest.fn() };
     email = { send: jest.fn().mockResolvedValue(true) };
     prisma = {
-      employee: { findFirst: jest.fn() },
+      employee: { findFirst: jest.fn(), findMany: jest.fn() },
       user: {
         findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(),
         create: jest.fn(), update: jest.fn(), findUniqueOrThrow: jest.fn(), delete: jest.fn(),
@@ -97,6 +97,89 @@ describe('UsersService', () => {
       ],
     }).compile();
     service = module.get(UsersService);
+  });
+
+  // Achados 1 e 4 da revisão final (27/09/2026): quem gerencia usuários vincula o login de outra
+  // pessoa a uma ficha de funcionário e escolhe entre funcionários ativos ainda sem login.
+  describe('linkEmployee (PATCH /companies/me/users/:id/employee)', () => {
+    it('404 quando o login alvo é de outra empresa', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.linkEmployee('company-1', 'user-other', 'employee-1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({ id: 'user-other', companyId: 'company-1' });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('400 quando o login alvo já tem ficha vinculada', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: 'e-old' });
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Este login já está vinculado a um funcionário');
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('400 quando o funcionário não existe nesta empresa', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
+      prisma.employee.findFirst.mockResolvedValue(null);
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-x')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('400 quando o funcionário está inativo', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'INACTIVE' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Funcionário inativo não pode ser vinculado a um login');
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('400 quando o funcionário já tem outro login', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'ACTIVE' });
+      prisma.user.findUnique.mockResolvedValue({ id: 'u3' });
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Este funcionário já possui um login vinculado');
+    });
+
+    it('409 amigável quando perde a corrida (P2002)', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'ACTIVE' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: '5.22.0', meta: { target: ['employeeId'] } }),
+      );
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('vincula, devolve o login no formato da listagem e não encerra sessões', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: null });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'ACTIVE' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.update.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: 'employee-1' });
+      const result = await service.linkEmployee('company-1', 'u2', 'employee-1');
+      const call = prisma.user.update.mock.calls[0][0];
+      expect(call.where).toEqual({ id: 'u2' });
+      expect(call.data).toEqual({ employeeId: 'employee-1' });
+      expect(call.select.passwordHash).toBeUndefined();
+      expect(call.select.employeeId).toBe(true);
+      expect(result).toEqual({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: false, employeeId: 'employee-1' });
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listLinkableEmployees (GET /companies/me/users/linkable-employees)', () => {
+    it('lista funcionários ativos sem login, por nome, lendo User (central) e Employee (tenant) em consultas separadas', async () => {
+      prisma.user.findMany.mockResolvedValue([{ employeeId: 'e1' }, { employeeId: 'e2' }]);
+      prisma.employee.findMany.mockResolvedValue([{ id: 'e3', fullName: 'Ana' }]);
+      const result = await service.listLinkableEmployees('company-1');
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: { companyId: 'company-1', employeeId: { not: null } },
+        select: { employeeId: true },
+      });
+      expect(prisma.employee.findMany).toHaveBeenCalledWith({
+        where: { companyId: 'company-1', status: 'ACTIVE', id: { notIn: ['e1', 'e2'] } },
+        select: { id: true, fullName: true },
+        orderBy: { fullName: 'asc' },
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual([{ id: 'e3', fullName: 'Ana' }]);
+    });
   });
 
   it('findAllForCompany never selects passwordHash', async () => {

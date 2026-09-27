@@ -255,6 +255,9 @@ export class AuthController {
   // vinculado. @UseGuards(JwtAuthGuard) explícito aqui é redundante com o
   // APP_GUARD global (ver app.module.ts) — mesmo padrão redundante-de-propósito
   // já usado em `me`/`me/password` acima.
+  // Achado 1 da revisão final (27/09/2026): só vale pra quem gerencia usuários ou tem todo alcance
+  // EMPRESA (403 PERMISSION_REQUIRED caso contrário, ver employee-link.util.ts); os demais pedem a
+  // quem administra os acessos (PATCH /companies/me/users/:id/employee).
   @UseGuards(JwtAuthGuard)
   @Patch('me/employee-link')
   linkEmployee(@CurrentUser() user: AuthenticatedUser, @Body() dto: LinkEmployeeDto) {

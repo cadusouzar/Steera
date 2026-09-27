@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
+import { assertEmployeeLinkable, saveEmployeeLink } from '../auth/employee-link.util';
 import { deriveHasFullPontoAccessFromGrants, deriveModulesFromGrants } from '../permissions/profile-signature.util';
 import { reassignUserProfile } from '../permissions/profile-assignment.util';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
@@ -83,6 +84,37 @@ export class UsersService {
       select: SAFE_USER_SELECT,
     });
     return users.map((u) => this.toPublicUser(u));
+  }
+
+  // GET /companies/me/users/linkable-employees (achado 4 da revisão final, 27/09/2026): funcionários
+  // ATIVOS ainda sem login, pra quem gerencia usuários escolher sem depender do próprio alcance em
+  // `funcionarios.ver`. User é CENTRAL e Employee é de TENANT — duas consultas separadas, nunca na
+  // mesma transação de tenant.
+  async listLinkableEmployees(companyId: string): Promise<{ id: string; fullName: string }[]> {
+    const linked = await this.prisma.user.findMany({
+      where: { companyId, employeeId: { not: null } },
+      select: { employeeId: true },
+    });
+    const linkedIds = linked.map((u) => u.employeeId).filter((id): id is string => !!id);
+    return this.prisma.employee.findMany({
+      where: { companyId, status: 'ACTIVE', id: { notIn: linkedIds } },
+      select: { id: true, fullName: true },
+      orderBy: { fullName: 'asc' },
+    });
+  }
+
+  // PATCH /companies/me/users/:id/employee (achado 1 da revisão final, 27/09/2026): quem gerencia
+  // usuários vincula o login de OUTRA pessoa a uma ficha de funcionário — o caminho pra logins de
+  // alcance restrito, que não podem mais se auto-vincular. Não troca um vínculo existente e não
+  // encerra sessões (o alcance novo vale no próximo token).
+  async linkEmployee(companyId: string, userId: string, employeeId: string) {
+    const target = await this.prisma.user.findFirst({ where: { id: userId, companyId }, select: SAFE_USER_SELECT });
+    if (!target) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    if (target.employeeId) throw new BadRequestException('Este login já está vinculado a um funcionário');
+
+    await assertEmployeeLinkable(this.prisma, companyId, employeeId, { requireActive: true });
+    const updated = await saveEmployeeLink(this.prisma, userId, employeeId, SAFE_USER_SELECT);
+    return this.toPublicUser(updated);
   }
 
   async create(companyId: string, dto: CreateUserDto, currentUser: AuthenticatedUser) {

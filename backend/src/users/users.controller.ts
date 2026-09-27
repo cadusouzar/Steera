@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { AssignProfileDto } from './dto/assign-profile.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { LinkUserEmployeeDto } from './dto/link-user-employee.dto';
 import { UsersService } from './users.service';
 
 // Permissões por ação e alcance (Task 6, 27/09/2026): toda rota de logins exige a permissão
@@ -22,6 +23,14 @@ export class UsersController {
   @Get()
   findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.users.findAllForCompany(user.companyId);
+  }
+
+  // Declarada ANTES de qualquer rota `:id`, senão o Nest captura "linkable-employees" como id.
+  // Funcionários ativos sem login (`{ id, fullName }[]`), pro seletor de vínculo.
+  @RequirePermission('usuarios.gerenciar')
+  @Get('linkable-employees')
+  linkableEmployees(@CurrentUser() user: AuthenticatedUser) {
+    return this.users.listLinkableEmployees(user.companyId);
   }
 
   @RequirePermission('usuarios.gerenciar')
@@ -78,5 +87,13 @@ export class UsersController {
   @HttpCode(204)
   assignProfile(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: AssignProfileDto) {
     return this.users.assignProfile(user.companyId, id, dto.profileId, user);
+  }
+
+  // Vincula o login alvo a uma ficha de funcionário (ativa, da empresa, sem outro login). Devolve o
+  // login no mesmo formato da listagem.
+  @RequirePermission('usuarios.gerenciar')
+  @Patch(':id/employee')
+  linkEmployee(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: LinkUserEmployeeDto) {
+    return this.users.linkEmployee(user.companyId, id, dto.employeeId);
   }
 }

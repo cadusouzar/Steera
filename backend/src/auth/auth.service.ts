@@ -25,6 +25,7 @@ import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { getDummyPasswordHash, hashPassword, verifyPassword } from './password.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
+import { assertEmployeeLinkable, canSelfLinkEmployee, saveEmployeeLink, SELF_LINK_DENIED_MESSAGE } from './employee-link.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
 import { INVALID_OR_EXPIRED_MESSAGE, SELF_SERVICE_EMAIL_COOLDOWN_MS, UserTokensService } from './user-tokens/user-tokens.service';
@@ -182,6 +183,9 @@ export class AuthService {
       employeeId: user.employeeId,
       hasFullPontoAccess: effectiveHasFullPontoAccess(user),
       permissions,
+      // Se este login pode se auto-vincular a uma ficha de funcionário (PATCH /auth/me/employee-link).
+      // Mesma regra do backend (employee-link.util.ts), pro frontend não duplicar a lógica.
+      canSelfLinkEmployee: canSelfLinkEmployee(permissions),
       // Confirmação de e-mail: o frontend decide por estes dois se mostra o aviso "confirme seu
       // e-mail" (bloqueante só quando emailVerificationRequired && !emailVerified).
       emailVerified: !!user.emailVerifiedAt,
@@ -942,14 +946,17 @@ export class AuthService {
   // companyId) sempre vem de `req.user` via @CurrentUser(), nunca do corpo
   // da requisição — ver AuthController.linkEmployee.
   async linkCurrentUserToEmployee(userId: string, companyId: string, employeeId: string) {
-    const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, companyId } });
-    if (!employee) throw new BadRequestException(`Funcionário ${employeeId} não encontrado nesta empresa`);
+    // Achado 1 da revisão final (27/09/2026): antes de qualquer leitura/escrita do vínculo, confere
+    // que o auto-vínculo não amplia o alcance do login (ver employee-link.util.ts). Permissões lidas
+    // do banco (não do JWT), pra um perfil recém-restringido não passar com um token ainda válido.
+    const permissions = await this.getEffectivePermissionsAsSystem(userId);
+    if (!canSelfLinkEmployee(permissions)) {
+      throw new ForbiddenException({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: SELF_LINK_DENIED_MESSAGE });
+    }
 
-    // Mesma checagem de unicidade que UsersService.create() já faz pra login
-    // EMPLOYEE (User.employeeId é @unique no schema) — sem isso, dois logins
-    // acabariam "donos" do mesmo funcionário.
-    const existingLogin = await this.prisma.user.findUnique({ where: { employeeId } });
-    if (existingLogin) throw new BadRequestException('Este funcionário já possui um login vinculado');
+    // Funcionário da mesma empresa e sem outro login (validação compartilhada com
+    // UsersService.linkEmployee).
+    await assertEmployeeLinkable(this.prisma, companyId, employeeId);
 
     const currentUser = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     // Não permite trocar um vínculo já existente por esta rota — trocar de
@@ -959,16 +966,7 @@ export class AuthService {
       throw new BadRequestException('Este login já está vinculado a um funcionário — não é possível trocar por esta rota');
     }
 
-    try {
-      await this.prisma.user.update({ where: { id: userId }, data: { employeeId } });
-    } catch (err) {
-      // P2002 = corrida real perdida contra o pre-check `existingLogin` acima (dois logins
-      // tentando se vincular ao mesmo funcionário ao mesmo tempo) — sem isso, vazava como 500 cru.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new ConflictException('Este funcionário já está vinculado a outro login');
-      }
-      throw err;
-    }
+    await saveEmployeeLink(this.prisma, userId, employeeId);
     return this.getProfile(userId);
   }
 }

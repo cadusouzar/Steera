@@ -42,9 +42,25 @@ function expectHandler(controller: Ctor, handlerName: string, codes: string[]) {
 
 describe('Mapa rota -> permissão: Usuários, Perfis e Campos Personalizados', () => {
   describe('UsersController (usuarios.gerenciar em todas as rotas)', () => {
-    for (const handler of ['findAll', 'create', 'block', 'unblock', 'remove', 'resetPassword', 'resendInvite', 'assignProfile']) {
+    for (const handler of ['findAll', 'create', 'block', 'unblock', 'remove', 'resetPassword', 'resendInvite', 'assignProfile', 'linkEmployee', 'linkableEmployees']) {
       expectHandler(UsersController, handler, ['usuarios.gerenciar']);
     }
+
+    // A rota estática precisa ser declarada antes de qualquer rota `:id`, senão o Nest a captura como id.
+    it('UsersController#linkableEmployees is GET linkable-employees, declared before every :id route', () => {
+      const proto = (UsersController as any).prototype;
+      const names = Object.getOwnPropertyNames(proto).filter((n) => n !== 'constructor');
+      expect(Reflect.getMetadata('path', proto.linkableEmployees)).toBe('linkable-employees');
+      expect(Reflect.getMetadata('method', proto.linkableEmployees)).toBe(0); // RequestMethod.GET
+      const firstParamRoute = names.findIndex((n) => String(Reflect.getMetadata('path', proto[n])).startsWith(':id'));
+      expect(names.indexOf('linkableEmployees')).toBeLessThan(firstParamRoute);
+    });
+
+    it('UsersController#linkEmployee is PATCH :id/employee', () => {
+      const proto = (UsersController as any).prototype;
+      expect(Reflect.getMetadata('path', proto.linkEmployee)).toBe(':id/employee');
+      expect(Reflect.getMetadata('method', proto.linkEmployee)).toBe(4); // RequestMethod.PATCH
+    });
 
     it('UsersController no longer uses RolesGuard', () => {
       expect(Reflect.getMetadata(GUARDS_METADATA, UsersController)).not.toContain(RolesGuard);
