@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Check, CreditCard, Loader2 } from 'lucide-react';
+import { Check, CreditCard, Info, Loader2 } from 'lucide-react';
 import type { CurrentUser } from '../../lib/auth';
 import { getMyPlan, type MyPlan } from '../../lib/api';
 import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../../lib/planCatalog';
+import BillingContacts from './BillingContacts';
 
 interface AccountSubscriptionDetailsProps {
   user: CurrentUser | null;
@@ -38,7 +39,9 @@ const UsageRow: React.FC<UsageRowProps> = ({ label, used, limit }) => (
 // Plano atual + uso + comparação dos 4 planos — compartilhado entre UserProfileDrawer (ERP) e
 // /conta/assinatura (site). Dado real de GET /plans/me pra todo login (ADMIN ou EMPLOYEE, sem
 // distinção — quem administra logins é uma questão de papel, não de leitura do plano). Sem
-// cobrança/pagamento nesta versão, de propósito: "Fazer upgrade" existe só como vitrine.
+// cobrança/pagamento nesta versão, de propósito: "Fazer upgrade" existe só como vitrine — e só
+// aparece pra quem tem `assinatura.gerenciar` (`canManageSubscription`, 27/09/2026); os demais veem
+// com quem falar pra mudar o plano.
 const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({ children }) => {
   const [plan, setPlan] = useState<MyPlan | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -78,6 +81,7 @@ const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({
   }
 
   const currentIndex = PLAN_ORDER.indexOf(plan.current.tier);
+  const canManage = plan.canManageSubscription;
 
   return (
     <div className="space-y-6">
@@ -139,7 +143,7 @@ const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({
                     </div>
                     <p className="text-sm text-muted">{item.priceLabel}</p>
                   </div>
-                  {canUpgrade && (
+                  {canManage && canUpgrade && (
                     <button
                       type="button"
                       disabled
@@ -179,8 +183,17 @@ const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({
             );
           })}
         </div>
-        {currentIndex < PLAN_ORDER.length - 1 && (
+        {canManage && currentIndex < PLAN_ORDER.length - 1 && (
           <p className="text-xs text-muted mt-3">Upgrade em breve — pagamento online ainda não disponível.</p>
+        )}
+        {!canManage && (
+          <div className="mt-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
+            <p className="text-sm text-muted flex items-start gap-2 mb-3">
+              <Info size={16} className="text-primary mt-0.5 shrink-0" aria-hidden="true" />
+              <span>Para mudar o plano, fale com quem administra a assinatura da empresa:</span>
+            </p>
+            <BillingContacts contacts={plan.billingContacts} />
+          </div>
         )}
       </div>
     </div>

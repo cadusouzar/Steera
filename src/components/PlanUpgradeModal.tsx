@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Loader2, Lock, Plus, Sparkles, X } from 'lucide-react';
+import { Check, Info, Loader2, Lock, Plus, Sparkles, X } from 'lucide-react';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { getMyPlan, type MyPlan, type PlanCatalogItem, type PlanLimits } from '../lib/api';
 import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../lib/planCatalog';
+import BillingContacts from './account/BillingContacts';
 
 // Oferta de upgrade (26/09/2026): aberta por cima da tela atual quando a pessoa clica num item de
 // menu travado pelo plano (LockedNavItem) ou em "Ver planos" na tela de rota travada
@@ -12,7 +13,9 @@ import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../lib/planCatalog';
 // planos que liberam o módulo (acima do atual), com o plano mínimo em destaque. Dados de
 // GET /plans/me (mesma fonte da aba Assinatura), então preço/limite nunca divergem do backend. Sem
 // pagamento nesta versão: o botão de compra fica desabilitado com "Em breve". O plano atual aparece
-// primeiro, como referência (sem botão).
+// primeiro, como referência (sem botão). Quem gerencia a assinatura (27/09/2026): sem a permissão
+// `assinatura.gerenciar` (`canManageSubscription` false), os cards ficam só informativos (sem
+// "Quero o plano X") e uma caixa no fim diz com quem falar pra liberar o módulo.
 export interface PlanUpgradeTarget {
   featureLabel: string; // o que a pessoa tentou abrir, ex. "Ponto"
   requiredTier: PlanCatalogItem['tier']; // plano mínimo que libera
@@ -191,23 +194,38 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
                         ))}
                       </ul>
 
-                      <button
-                        type="button"
-                        disabled
-                        className={`w-full py-2.5 rounded-xl font-medium text-sm cursor-not-allowed ${
-                          recommended
-                            ? 'bg-primary text-white opacity-60'
-                            : 'bg-background border border-border text-muted'
-                        }`}
-                      >
-                        Quero o plano {item.label}
-                      </button>
-                      <p className="text-[11px] text-muted mt-1.5 text-center">
-                        Em breve — pagamento online ainda não disponível.
-                      </p>
+                      {plan.canManageSubscription && (
+                        <>
+                          <button
+                            type="button"
+                            disabled
+                            className={`w-full py-2.5 rounded-xl font-medium text-sm cursor-not-allowed ${
+                              recommended
+                                ? 'bg-primary text-white opacity-60'
+                                : 'bg-background border border-border text-muted'
+                            }`}
+                          >
+                            Quero o plano {item.label}
+                          </button>
+                          <p className="text-[11px] text-muted mt-1.5 text-center">
+                            Em breve — pagamento online ainda não disponível.
+                          </p>
+                        </>
+                      )}
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {plan && !plan.canManageSubscription && (
+              <div className="mt-6 rounded-2xl border border-border bg-secondary/20 p-5">
+                <p className="text-sm text-foreground flex items-start gap-2 mb-3">
+                  <Info size={16} className="text-primary mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    Para liberar {target.featureLabel}, fale com quem administra a assinatura da sua empresa:
+                  </span>
+                </p>
+                <BillingContacts contacts={plan.billingContacts} />
               </div>
             )}
           </div>

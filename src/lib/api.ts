@@ -1797,6 +1797,16 @@ export interface MyPlan {
   // Catálogo inteiro (4 planos), sempre na mesma ordem crescente — a aba Assinatura usa isso pra
   // desenhar a comparação/upgrade de planos.
   catalog: PlanCatalogItem[];
+  // Quem gerencia a assinatura (27/09/2026): se o login atual tem a permissão
+  // `assinatura.gerenciar` (lido do banco, não do JWT). Quando false, a UI esconde as ações de
+  // compra e mostra `billingContacts` — logins ATIVOS da empresa com a permissão (no máximo 3).
+  canManageSubscription: boolean;
+  billingContacts: BillingContact[];
+}
+
+export interface BillingContact {
+  name: string | null;
+  email: string;
 }
 
 export async function getMyPlan(): Promise<MyPlan> {
