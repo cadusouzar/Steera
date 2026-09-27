@@ -6,7 +6,9 @@ import { ModulesGuard } from '../auth/guards/modules.guard';
 import { ReportsService } from './reports.service';
 
 @UseGuards(ModulesGuard, PermissionsGuard)
-@RequireModule('CLIENTES')
+// Achado 5 da revisão final (27/09/2026): lançamentos derivam o módulo FINANCAS no perfil — aceita
+// CLIENTES ou FINANCAS (OR no ModulesGuard/PlanGuard); a permissão de cada rota continua exigida.
+@RequireModule('CLIENTES', 'FINANCAS')
 @RequirePermission('financas.lancamentos.ver')
 @Controller('reports')
 export class ReportsController {

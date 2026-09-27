@@ -1,5 +1,6 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
+import { REQUIRED_MODULES_KEY } from '../auth/decorators/require-module.decorator';
 import { REQUIRED_PERMISSIONS_KEY } from '../auth/decorators/require-permission.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ClientsController } from '../clients/clients.controller';
@@ -68,6 +69,16 @@ describe('Mapa rota -> permissão: Clientes, Lançamentos, Relatórios e Cargos'
 
   describe('ReportsController', () => {
     expectHandler(ReportsController, 'financialSummary', ['financas.lancamentos.ver']);
+  });
+
+  // Achado 5 da revisão final (27/09/2026): lançamentos derivam o módulo FINANCAS no perfil, então as
+  // rotas de finanças aceitam CLIENTES ou FINANCAS (semântica OR do ModulesGuard); a permissão continua exigida.
+  describe('módulo das rotas de finanças', () => {
+    for (const controller of [ReceivablesController, SubscriptionsController, ReportsController]) {
+      it(`${controller.name} accepts module CLIENTES or FINANCAS`, () => {
+        expect(reflector.get(REQUIRED_MODULES_KEY, controller)).toEqual(['CLIENTES', 'FINANCAS']);
+      });
+    }
   });
 
   describe('RolesController', () => {

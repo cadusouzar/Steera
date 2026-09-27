@@ -9,7 +9,9 @@ import { UpdateReceivableDto } from './dto/update-receivable.dto';
 import { ReceivablesService } from './receivables.service';
 
 @UseGuards(ModulesGuard, PermissionsGuard)
-@RequireModule('CLIENTES')
+// Achado 5 da revisão final (27/09/2026): lançamentos derivam o módulo FINANCAS no perfil — aceita
+// CLIENTES ou FINANCAS (OR no ModulesGuard/PlanGuard); a permissão de cada rota continua exigida.
+@RequireModule('CLIENTES', 'FINANCAS')
 @Controller()
 export class ReceivablesController {
   constructor(private readonly receivablesService: ReceivablesService) {}
