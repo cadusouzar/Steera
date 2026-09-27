@@ -62,17 +62,17 @@ function sortedScopes(scopes: Scope[]): Scope[] {
 // ---------------------------------------------------------------------------------------------
 
 export const SCOPE_ANSWER_LABEL: Record<Scope, string> = {
-  PROPRIO: 'Só o próprio cadastro',
-  EQUIPE: 'Da equipe que ela lidera',
+  PROPRIO: 'Só dela mesma',
+  EQUIPE: 'Da equipe que ela coordena',
   DEPARTAMENTO: 'Do departamento dela',
-  EMPRESA: 'De toda a empresa',
+  EMPRESA: 'De todos da empresa',
 };
 
-const SCOPE_SUMMARY: Record<Scope, string> = {
-  PROPRIO: 'só o próprio cadastro',
-  EQUIPE: 'da equipe que ela lidera',
+export const SCOPE_SUMMARY: Record<Scope, string> = {
+  PROPRIO: 'só dela mesma',
+  EQUIPE: 'da equipe que ela coordena',
   DEPARTAMENTO: 'do departamento dela',
-  EMPRESA: 'de toda a empresa',
+  EMPRESA: 'de todos da empresa',
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -145,9 +145,9 @@ export function writeLevel(map: GrantMap, catalog: CatalogIndex, pair: LevelPair
 export const FUNCIONARIOS_PAIR: LevelPair = { verCode: 'funcionarios.ver', manageCode: 'funcionarios.gerenciar' };
 
 export const FUNCIONARIOS_EXTRAS: { code: string; label: string; summary: string }[] = [
-  { code: 'ferias.gerenciar', label: 'Agendar e cancelar férias e afastamentos', summary: 'Agenda férias e afastamentos' },
-  { code: 'advertencias.gerenciar', label: 'Registrar advertências', summary: 'Registra advertências' },
-  { code: 'pagamentos.gerenciar', label: 'Marcar pagamentos de funcionários', summary: 'Marca pagamentos de funcionários' },
+  { code: 'ferias.gerenciar', label: 'Marcar e cancelar férias e afastamentos', summary: 'Pode marcar e cancelar férias e afastamentos' },
+  { code: 'advertencias.gerenciar', label: 'Registrar advertências', summary: 'Pode registrar advertências' },
+  { code: 'pagamentos.gerenciar', label: 'Marcar pagamentos como feitos', summary: 'Pode marcar pagamentos como feitos' },
 ];
 
 export interface FuncionariosView {
@@ -221,18 +221,18 @@ export interface CheckboxItem {
 }
 
 export const INICIO_ITEMS: CheckboxItem[] = [
-  { code: 'dashboard.ver', label: 'Ver a página inicial com os resumos', summary: 'Vê a página inicial com os resumos' },
+  { code: 'dashboard.ver', label: 'Ver a página inicial com os resumos', summary: 'Pode ver a página inicial com os resumos' },
 ];
 
 export const COMERCIAL_ITEMS: CheckboxItem[] = [
-  { code: 'comercial.ver', label: 'Ver a área Comercial', summary: 'Vê a área Comercial' },
-  { code: 'operacoes.ver', label: 'Ver a área de Operações', summary: 'Vê a área de Operações' },
+  { code: 'comercial.ver', label: 'Ver a área Comercial', summary: 'Pode ver a área Comercial' },
+  { code: 'operacoes.ver', label: 'Ver a área de Operações', summary: 'Pode ver a área de Operações' },
 ];
 
 export const ADMINISTRACAO_ITEMS: CheckboxItem[] = [
-  { code: 'usuarios.gerenciar', label: 'Criar logins e montar perfis de acesso', hint: 'Cuida de quem entra no sistema e do que cada um pode fazer.', summary: 'Cria logins e monta perfis de acesso' },
-  { code: 'assinatura.gerenciar', label: 'Gerenciar a assinatura e o plano da empresa', hint: 'Pode contratar ou trocar o plano.', summary: 'Gerencia a assinatura e o plano' },
-  { code: 'campos-personalizados.gerenciar', label: 'Criar campos personalizados', hint: 'Adiciona informações extras nos cadastros.', summary: 'Cria campos personalizados' },
+  { code: 'usuarios.gerenciar', label: 'Criar acessos para outras pessoas e montar perfis', hint: 'Decide quem entra no sistema e o que cada um pode fazer.', summary: 'Pode criar acessos e montar perfis' },
+  { code: 'assinatura.gerenciar', label: 'Cuidar da assinatura e do plano', hint: 'Pode contratar ou trocar o plano da empresa.', summary: 'Pode cuidar da assinatura e do plano' },
+  { code: 'campos-personalizados.gerenciar', label: 'Criar campos extras nos cadastros', hint: 'Por exemplo: tamanho do uniforme ou número da CNH.', summary: 'Pode criar campos extras nos cadastros' },
 ];
 
 export const PONTO_REGISTRAR = 'ponto.registrar';
@@ -241,14 +241,14 @@ export const PONTO_FERIADOS = 'ponto.feriados.gerenciar';
 
 export const PONTO_ADMIN_LABEL: Record<Scope, string> = {
   PROPRIO: 'Só o próprio ponto',
-  EQUIPE: 'Da equipe que ela lidera',
+  EQUIPE: 'Da equipe que ela coordena',
   DEPARTAMENTO: 'Do departamento dela',
-  EMPRESA: 'De toda a empresa',
+  EMPRESA: 'De todos da empresa',
 };
 
 export interface LevelAreaConfig {
   pair: LevelPair;
-  noun: string;
+  noAccessLabel: string;
   viewLabel: string;
   fullLabel: string;
   viewSummary: string;
@@ -258,27 +258,27 @@ export interface LevelAreaConfig {
 export const LEVEL_AREAS: Record<'clientes' | 'cargos' | 'financeiro', LevelAreaConfig> = {
   clientes: {
     pair: { verCode: 'clientes.ver', manageCode: 'clientes.gerenciar' },
-    noun: 'clientes',
-    viewLabel: 'Só consultar',
-    fullLabel: 'Consultar, cadastrar e editar',
-    viewSummary: 'Só consulta os clientes',
-    fullSummary: 'Consulta, cadastra e edita clientes',
+    noAccessLabel: 'Não acessa Clientes',
+    viewLabel: 'Pode ver, mas não alterar',
+    fullLabel: 'Pode ver, cadastrar e alterar',
+    viewSummary: 'Pode ver os clientes',
+    fullSummary: 'Pode ver, cadastrar e alterar clientes',
   },
   cargos: {
     pair: { verCode: 'cargos.ver', manageCode: 'cargos.gerenciar' },
-    noun: 'cargos',
-    viewLabel: 'Só consultar',
-    fullLabel: 'Consultar, cadastrar e editar',
-    viewSummary: 'Só consulta os cargos',
-    fullSummary: 'Consulta, cadastra e edita cargos',
+    noAccessLabel: 'Não acessa Cargos',
+    viewLabel: 'Pode ver, mas não alterar',
+    fullLabel: 'Pode ver, cadastrar e alterar',
+    viewSummary: 'Pode ver os cargos',
+    fullSummary: 'Pode ver, cadastrar e alterar cargos',
   },
   financeiro: {
     pair: { verCode: 'financas.lancamentos.ver', manageCode: 'financas.lancamentos.gerenciar' },
-    noun: 'lançamentos',
-    viewLabel: 'Só consultar lançamentos',
-    fullLabel: 'Consultar e lançar',
-    viewSummary: 'Só consulta os lançamentos',
-    fullSummary: 'Consulta e faz lançamentos',
+    noAccessLabel: 'Não acessa o Financeiro',
+    viewLabel: 'Pode ver os lançamentos, mas não alterar',
+    fullLabel: 'Pode ver e fazer lançamentos',
+    viewSummary: 'Pode ver os lançamentos',
+    fullSummary: 'Pode ver e fazer lançamentos',
   },
 };
 
@@ -335,7 +335,7 @@ export interface SummaryLine {
   text: string;
 }
 
-const NO_ACCESS: SummaryLine = { ok: false, text: 'Não tem acesso' };
+const NO_ACCESS: SummaryLine = { ok: false, text: 'Sem acesso' };
 
 function checkboxSummary(map: GrantMap, items: CheckboxItem[]): SummaryLine[] {
   const lines = items.filter((i) => i.code in map).map((i) => ({ ok: true, text: i.summary }));
@@ -366,18 +366,18 @@ export function summarizeArea(map: GrantMap, catalog: CatalogIndex, area: AreaDe
       let mainScope: Scope | null = null;
       if (hasManage && (!hasVer || ver === manage)) {
         mainScope = manage ?? null;
-        lines.push({ ok: true, text: `Consulta, cadastra e edita${manage ? ` — ${SCOPE_SUMMARY[manage]}` : ''}` });
+        lines.push({ ok: true, text: `Pode ver, cadastrar e alterar funcionários${manage ? `, ${SCOPE_SUMMARY[manage]}` : ''}` });
       } else {
         if (hasVer) {
           mainScope = ver ?? null;
-          lines.push({ ok: true, text: `Consulta${ver ? ` — ${SCOPE_SUMMARY[ver]}` : ''}` });
+          lines.push({ ok: true, text: `Pode ver os funcionários${ver ? `, ${SCOPE_SUMMARY[ver]}` : ''}` });
         }
-        if (hasManage) lines.push({ ok: true, text: `Cadastra e edita${manage ? ` — ${SCOPE_SUMMARY[manage]}` : ''}` });
+        if (hasManage) lines.push({ ok: true, text: `Pode cadastrar e alterar funcionários${manage ? `, ${SCOPE_SUMMARY[manage]}` : ''}` });
       }
       for (const extra of FUNCIONARIOS_EXTRAS) {
         if (!(extra.code in map)) continue;
         const s = map[extra.code];
-        const suffix = s && s !== mainScope ? ` — ${SCOPE_SUMMARY[s]}` : '';
+        const suffix = s && s !== mainScope ? `, ${SCOPE_SUMMARY[s]}` : '';
         lines.push({ ok: true, text: `${extra.summary}${suffix}` });
       }
       return lines.length ? lines : [NO_ACCESS];
@@ -385,17 +385,17 @@ export function summarizeArea(map: GrantMap, catalog: CatalogIndex, area: AreaDe
     case 'ponto': {
       const lines: SummaryLine[] = [];
       if (catalog.has(PONTO_REGISTRAR)) {
-        lines.push(PONTO_REGISTRAR in map ? { ok: true, text: 'Bate o próprio ponto' } : { ok: false, text: 'Não bate ponto' });
+        lines.push(PONTO_REGISTRAR in map ? { ok: true, text: 'Pode bater o próprio ponto' } : { ok: false, text: 'Não bate ponto' });
       }
       if (catalog.has(PONTO_ADMINISTRAR)) {
         const s = map[PONTO_ADMINISTRAR];
         lines.push(
           PONTO_ADMINISTRAR in map
-            ? { ok: true, text: `Administra o ponto${s ? ` — ${SCOPE_SUMMARY[s]}` : ''}` }
-            : { ok: false, text: 'Não administra o ponto' },
+            ? { ok: true, text: `Pode cuidar do ponto de outras pessoas${s ? `, ${SCOPE_SUMMARY[s]}` : ''}` }
+            : { ok: false, text: 'Não cuida do ponto de outras pessoas' },
         );
       }
-      if (PONTO_FERIADOS in map) lines.push({ ok: true, text: 'Cadastra feriados da empresa' });
+      if (PONTO_FERIADOS in map) lines.push({ ok: true, text: 'Pode cadastrar os feriados da empresa' });
       return lines.length ? lines : [NO_ACCESS];
     }
     case 'comercial':
@@ -405,4 +405,36 @@ export function summarizeArea(map: GrantMap, catalog: CatalogIndex, area: AreaDe
     case 'outras':
       return checkboxSummary(map, outrasItems(catalog, area));
   }
+}
+
+/**
+ * Uma linha curta para a lista de áreas do editor (ex.: "Pode ver e alterar", "Sem acesso",
+ * "3 liberações", "Pode ver · só dela mesma"). Derivada do mesmo mapa de grants do resumo.
+ */
+export function areaStatus(map: GrantMap, catalog: CatalogIndex, area: AreaDef): string {
+  switch (area.key) {
+    case 'clientes':
+    case 'cargos':
+    case 'financeiro': {
+      const level = readLevel(map, LEVEL_AREAS[area.key].pair);
+      if (level === 'full') return 'Pode ver e alterar';
+      if (level === 'view') return 'Só pode ver';
+      return 'Sem acesso';
+    }
+    case 'funcionarios': {
+      const hasVer = FUNCIONARIOS_PAIR.verCode in map;
+      const hasManage = FUNCIONARIOS_PAIR.manageCode in map;
+      const ver = map[FUNCIONARIOS_PAIR.verCode];
+      const manage = map[FUNCIONARIOS_PAIR.manageCode];
+      const withScope = (base: string, s: Scope | null | undefined) => (s ? `${base} · ${SCOPE_SUMMARY[s]}` : base);
+      if (hasManage && hasVer && ver === manage) return withScope('Pode ver e alterar', manage);
+      if (hasVer && !hasManage) return withScope('Pode ver', ver);
+      break;
+    }
+    default:
+      break;
+  }
+  const okCount = summarizeArea(map, catalog, area).filter((line) => line.ok).length;
+  if (okCount === 0) return 'Sem acesso';
+  return `${okCount} ${okCount === 1 ? 'liberação' : 'liberações'}`;
 }

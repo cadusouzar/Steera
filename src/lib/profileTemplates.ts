@@ -19,14 +19,14 @@ export const PROFILE_TEMPLATES: ProfileTemplate[] = [
   {
     key: 'funcionario',
     title: 'Funcionário comum',
-    description: 'Bate o próprio ponto e vê o próprio cadastro.',
+    description: 'Bate o próprio ponto e vê os próprios dados.',
     icon: UserRound,
     grants: [{ code: 'dashboard.ver' }, { code: 'funcionarios.ver', scope: 'PROPRIO' }, { code: 'ponto.registrar' }],
   },
   {
     key: 'atendente',
     title: 'Atendente',
-    description: 'Consulta e cadastra clientes e bate o próprio ponto.',
+    description: 'Atende clientes: vê, cadastra e altera. Também bate ponto.',
     icon: Headset,
     grants: [
       { code: 'dashboard.ver' },
@@ -38,7 +38,7 @@ export const PROFILE_TEMPLATES: ProfileTemplate[] = [
   {
     key: 'financeiro',
     title: 'Financeiro',
-    description: 'Cuida de clientes, lançamentos e pagamentos.',
+    description: 'Cuida dos lançamentos, dos pagamentos e vê os clientes.',
     icon: Wallet,
     grants: [
       { code: 'dashboard.ver' },
@@ -52,7 +52,7 @@ export const PROFILE_TEMPLATES: ProfileTemplate[] = [
   {
     key: 'rh',
     title: 'Gerente de RH',
-    description: 'Cuida de cargos, funcionários, férias e do ponto da empresa.',
+    description: 'Cuida de cargos, funcionários, férias e do ponto de todos.',
     icon: Briefcase,
     grants: [
       { code: 'dashboard.ver' },
@@ -71,14 +71,14 @@ export const PROFILE_TEMPLATES: ProfileTemplate[] = [
   {
     key: 'admin',
     title: 'Administrador',
-    description: 'Pode tudo, inclusive usuários e assinatura.',
+    description: 'Pode tudo, inclusive pessoas, perfis e assinatura.',
     icon: Crown,
     grants: 'all',
   },
   {
     key: 'zero',
     title: 'Começar do zero',
-    description: 'Nenhuma permissão marcada; você escolhe tudo.',
+    description: 'Tudo desmarcado. Você escolhe cada item.',
     icon: Sparkles,
     grants: [],
   },
