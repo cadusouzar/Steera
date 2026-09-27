@@ -101,8 +101,10 @@ export class EmployeesService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
 
+    // Alcance sempre em `AND`, nunca espalhado: assim nenhuma chave do resto do filtro (status,
+    // busca) consegue sobrescrever o recorte de alcance.
     const where: Prisma.EmployeeWhereInput = {
-      ...scopeFilter,
+      ...(Object.keys(scopeFilter).length > 0 ? { AND: [scopeFilter] } : {}),
       companyId,
       ...(query.status ? { status: query.status } : {}),
       ...(query.search
