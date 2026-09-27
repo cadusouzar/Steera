@@ -49,6 +49,17 @@ describe('Permissões por ação e alcance (e2e)', () => {
 
   let proprioProfileId: string;
 
+  // DEPARTAMENTO: dois departamentos reais (tabela de tenant, sem rota HTTP) e fichas ligadas por
+  // departmentId — é ele, não o texto livre `department`, que define o alcance.
+  let deptLeaderId: string;
+  let deptPeerId: string;
+  let otherDeptEmployeeId: string;
+  let departmentToken: string;
+
+  // Vínculo login <-> ficha feito por quem gerencia usuários.
+  let linkTargetEmployeeId: string;
+  let secondLinkTargetEmployeeId: string;
+
   const http = () => request(app.getHttpServer());
   const auth = (token: string) => `Bearer ${token}`;
 
@@ -104,6 +115,33 @@ describe('Permissões por ação e alcance (e2e)', () => {
     );
     expect(rows).toHaveLength(1);
     return rows[0];
+  }
+
+  async function createDepartment(name: string): Promise<string> {
+    const schemaName = await getTenantSchemaName(prisma, companyId);
+    const id = `dept-${Math.random().toString(36).slice(2)}-${runId}`;
+    await writeBypassingRls(
+      `INSERT INTO "${schemaName}"."Department" ("id", "companyId", "name", "active") VALUES ('${id}', '${companyId}', '${name}', true)`,
+    );
+    return id;
+  }
+
+  async function setEmployeeDepartment(employeeId: string, departmentId: string): Promise<void> {
+    const schemaName = await getTenantSchemaName(prisma, companyId);
+    await writeBypassingRls(`UPDATE "${schemaName}"."Employee" SET "departmentId" = '${departmentId}' WHERE "id" = '${employeeId}'`);
+  }
+
+  // Mesmo motivo de selectBypassingRls: SQL bruto não passa pelo bypass de runAsSystem, então o
+  // set_config vai na MESMA transação.
+  function writeBypassingRls(sql: string): Promise<unknown> {
+    return sys(() =>
+      prisma.$transaction([prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`, prisma.$executeRawUnsafe(sql)]),
+    );
+  }
+
+  async function currentUserId(token: string): Promise<string> {
+    const res = await http().get('/auth/me').set('Authorization', auth(token)).expect(200);
+    return res.body.id;
   }
 
   function expectPermissionRequired(res: request.Response): void {
@@ -165,6 +203,20 @@ describe('Permissões por ação e alcance (e2e)', () => {
     proprioToken = await createLogin({ role: 'EMPLOYEE', profileId: proprioProfileId, employeeId: subordinadoId });
     usersMgrToken = await createLogin({ role: 'EMPLOYEE', profileId: usersMgrProfileId, employeeId: usersMgrEmployeeId });
     adminNoEmployeeToken = await createLogin({ role: 'ADMIN', profileId: adminLimitedProfileId });
+
+    deptLeaderId = await createEmployee('Líder Departamento X');
+    deptPeerId = await createEmployee('Colega Departamento X');
+    otherDeptEmployeeId = await createEmployee('Pessoa Departamento Y');
+    const deptX = await createDepartment('Departamento X');
+    const deptY = await createDepartment('Departamento Y');
+    await setEmployeeDepartment(deptLeaderId, deptX);
+    await setEmployeeDepartment(deptPeerId, deptX);
+    await setEmployeeDepartment(otherDeptEmployeeId, deptY);
+    const departmentProfileId = await createProfile('Ver o departamento', [{ permissionCode: 'funcionarios.ver', scope: 'DEPARTAMENTO' }]);
+    departmentToken = await createLogin({ role: 'EMPLOYEE', profileId: departmentProfileId, employeeId: deptLeaderId });
+
+    linkTargetEmployeeId = await createEmployee('Ficha Para Vincular');
+    secondLinkTargetEmployeeId = await createEmployee('Segunda Ficha Para Vincular');
   });
 
   afterAll(async () => {
@@ -284,6 +336,106 @@ describe('Permissões por ação e alcance (e2e)', () => {
       expect(res.body.items).toEqual([]);
       expect(res.body.total).toBe(0);
       await http().get(`/employees/${gestorId}`).set('Authorization', auth(adminNoEmployeeToken)).expect(404);
+    });
+  });
+
+  describe('alcance DEPARTAMENTO', () => {
+    it('lista exatamente as fichas do mesmo departamento (departmentId)', async () => {
+      const res = await http().get('/employees').set('Authorization', auth(departmentToken)).expect(200);
+      const ids = (res.body.items as { id: string }[]).map((e) => e.id).sort();
+      expect(ids).toEqual([deptLeaderId, deptPeerId].sort());
+      expect(res.body.total).toBe(2);
+    });
+
+    it('ficha do mesmo departamento: 200; de outro departamento ou sem departamento: 404', async () => {
+      await http().get(`/employees/${deptPeerId}`).set('Authorization', auth(departmentToken)).expect(200);
+      await http().get(`/employees/${otherDeptEmployeeId}`).set('Authorization', auth(departmentToken)).expect(404);
+      await http().get(`/employees/${outsiderId}`).set('Authorization', auth(departmentToken)).expect(404);
+    });
+  });
+
+  describe('auto-vínculo a uma ficha (PATCH /auth/me/employee-link)', () => {
+    it('ADMIN sem ficha, com alcance EQUIPE e sem usuarios.gerenciar → 403 com a mensagem exata e continua sem vínculo', async () => {
+      const userId = await currentUserId(adminNoEmployeeToken);
+      const res = await http()
+        .patch('/auth/me/employee-link')
+        .set('Authorization', auth(adminNoEmployeeToken))
+        .send({ employeeId: gestorId });
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('PERMISSION_REQUIRED');
+      expect(res.body.message).toBe(
+        'Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário. Peça a quem administra os acessos para vincular.',
+      );
+
+      const row = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: userId } }));
+      expect(row.employeeId).toBeNull();
+      // O alcance continua vazio: a tentativa não abriu a equipe do gestor.
+      await http().get(`/employees/${subordinadoId}`).set('Authorization', auth(adminNoEmployeeToken)).expect(404);
+    });
+
+    it('GET /auth/me expõe canSelfLinkEmployee: false pra esse login', async () => {
+      const res = await http().get('/auth/me').set('Authorization', auth(adminNoEmployeeToken)).expect(200);
+      expect(res.body.canSelfLinkEmployee).toBe(false);
+    });
+  });
+
+  describe('vínculo feito por quem gerencia usuários', () => {
+    it('com usuarios.gerenciar: lista a ficha, vincula outro login, a ficha some da lista e não vincula de novo', async () => {
+      const targetToken = await createLogin({ role: 'ADMIN', profileId: proprioProfileId });
+      const targetUserId = await currentUserId(targetToken);
+      const otherToken = await createLogin({ role: 'ADMIN', profileId: proprioProfileId });
+      const otherUserId = await currentUserId(otherToken);
+      const token = auth(usersMgrToken);
+
+      const before = await http().get('/companies/me/users/linkable-employees').set('Authorization', token).expect(200);
+      expect(before.body).toContainEqual({ id: linkTargetEmployeeId, fullName: 'Ficha Para Vincular' });
+
+      const linked = await http()
+        .patch(`/companies/me/users/${targetUserId}/employee`)
+        .set('Authorization', token)
+        .send({ employeeId: linkTargetEmployeeId })
+        .expect(200);
+      expect(linked.body.id).toBe(targetUserId);
+      expect(linked.body.employeeId).toBe(linkTargetEmployeeId);
+      const row = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: targetUserId } }));
+      expect(row.employeeId).toBe(linkTargetEmployeeId);
+
+      const after = await http().get('/companies/me/users/linkable-employees').set('Authorization', token).expect(200);
+      const afterIds = (after.body as { id: string }[]).map((e) => e.id);
+      expect(afterIds).not.toContain(linkTargetEmployeeId);
+      expect(afterIds).toContain(secondLinkTargetEmployeeId);
+
+      // Mesma ficha pra outro login → 400; e o login já vinculado não troca de ficha.
+      const takenEmployee = await http()
+        .patch(`/companies/me/users/${otherUserId}/employee`)
+        .set('Authorization', token)
+        .send({ employeeId: linkTargetEmployeeId });
+      expect(takenEmployee.status).toBe(400);
+      expect(takenEmployee.body.message).toBe('Este funcionário já possui um login vinculado');
+      const alreadyLinked = await http()
+        .patch(`/companies/me/users/${targetUserId}/employee`)
+        .set('Authorization', token)
+        .send({ employeeId: secondLinkTargetEmployeeId });
+      expect(alreadyLinked.status).toBe(400);
+      expect(alreadyLinked.body.message).toBe('Este login já está vinculado a um funcionário');
+
+      expect((await sys(() => prisma.user.findUniqueOrThrow({ where: { id: otherUserId } }))).employeeId).toBeNull();
+      expect((await sys(() => prisma.user.findUniqueOrThrow({ where: { id: targetUserId } }))).employeeId).toBe(linkTargetEmployeeId);
+    });
+
+    it('sem usuarios.gerenciar → 403 PERMISSION_REQUIRED nas duas rotas e nada é vinculado', async () => {
+      const targetToken = await createLogin({ role: 'ADMIN', profileId: proprioProfileId });
+      const targetUserId = await currentUserId(targetToken);
+      const token = auth(adminNoEmployeeToken);
+
+      expectPermissionRequired(await http().get('/companies/me/users/linkable-employees').set('Authorization', token));
+      expectPermissionRequired(
+        await http()
+          .patch(`/companies/me/users/${targetUserId}/employee`)
+          .set('Authorization', token)
+          .send({ employeeId: secondLinkTargetEmployeeId }),
+      );
+      expect((await sys(() => prisma.user.findUniqueOrThrow({ where: { id: targetUserId } }))).employeeId).toBeNull();
     });
   });
 
