@@ -232,7 +232,7 @@ const AppLayout = () => {
                   Controle de Ponto
                 </Link>
                 )}
-                {hasModule('PONTO_ADMINISTRACAO') && (
+                {hasModule('PONTO_ADMINISTRACAO') && hasPermission('ponto.administrar') && (
                 <Link
                   to="/app/ponto-administracao"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
