@@ -55,7 +55,8 @@ describe('computeProfileSignature', () => {
   // INTEIRO, ignorando `modules` por completo.
   it('ADMIN de módulos restritos NÃO recebe o catálogo inteiro — só os módulos dele + os códigos gated só por papel', () => {
     const result = computeProfileSignature({ role: 'ADMIN', modules: ['DASHBOARD'], hasFullPontoAccess: true });
-    expect(codesOf(result)).toEqual(['campos-personalizados.gerenciar', 'dashboard.ver', 'usuarios.gerenciar']);
+    // `assinatura.gerenciar` (27/09/2026) também não vem de módulo nenhum — é uma ação de ADMIN.
+    expect(codesOf(result)).toEqual(['assinatura.gerenciar', 'campos-personalizados.gerenciar', 'dashboard.ver', 'usuarios.gerenciar']);
     expect(codesOf(result).length).toBeLessThan(PERMISSION_CATALOG.length);
     // Nada de Clientes/Finanças/Ponto vindo de graça.
     expect(codesOf(result)).not.toContain('clientes.ver');
@@ -93,7 +94,7 @@ describe('computeProfileSignature', () => {
 
 describe('getRoleOnlyGatedPermissionCodes', () => {
   it('devolve exatamente os códigos do catálogo que nenhum módulo concede', () => {
-    expect(getRoleOnlyGatedPermissionCodes().sort()).toEqual(['campos-personalizados.gerenciar', 'usuarios.gerenciar']);
+    expect(getRoleOnlyGatedPermissionCodes().sort()).toEqual(['assinatura.gerenciar', 'campos-personalizados.gerenciar', 'usuarios.gerenciar']);
   });
 
   it('todo código do mapa existe de verdade no catálogo (protege contra typo silencioso)', () => {

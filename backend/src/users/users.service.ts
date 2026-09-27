@@ -10,6 +10,7 @@ import { reassignUserProfile } from '../permissions/profile-assignment.util';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { assertNotLastAdminWithFullPontoAccess, assertNotLastHolderOfPermission } from './last-permission-holder.util';
+import { LAST_HOLDER_PROTECTED_PERMISSION_CODES } from '../permissions/protected-permissions';
 import { planLimit } from '../plans/plan-catalog';
 import { assertBelowPlanLimit, PLAN_COUNTED_LOGIN_STATUSES } from '../plans/plan-limits.util';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -218,7 +219,9 @@ export class UsersService {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
         await this.assertNotLastActiveAdmin(tx, companyId, userId);
-        await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
+        for (const code of LAST_HOLDER_PROTECTED_PERMISSION_CODES) {
+          await assertNotLastHolderOfPermission(tx, companyId, code, userId);
+        }
         await tx.user.update({ where: { id: userId }, data: { status: 'BLOCKED' } });
         await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
       }),
@@ -300,11 +303,15 @@ export class UsersService {
         // Só esta checagem depende de haver um perfil anterior: "ele tinha `usuarios.gerenciar` e
         // vai perder?" não faz sentido pra quem nunca teve perfil nenhum (não dá pra remover uma
         // permissão que nunca se teve, e a contagem de detentores não muda).
+        // Roda pra cada permissão protegida (`usuarios.gerenciar` e `assinatura.gerenciar` — ver
+        // protected-permissions.ts).
         if (freshUser.profileId) {
-          const hadIt = currentGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
-          const willHaveIt = newGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
-          if (hadIt && !willHaveIt) {
-            await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
+          for (const code of LAST_HOLDER_PROTECTED_PERMISSION_CODES) {
+            const hadIt = currentGrants.some((g) => g.permissionCode === code);
+            const willHaveIt = newGrants.some((g) => g.permissionCode === code);
+            if (hadIt && !willHaveIt) {
+              await assertNotLastHolderOfPermission(tx, companyId, code, userId);
+            }
           }
         }
 
@@ -358,7 +365,9 @@ export class UsersService {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${companyId})::bigint)`;
         await this.assertNotLastActiveAdmin(tx, companyId, userId);
-        await assertNotLastHolderOfPermission(tx, companyId, 'usuarios.gerenciar', userId);
+        for (const code of LAST_HOLDER_PROTECTED_PERMISSION_CODES) {
+          await assertNotLastHolderOfPermission(tx, companyId, code, userId);
+        }
         await tx.user.delete({ where: { id: userId } });
       }),
     );

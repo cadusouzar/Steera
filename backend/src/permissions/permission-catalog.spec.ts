@@ -13,4 +13,16 @@ describe('PERMISSION_CATALOG', () => {
   it('getPermissionDefinition returns the matching entry', () => {
     expect(getPermissionDefinition('usuarios.gerenciar').labelPt).toBe('Gerenciar Usuários e Perfis');
   });
+
+  // Quem gerencia a assinatura (27/09/2026): permissão própria, sem escopo — não é por
+  // funcionário/time, é uma ação sobre a empresa inteira.
+  it('inclui assinatura.gerenciar, sem escopo', () => {
+    expect(getPermissionDefinition('assinatura.gerenciar')).toEqual({
+      code: 'assinatura.gerenciar',
+      resource: 'assinatura',
+      action: 'gerenciar',
+      labelPt: 'Gerenciar assinatura e plano',
+      validScopes: [],
+    });
+  });
 });

@@ -33,6 +33,12 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   { code: 'operacoes.ver', resource: 'operacoes', action: 'ver', labelPt: 'Ver Operações', validScopes: [Scope.EMPRESA] },
   { code: 'campos-personalizados.gerenciar', resource: 'campos-personalizados', action: 'gerenciar', labelPt: 'Gerenciar Campos Personalizados', validScopes: [Scope.EMPRESA] },
   { code: 'usuarios.gerenciar', resource: 'usuarios', action: 'gerenciar', labelPt: 'Gerenciar Usuários e Perfis', validScopes: [Scope.EMPRESA] },
+  // Quem gerencia a assinatura (27/09/2026): comprar/trocar o plano da empresa. Sem escopo — é uma
+  // ação sobre a empresa inteira, não sobre funcionário/time. Protegida pela trava de último
+  // detentor (ver protected-permissions.ts). Hoje ainda não existe rota que mude o plano: a
+  // permissão já decide quem VÊ as ações de compra no frontend e quem aparece como contato
+  // (`GET /plans/me`); a futura rota de checkout precisa exigi-la (ver plans.controller.ts).
+  { code: 'assinatura.gerenciar', resource: 'assinatura', action: 'gerenciar', labelPt: 'Gerenciar assinatura e plano', validScopes: [] },
 ];
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]['code'];

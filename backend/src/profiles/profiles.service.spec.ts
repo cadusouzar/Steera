@@ -271,6 +271,21 @@ describe('ProfilesService', () => {
       expect(assertOtherProfileGrantsPermission).not.toHaveBeenCalled();
     });
 
+    // Quem gerencia a assinatura (27/09/2026): tirar `assinatura.gerenciar` de um perfil passa pela
+    // mesma trava por PERFIL — senão a empresa podia ficar sem ninguém para gerenciar o plano.
+    it('chama assertOtherProfileGrantsPermission para assinatura.gerenciar ao removê-la do perfil', async () => {
+      const { prisma, tx } = makeTxPrisma('p1', ['u1'], [
+        { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA },
+        { permissionCode: 'assinatura.gerenciar', scope: null },
+      ]);
+      const service = new ProfilesService(prisma as any, makeTimeAuth());
+
+      await service.update('company-1', 'p1', { name: 'Admin', grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }] }, makeCaller());
+
+      expect(assertOtherProfileGrantsPermission).toHaveBeenCalledTimes(1);
+      expect(assertOtherProfileGrantsPermission).toHaveBeenCalledWith(tx, 'company-1', 'assinatura.gerenciar', 'p1');
+    });
+
     it('regrava as ProfilePermission e recalcula cada usuário afetado', async () => {
       const { prisma, tx } = makeTxPrisma('p1', ['u1', 'u2']);
       const service = new ProfilesService(prisma as any, makeTimeAuth());
@@ -600,6 +615,20 @@ describe('reassignAndDelete', () => {
 
     expect(assertOtherProfileGrantsPermission).toHaveBeenCalledTimes(1);
     expect(assertOtherProfileGrantsPermission).toHaveBeenCalledWith(tx, 'company-1', 'usuarios.gerenciar', 'source');
+  });
+
+  it('chama a trava para assinatura.gerenciar se a origem a concede e o destino não', async () => {
+    const { prisma, tx } = makeTxPrisma();
+    tx.profilePermission.findMany
+      .mockResolvedValueOnce([{ permissionCode: 'assinatura.gerenciar' }])
+      .mockResolvedValueOnce([]);
+    tx.user.findMany.mockResolvedValue([{ id: 'u1' }]);
+    const service = new ProfilesService(prisma as any, makeTimeAuth());
+
+    await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
+
+    expect(assertOtherProfileGrantsPermission).toHaveBeenCalledTimes(1);
+    expect(assertOtherProfileGrantsPermission).toHaveBeenCalledWith(tx, 'company-1', 'assinatura.gerenciar', 'source');
   });
 
   it('NÃO chama a trava se o destino também concede usuarios.gerenciar', async () => {

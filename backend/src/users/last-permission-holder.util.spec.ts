@@ -287,3 +287,35 @@ describe('assertNotLastAdminWithFullPontoAccess', () => {
     });
   });
 });
+
+// Quem gerencia a assinatura (27/09/2026): a mesma trava cobre `assinatura.gerenciar` — a mensagem
+// precisa dizer QUAL permissão ficaria sem detentor, não sempre "gerenciar usuários".
+describe('mensagem por permissão protegida', () => {
+  function makeTx(...results: unknown[]) {
+    const fn = jest.fn();
+    for (const r of results) fn.mockResolvedValueOnce(r);
+    return { $queryRawUnsafe: fn };
+  }
+
+  it('assertNotLastHolderOfPermission com assinatura.gerenciar fala da assinatura', async () => {
+    const tx = makeTx([{ exists: true }], [{ count: 0n }]);
+    await expect(
+      assertNotLastHolderOfPermission(tx as any, 'company-1', 'assinatura.gerenciar', 'user-1'),
+    ).rejects.toThrow('A empresa precisa ter pelo menos um login ativo com permissão para gerenciar a assinatura');
+    expect(tx.$queryRawUnsafe.mock.calls[1].slice(1)).toEqual(['company-1', 'user-1', 'assinatura.gerenciar']);
+  });
+
+  it('assertOtherProfileGrantsPermission com assinatura.gerenciar fala da assinatura', async () => {
+    const tx = makeTx([{ count: 0n }]);
+    await expect(
+      assertOtherProfileGrantsPermission(tx as any, 'company-1', 'assinatura.gerenciar', 'profile-1'),
+    ).rejects.toThrow('A empresa precisa ter pelo menos um login ativo com permissão para gerenciar a assinatura');
+  });
+
+  it('usuarios.gerenciar mantém a mensagem de sempre', async () => {
+    const tx = makeTx([{ count: 0n }]);
+    await expect(
+      assertOtherProfileGrantsPermission(tx as any, 'company-1', 'usuarios.gerenciar', 'profile-1'),
+    ).rejects.toThrow('A empresa precisa ter pelo menos um login ativo com permissão para gerenciar usuários');
+  });
+});

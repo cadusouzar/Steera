@@ -3,6 +3,7 @@ import { Scope } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
+import { LAST_HOLDER_PROTECTED_PERMISSION_CODES } from '../permissions/protected-permissions';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { recomputeAndSaveUserAccess, reassignUserProfile } from '../permissions/profile-assignment.util';
 import { deriveHasFullPontoAccessFromGrants } from '../permissions/profile-signature.util';
@@ -72,7 +73,6 @@ export class ProfilesService {
       throw new ForbiddenException('Este perfil é protegido e não pode ser editado');
     }
 
-    const willGrantUsuariosGerenciar = dto.grants.some((g) => g.permissionCode === 'usuarios.gerenciar');
     // Mesma derivação usada em todo o resto do projeto, em vez de uma reimplementação à mão —
     // hoje as duas concordam (validateGrants já rejeita permissionCode duplicado), mas sem isso
     // nada impediria as duas de divergirem numa mudança futura.
@@ -99,7 +99,6 @@ export class ProfilesService {
         // corretas mesmo sem esse filtro aqui.
         const affectedUsers = await tx.user.findMany({ where: { profileId: id } });
         const currentGrants = await tx.profilePermission.findMany({ where: { profileId: id } });
-        const currentlyGrantsUsuariosGerenciar = currentGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
 
         // Corrigido numa rodada de revisão de segurança pós-implementação (ver task-4-report.md):
         // a versão original chamava `assertNotLastHolderOfPermission` uma vez POR USUÁRIO afetado,
@@ -117,8 +116,15 @@ export class ProfilesService {
         // editar um perfil que nunca teve `usuarios.gerenciar` (o caso comum) rodava a trava à toa
         // e podia devolver um 400 confuso ("a empresa precisa ter pelo menos um login...") numa
         // edição que não removia nada de ninguém.
-        if (!willGrantUsuariosGerenciar && currentlyGrantsUsuariosGerenciar) {
-          await assertOtherProfileGrantsPermission(tx, companyId, 'usuarios.gerenciar', id);
+        //
+        // Roda pra cada permissão protegida (`usuarios.gerenciar` e, desde 27/09/2026,
+        // `assinatura.gerenciar` — ver protected-permissions.ts).
+        for (const code of LAST_HOLDER_PROTECTED_PERMISSION_CODES) {
+          const currentlyGrants = currentGrants.some((g) => g.permissionCode === code);
+          const willGrant = dto.grants.some((g) => g.permissionCode === code);
+          if (currentlyGrants && !willGrant) {
+            await assertOtherProfileGrantsPermission(tx, companyId, code, id);
+          }
         }
 
         // Mesmo achado do Important #1 (ver UsersService.assignProfile) — um dos QUATRO caminhos
@@ -205,8 +211,6 @@ export class ProfilesService {
 
         const sourceGrants = await tx.profilePermission.findMany({ where: { profileId: id } });
         const targetGrants = await tx.profilePermission.findMany({ where: { profileId: dto.targetProfileId } });
-        const sourceHasIt = sourceGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
-        const targetHasIt = targetGrants.some((g) => g.permissionCode === 'usuarios.gerenciar');
 
         // Sem `status: 'ACTIVE'` (revisão final da branch, Fase 2a, 22/09/2026, Important #2 — mesma
         // correção de update()): esta lista alimenta a MUTAÇÃO (mover cada login pro perfil de
@@ -226,8 +230,13 @@ export class ProfilesService {
         // pergunta a coisa certa pra este cenário — "excluindo o PERFIL de origem sendo esvaziado,
         // existe algum usuário ativo, em QUALQUER OUTRO perfil, que ainda concede esta permissão?"
         // — e por isso só precisa ser chamada UMA vez, não uma vez por usuário.
-        if (sourceHasIt && !targetHasIt) {
-          await assertOtherProfileGrantsPermission(tx, companyId, 'usuarios.gerenciar', id);
+        // Roda pra cada permissão protegida (ver protected-permissions.ts).
+        for (const code of LAST_HOLDER_PROTECTED_PERMISSION_CODES) {
+          const sourceHasIt = sourceGrants.some((g) => g.permissionCode === code);
+          const targetHasIt = targetGrants.some((g) => g.permissionCode === code);
+          if (sourceHasIt && !targetHasIt) {
+            await assertOtherProfileGrantsPermission(tx, companyId, code, id);
+          }
         }
 
         // Mesma proteção de acesso total ao Ponto já aplicada em `update()` e em

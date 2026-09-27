@@ -237,6 +237,101 @@ describe('Trava do último detentor de usuarios.gerenciar (e2e)', () => {
       .expect(204);
   });
 
+  // ————— Quem gerencia a assinatura (27/09/2026): a mesma trava cobre `assinatura.gerenciar`. —————
+  // Estado montado: o segundo ADMIN fica num perfil que concede `usuarios.gerenciar` MAS NÃO
+  // `assinatura.gerenciar` — a trava de usuários passa (sobra um detentor), só a da assinatura segura.
+  async function moveSecondAdminToUsersOnlyProfile(secondAdminId: string): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .post('/profiles')
+      .set('Authorization', adminToken)
+      .send({ name: `Só Usuários ${uniq()}`, grants: [{ permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' }] })
+      .expect(201);
+    await request(app.getHttpServer())
+      .patch(`/companies/me/users/${secondAdminId}/profile`)
+      .set('Authorization', adminToken)
+      .send({ profileId: res.body.id })
+      .expect(204);
+    return res.body.id;
+  }
+
+  it('último detentor de assinatura.gerenciar: excluir ou bloquear é recusado com a mensagem da assinatura', async () => {
+    const secondAdminId = await createAdminLogin();
+    await moveSecondAdminToUsersOnlyProfile(secondAdminId);
+
+    const del = await request(app.getHttpServer())
+      .delete(`/companies/me/users/${founderId}`)
+      .set('Authorization', adminToken)
+      .expect(400);
+    expect(del.body.message).toMatch(/permissão para gerenciar a assinatura/i);
+
+    const block = await request(app.getHttpServer())
+      .patch(`/companies/me/users/${founderId}/block`)
+      .set('Authorization', adminToken)
+      .expect(400);
+    expect(block.body.message).toMatch(/permissão para gerenciar a assinatura/i);
+
+    const founder = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: founderId } }));
+    expect(founder.status).toBe('ACTIVE');
+  });
+
+  it('último detentor de assinatura.gerenciar: trocar o perfil dele por um sem a permissão é recusado', async () => {
+    const secondAdminId = await createAdminLogin();
+    const usersOnlyProfileId = await moveSecondAdminToUsersOnlyProfile(secondAdminId);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/companies/me/users/${founderId}/profile`)
+      .set('Authorization', adminToken)
+      .send({ profileId: usersOnlyProfileId })
+      .expect(400);
+    expect(res.body.message).toMatch(/permissão para gerenciar a assinatura/i);
+  });
+
+  it('perfil compartilhado que é a única fonte de assinatura.gerenciar: remover a permissão (PATCH) ou reatribuir-e-excluir é recusado', async () => {
+    // "Gestão" concede usuários + assinatura; o fundador vai pra ele e o Administrador Geral fica
+    // sem nenhum login — "Gestão" vira a única fonte ATIVA da assinatura. O segundo admin (perfil
+    // "Só Usuários") segura `usuarios.gerenciar`, então só a trava da assinatura pode disparar.
+    const secondAdminId = await createAdminLogin();
+    const usersOnlyProfileId = await moveSecondAdminToUsersOnlyProfile(secondAdminId);
+    const gestao = await request(app.getHttpServer())
+      .post('/profiles')
+      .set('Authorization', adminToken)
+      .send({
+        name: `Gestão ${uniq()}`,
+        grants: [
+          { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
+          { permissionCode: 'assinatura.gerenciar' },
+          { permissionCode: 'ponto.administrar', scope: 'EMPRESA' },
+        ],
+      })
+      .expect(201);
+    await sys(() => prisma.user.update({ where: { id: founderId }, data: { profileId: gestao.body.id } }));
+
+    const patch = await request(app.getHttpServer())
+      .patch(`/profiles/${gestao.body.id}`)
+      .set('Authorization', adminToken)
+      .send({
+        name: 'Gestão sem assinatura',
+        grants: [
+          { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
+          { permissionCode: 'ponto.administrar', scope: 'EMPRESA' },
+        ],
+      })
+      .expect(400);
+    expect(patch.body.message).toMatch(/permissão para gerenciar a assinatura/i);
+
+    const reassign = await request(app.getHttpServer())
+      .post(`/profiles/${gestao.body.id}/reassign-and-delete`)
+      .set('Authorization', adminToken)
+      .send({ targetProfileId: usersOnlyProfileId });
+    expect(reassign.status).toBe(400);
+    expect(reassign.body.message).toMatch(/permissão para gerenciar a assinatura/i);
+
+    const stillGranted = await sys(() =>
+      prisma.profilePermission.findFirst({ where: { profileId: gestao.body.id, permissionCode: 'assinatura.gerenciar' } }),
+    );
+    expect(stillGranted).not.toBeNull();
+  });
+
   // Os dois testes que existiam aqui ("um ADMIN de módulos restritos NÃO herda o perfil completo
   // do fundador — vai pra um perfil próprio" e "dois ADMINs com a mesma assinatura restrita
   // compartilham o mesmo perfil desambiguado") cobriam `getOrCreateProfileForSignature`/

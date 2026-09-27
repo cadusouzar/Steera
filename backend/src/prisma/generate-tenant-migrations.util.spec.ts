@@ -72,6 +72,22 @@ describe('splitMigrationSqlByTenant', () => {
     expect(result).not.toContain('UPDATE "User"');
   });
 
+  // 27/09/2026 (backfill de `assinatura.gerenciar`): primeira migration de dados com INSERT deste
+  // projeto. Sem classificador, os INSERTs em "Permission"/"ProfilePermission" (centrais) caíam no
+  // branch "desconhecido, mantém com aviso" e iam parar na réplica de TENANT — seriam reexecutados
+  // em cada schema de empresa pelo TenantMigrationManagerService.
+  it('mantém INSERT INTO numa tabela de tenant e remove numa tabela central', () => {
+    const sql = [
+      `INSERT INTO "Client" ("id") VALUES ('x');`,
+      `INSERT INTO "Permission" ("code") VALUES ('a.b') ON CONFLICT ("code") DO NOTHING;`,
+      'INSERT INTO "ProfilePermission" ("id") SELECT gen_random_uuid()::text FROM "ProfilePermission" pp ON CONFLICT DO NOTHING;',
+    ].join('\n\n');
+    const result = splitMigrationSqlByTenant(sql, TENANT_TABLES);
+    expect(result).toContain('INSERT INTO "Client"');
+    expect(result).not.toContain('INSERT INTO "Permission"');
+    expect(result).not.toContain('INSERT INTO "ProfilePermission"');
+  });
+
   it('sempre mantém CREATE TYPE, mesmo de um enum usado só por tabela central — inofensivo, nunca lido via search_path de forma ambígua como uma tabela seria', () => {
     const sql = 'CREATE TYPE "UserRole" AS ENUM (\'ADMIN\', \'EMPLOYEE\');';
     expect(splitMigrationSqlByTenant(sql, TENANT_TABLES)).toContain('CREATE TYPE "UserRole"');

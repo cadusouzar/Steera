@@ -7,7 +7,7 @@ import { FriendlyThrottlerGuard } from '../src/auth/guards/friendly-throttler.gu
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
-import { markEmailVerified } from './access.util';
+import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { setCompanyPlan } from './plan.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
@@ -25,6 +25,7 @@ describe('Planos grátis e pagos — gate de módulo, limites e GET /plans/me (e
   let prisma: PrismaService;
   let companyId: string;
   let adminToken: string;
+  let founderEmail: string;
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   beforeAll(async () => {
@@ -48,6 +49,7 @@ describe('Planos grátis e pagos — gate de módulo, limites e GET /plans/me (e
       .send(buildRegisterBody({ companyName: 'Empresa de Planos', email, password: PASSWORD }))
       .expect(201);
     adminToken = `Bearer ${res.body.accessToken}`;
+    founderEmail = email;
     companyId = (await sys(() => prisma.user.findUniqueOrThrow({ where: { email } }))).companyId;
     await markEmailVerified(prisma, email);
   });
@@ -129,5 +131,44 @@ describe('Planos grátis e pagos — gate de módulo, limites e GET /plans/me (e
     expect(res.body.current.tier).toBe('GRATIS');
     expect(typeof res.body.usage.roles).toBe('number');
     expect(res.body.catalog).toHaveLength(4);
+  });
+
+  // Quem gerencia a assinatura (27/09/2026): `canManageSubscription` vem do PERFIL do login
+  // (`assinatura.gerenciar`), não do papel — um ADMIN num perfil sem a permissão também não pode, e
+  // vê quem procurar em `billingContacts`.
+  it('GET /plans/me: fundador pode gerenciar a assinatura e aparece como contato', async () => {
+    const res = await request(app.getHttpServer()).get('/plans/me').set('Authorization', adminToken).expect(200);
+    expect(res.body.canManageSubscription).toBe(true);
+    expect(res.body.billingContacts).toEqual([{ name: expect.anything(), email: founderEmail }]);
+  });
+
+  it('GET /plans/me: login sem assinatura.gerenciar recebe false e os contatos (só ACTIVE, sem ele mesmo)', async () => {
+    const profileRes = await request(app.getHttpServer())
+      .post('/profiles')
+      .set('Authorization', adminToken)
+      .send({ name: `Só Dashboard ${runId}`, grants: [{ permissionCode: 'dashboard.ver' }] })
+      .expect(201);
+    const email = `plans-limited-${runId}@test.com`;
+    const created = await request(app.getHttpServer())
+      .post('/companies/me/users')
+      .set('Authorization', adminToken)
+      .send({ email, role: 'ADMIN', profileId: profileRes.body.id })
+      .expect(201);
+    await acceptInvite(app, created.body.inviteUrl, 'senha-limitada-12345');
+    await markEmailVerified(prisma, email);
+    const login = await request(app.getHttpServer())
+      .post('/auth/login')
+      .set('x-requested-with', 'XMLHttpRequest')
+      .send({ email, password: 'senha-limitada-12345' })
+      .expect(201);
+
+    const res = await request(app.getHttpServer())
+      .get('/plans/me')
+      .set('Authorization', `Bearer ${login.body.accessToken}`)
+      .expect(200);
+    expect(res.body.canManageSubscription).toBe(false);
+    expect(res.body.billingContacts.map((c: { email: string }) => c.email)).toEqual([founderEmail]);
+    // Só nome/e-mail — nada de id/papel/status vazando pra quem não administra.
+    expect(Object.keys(res.body.billingContacts[0]).sort()).toEqual(['email', 'name']);
   });
 });

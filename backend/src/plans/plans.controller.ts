@@ -19,6 +19,20 @@ export class PlansController {
   @AllowUnverifiedEmail()
   @Get('me')
   getMine(@CurrentUser() user: AuthenticatedUser) {
-    return this.plans.getMyPlan(user.companyId);
+    return this.plans.getMyPlan(user.companyId, user.userId);
   }
+
+  // Quem gerencia a assinatura (27/09/2026) — nota pra quando existir a rota de checkout/troca de
+  // plano (NÃO existe hoje, e não deve existir sem cobrança de verdade — ver o histórico de
+  // `PATCH /companies/me/plan`, removido por deixar o admin subir o próprio plano de graça):
+  // ela precisa exigir a permissão no BACKEND, nunca confiar só no frontend esconder o botão:
+  //
+  //   @UseGuards(PermissionsGuard)
+  //   @RequirePermission(SUBSCRIPTION_MANAGE_PERMISSION)   // 'assinatura.gerenciar'
+  //   @Post('me/checkout')
+  //
+  // (`PermissionsGuard`/`RequirePermission` em backend/src/auth/, `SUBSCRIPTION_MANAGE_PERMISSION`
+  // em backend/src/permissions/protected-permissions.ts.) O claim `permissions` do JWT pode ficar
+  // até 15min defasado depois de uma troca de perfil — pra uma ação que cobra dinheiro, vale
+  // reconferir no banco dentro do handler também, como `getMyPlan` já faz.
 }

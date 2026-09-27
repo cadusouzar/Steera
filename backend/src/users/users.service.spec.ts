@@ -374,6 +374,23 @@ describe('UsersService', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
+  // Quem gerencia a assinatura (27/09/2026): bloquear o ÚNICO detentor de `assinatura.gerenciar`
+  // é recusado, mesmo que ainda sobrem outros detentores de `usuarios.gerenciar`.
+  it('block rejects blocking the last holder of assinatura.gerenciar', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
+    prisma.user.count.mockResolvedValue(2);
+    // usuarios.gerenciar: alvo detém, sobra outro detentor. assinatura.gerenciar: alvo detém, ninguém mais.
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([{ exists: true }])
+      .mockResolvedValueOnce([{ count: 1n }])
+      .mockResolvedValueOnce([{ exists: true }])
+      .mockResolvedValueOnce([{ count: 0n }]);
+    await expect(service.block('c1', 'admin1')).rejects.toThrow(/gerenciar a assinatura/);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.$queryRawUnsafe.mock.calls[3].slice(1)).toEqual(['c1', 'admin1', 'assinatura.gerenciar']);
+  });
+
   it('unblock 404s for a user from another company', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
     await expect(service.unblock('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
@@ -516,6 +533,18 @@ describe('UsersService', () => {
         .mockResolvedValueOnce([{ exists: true }])
         .mockResolvedValueOnce([{ count: 0n }]);
       await expect(service.remove('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('remove rejects deleting the last holder of assinatura.gerenciar', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
+      prisma.user.count.mockResolvedValue(2);
+      prisma.$queryRawUnsafe
+        .mockResolvedValueOnce([{ exists: false }])
+        .mockResolvedValueOnce([{ exists: true }])
+        .mockResolvedValueOnce([{ count: 0n }]);
+      await expect(service.remove('c1', 'admin1')).rejects.toThrow(/gerenciar a assinatura/);
       expect(prisma.user.delete).not.toHaveBeenCalled();
     });
 
@@ -840,6 +869,24 @@ describe('UsersService', () => {
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
       expect(assertNotLastHolderOfPermissionSpy).not.toHaveBeenCalled();
+    });
+
+    // Quem gerencia a assinatura (27/09/2026): a mesma trava de último detentor cobre
+    // `assinatura.gerenciar` — trocar o perfil do único gestor da assinatura por um sem ela é
+    // recusado, igual a `usuarios.gerenciar`.
+    it('chama a trava de assinatura.gerenciar se o perfil atual a concedia e o novo não', async () => {
+      const spy = jest
+        .spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission')
+        .mockResolvedValue(undefined);
+      jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
+      const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
+      mockGrants(tx, [{ permissionCode: 'usuarios.gerenciar' }], [{ permissionCode: 'usuarios.gerenciar' }, { permissionCode: 'assinatura.gerenciar' }]);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+
+      await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(tx, 'company-1', 'assinatura.gerenciar', 'u1');
     });
 
     // Achado Important #1 da revisão final da branch (22/09/2026): remover `PATCH .../ponto-access`

@@ -190,7 +190,10 @@ export function splitMigrationSqlByTenant(sql: string, tenantTableNames: readonl
       statement.match(/^CREATE(?:\s+OR\s+REPLACE)?(?:\s+CONSTRAINT)?\s+TRIGGER\s+\S+[\s\S]*?\sON\s+"(\w+)"/i) ||
       statement.match(/^DROP TRIGGER\s+(?:IF EXISTS\s+)?\S+\s+ON\s+"(\w+)"/i) ||
       statement.match(/^DROP INDEX\s+"(\w+?)_/i) ||
-      statement.match(/^UPDATE\s+"(\w+)"/i);
+      statement.match(/^UPDATE\s+"(\w+)"/i) ||
+      // INSERT (27/09/2026, primeira migration de dados com INSERT — backfill de
+      // `assinatura.gerenciar` em "Permission"/"ProfilePermission", centrais): mesma regra do UPDATE.
+      statement.match(/^INSERT\s+INTO\s+"(\w+)"/i);
 
     if (tableMatch) {
       if (isTenantTable(tableMatch[1])) kept.push(statement);

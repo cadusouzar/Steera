@@ -1,10 +1,12 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { lastHolderErrorMessage } from '../permissions/protected-permissions';
 
 // Generaliza assertNotLastActiveAdmin (mesmo espírito, mesma trava por empresa via
-// pg_advisory_xact_lock já feita pelo chamador) pra qualquer permissão — hoje só usado pra
-// `usuarios.gerenciar`, a permissão cuja perda total travaria a empresa sem ninguém pra
-// administrar acesso. `excludingUserId` é o usuário que está prestes a ser bloqueado/excluído/
+// pg_advisory_xact_lock já feita pelo chamador) pra qualquer permissão — usado pra toda permissão
+// de `LAST_HOLDER_PROTECTED_PERMISSION_CODES` (`usuarios.gerenciar` e, desde 27/09/2026,
+// `assinatura.gerenciar`), cuja perda total travaria a empresa sem ninguém pra administrar acesso
+// ou mudar o plano. `excludingUserId` é o usuário que está prestes a ser bloqueado/excluído/
 // reatribuído — a contagem precisa simular o estado DEPOIS da ação, não o de agora.
 export async function assertNotLastHolderOfPermission(
   tx: Prisma.TransactionClient,
@@ -61,9 +63,7 @@ export async function assertNotLastHolderOfPermission(
     permissionCode,
   );
   if (Number(rows[0]?.count ?? 0) === 0) {
-    throw new BadRequestException(
-      'A empresa precisa ter pelo menos um login ativo com permissão para gerenciar usuários',
-    );
+    throw new BadRequestException(lastHolderErrorMessage(permissionCode));
   }
 }
 
@@ -108,9 +108,7 @@ export async function assertOtherProfileGrantsPermission(
     permissionCode,
   );
   if (Number(rows[0]?.count ?? 0) === 0) {
-    throw new BadRequestException(
-      'A empresa precisa ter pelo menos um login ativo com permissão para gerenciar usuários',
-    );
+    throw new BadRequestException(lastHolderErrorMessage(permissionCode));
   }
 }
 
