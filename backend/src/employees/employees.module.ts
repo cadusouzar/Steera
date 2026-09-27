@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthorizationModule } from '../authorization/authorization.module';
 import { CompanyModule } from '../company/company.module';
 import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
 import { TimeClockModule } from '../time-clock/time-clock.module';
@@ -7,7 +8,7 @@ import { EmployeesController } from './employees.controller';
 import { EmployeesService } from './employees.service';
 
 @Module({
-  imports: [CompanyModule, CustomFieldsModule, TimeManagementAuthModule, TimeClockModule],
+  imports: [AuthorizationModule, CompanyModule, CustomFieldsModule, TimeManagementAuthModule, TimeClockModule],
   controllers: [EmployeesController],
   providers: [EmployeesService],
   exports: [EmployeesService],

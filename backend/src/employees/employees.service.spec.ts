@@ -285,4 +285,25 @@ describe('EmployeesService', () => {
 
     expect(prisma.employee.count).not.toHaveBeenCalled();
   });
+
+  describe('findAll com filtro de alcance (Task 3 — permissões por ação e alcance)', () => {
+    beforeEach(() => {
+      prisma.employee.findMany.mockResolvedValue([]);
+      prisma.employee.count.mockResolvedValue(0);
+    });
+
+    it('aplica o filtro de ids recebido no where da listagem e da contagem, mantendo companyId', async () => {
+      await service.findAll({ search: 'ana' }, { id: { in: ['e1', 'e2'] } });
+      const where = prisma.employee.findMany.mock.calls[0][0].where;
+      expect(where).toMatchObject({ companyId: 'company-1', id: { in: ['e1', 'e2'] } });
+      expect(where.OR).toBeDefined();
+      expect(prisma.employee.count.mock.calls[0][0].where).toMatchObject({ id: { in: ['e1', 'e2'] } });
+    });
+
+    it('sem filtro (chamadores internos / alcance EMPRESA) não restringe ids', async () => {
+      await service.findAll({});
+      const where = prisma.employee.findMany.mock.calls[0][0].where;
+      expect(where).toEqual({ companyId: 'company-1' });
+    });
+  });
 });

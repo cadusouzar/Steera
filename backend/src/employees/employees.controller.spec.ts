@@ -43,6 +43,7 @@ describe('EmployeesController#findOne', () => {
       undefined as never,
       undefined as never,
       undefined as never,
+      { assertEmployeeInScope: jest.fn().mockResolvedValue(undefined) } as never,
     );
   });
 
@@ -109,6 +110,7 @@ describe('EmployeesController — aggregated time-tracking admin views', () => {
       timeManagementAuth as never,
       timeClock as never,
       calculation as never,
+      undefined as never,
     );
   });
 
@@ -143,5 +145,86 @@ describe('EmployeesController — aggregated time-tracking admin views', () => {
       await expect(controller.timeSummary('employee-1', user, '2026', '9')).rejects.toBeInstanceOf(NotFoundException);
       expect(calculation.calculateMonthlySummary).not.toHaveBeenCalled();
     });
+  });
+});
+
+// Task 3 do plano "Permissões por ação e alcance": o alcance de funcionarios.ver/gerenciar é
+// aplicado AQUI, na entrada HTTP, e nunca dentro de EmployeesService (que também é chamado por
+// outros módulos com suas próprias permissões). O EmployeeScopeService é mockado; a resolução real
+// de PROPRIO/EQUIPE/DEPARTAMENTO/EMPRESA já tem cobertura própria.
+describe('EmployeesController — alcance de funcionarios.ver/gerenciar', () => {
+  const user: AuthenticatedUser = {
+    userId: 'u1', companyId: 'c1', role: 'EMPLOYEE', modules: ['RH_FUNCIONARIOS'],
+    mustChangePassword: false, hasFullPontoAccess: false,
+    permissions: { 'funcionarios.ver': 'EQUIPE', 'funcionarios.gerenciar': 'EQUIPE' },
+  };
+  const outOfScope = new NotFoundException('Funcionário e9 não encontrado');
+
+  let controller: EmployeesController;
+  let service: Record<string, jest.Mock>;
+  let scope: { whereEmployeeIn: jest.Mock; assertEmployeeInScope: jest.Mock };
+
+  beforeEach(() => {
+    service = {
+      findAll: jest.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
+      findOne: jest.fn(),
+      update: jest.fn(),
+      deactivate: jest.fn(),
+      reactivate: jest.fn(),
+    };
+    scope = {
+      whereEmployeeIn: jest.fn().mockResolvedValue({ id: { in: ['e1', 'e2'] } }),
+      assertEmployeeInScope: jest.fn().mockRejectedValue(outOfScope),
+    };
+    controller = new EmployeesController(
+      service as unknown as EmployeesService,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      scope as never,
+    );
+  });
+
+  it('findAll passa pro serviço o filtro de alcance de funcionarios.ver', async () => {
+    await controller.findAll({});
+    expect(scope.whereEmployeeIn).toHaveBeenCalledWith('funcionarios.ver');
+    expect(service.findAll).toHaveBeenCalledWith({}, { id: { in: ['e1', 'e2'] } });
+  });
+
+  it('findAll com alcance EMPRESA (filtro vazio) não restringe ids', async () => {
+    scope.whereEmployeeIn.mockResolvedValue({});
+    await controller.findAll({});
+    expect(service.findAll).toHaveBeenCalledWith({}, {});
+  });
+
+  it('findOne fora do alcance de funcionarios.ver -> 404, sem consultar o serviço', async () => {
+    await expect(controller.findOne('e9', user)).rejects.toBe(outOfScope);
+    expect(scope.assertEmployeeInScope).toHaveBeenCalledWith('funcionarios.ver', 'e9');
+    expect(service.findOne).not.toHaveBeenCalled();
+  });
+
+  it('update fora do alcance de funcionarios.gerenciar -> 404, sem escrita', async () => {
+    await expect(controller.update('e9', {})).rejects.toBe(outOfScope);
+    expect(scope.assertEmployeeInScope).toHaveBeenCalledWith('funcionarios.gerenciar', 'e9');
+    expect(service.update).not.toHaveBeenCalled();
+  });
+
+  it('deactivate fora do alcance de funcionarios.gerenciar -> 404, sem escrita', async () => {
+    await expect(controller.deactivate('e9')).rejects.toBe(outOfScope);
+    expect(scope.assertEmployeeInScope).toHaveBeenCalledWith('funcionarios.gerenciar', 'e9');
+    expect(service.deactivate).not.toHaveBeenCalled();
+  });
+
+  it('reactivate fora do alcance de funcionarios.gerenciar -> 404, sem escrita', async () => {
+    await expect(controller.reactivate('e9')).rejects.toBe(outOfScope);
+    expect(scope.assertEmployeeInScope).toHaveBeenCalledWith('funcionarios.gerenciar', 'e9');
+    expect(service.reactivate).not.toHaveBeenCalled();
+  });
+
+  it('update dentro do alcance chama o serviço normalmente', async () => {
+    scope.assertEmployeeInScope.mockResolvedValue(undefined);
+    service.update.mockResolvedValue({ id: 'e1', baseValue: 1000, customFields: {} });
+    await controller.update('e1', {});
+    expect(service.update).toHaveBeenCalledWith('e1', {});
   });
 });

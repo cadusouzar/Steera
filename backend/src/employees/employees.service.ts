@@ -92,12 +92,17 @@ export class EmployeesService {
     });
   }
 
-  async findAll(query: QueryEmployeesDto) {
+  // `scopeFilter` (Task 3 do plano "Permissões por ação e alcance"): filtro extra de alcance
+  // montado pela entrada HTTP (EmployeesController, via EmployeeScopeService.whereEmployeeIn). O
+  // default vazio mantém o comportamento de sempre pra qualquer chamador interno; o alcance de
+  // funcionarios.ver nunca é aplicado implicitamente aqui dentro.
+  async findAll(query: QueryEmployeesDto, scopeFilter: Prisma.EmployeeWhereInput = {}) {
     const companyId = await this.companyContext.getCurrentCompanyId();
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
 
-    const where = {
+    const where: Prisma.EmployeeWhereInput = {
+      ...scopeFilter,
       companyId,
       ...(query.status ? { status: query.status } : {}),
       ...(query.search
