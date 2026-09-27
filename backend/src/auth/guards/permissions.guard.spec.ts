@@ -31,4 +31,33 @@ describe('PermissionsGuard', () => {
     const guard = new PermissionsGuard(reflector);
     expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });
+
+  it('denies with the structured PERMISSION_REQUIRED body and the human pt-BR message', () => {
+    const { context, reflector } = makeContext({ permissions: {} }, ['clientes.gerenciar']);
+    const guard = new PermissionsGuard(reflector);
+    try {
+      guard.canActivate(context);
+      fail('expected canActivate to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect((err as ForbiddenException).getResponse()).toEqual({
+        statusCode: 403,
+        code: 'PERMISSION_REQUIRED',
+        message: 'Seu perfil não permite alterar Clientes. Fale com quem administra os acessos da empresa.',
+      });
+    }
+  });
+
+  it('uses the FIRST required code for the message when multiple codes are accepted (OR semantics)', () => {
+    const { context, reflector } = makeContext({ permissions: {} }, ['funcionarios.ver', 'funcionarios.gerenciar']);
+    const guard = new PermissionsGuard(reflector);
+    try {
+      guard.canActivate(context);
+      fail('expected canActivate to throw');
+    } catch (err) {
+      expect((err as ForbiddenException).getResponse()).toMatchObject({
+        message: 'Seu perfil não permite ver Funcionários. Fale com quem administra os acessos da empresa.',
+      });
+    }
+  });
 });

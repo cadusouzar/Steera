@@ -80,7 +80,10 @@ export class AuthorizationService implements OnApplicationBootstrap {
     if (scope === Scope.EQUIPE) {
       const own = await this.getOwnEmployeeIdOrNull(currentUser);
       if (!own) return [];
-      return findDirectReportIds(this.prisma, currentUser.companyId, own);
+      // EQUIPE = a própria pessoa + subordinados diretos (sem propagação em cadeia) — o próprio id
+      // vem primeiro, pra quem só tem EQUIPE também enxergar/administrar a própria ficha.
+      const reports = await findDirectReportIds(this.prisma, currentUser.companyId, own);
+      return [own, ...reports];
     }
 
     // DEPARTAMENTO

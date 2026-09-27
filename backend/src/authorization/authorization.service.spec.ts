@@ -83,11 +83,13 @@ describe('AuthorizationService', () => {
       expect(result).toBe('ALL');
     });
 
-    it('EQUIPE resolves via hierarquia (subordinados diretos)', async () => {
+    it('EQUIPE resolves to the caller\'s own id PLUS subordinados diretos', async () => {
       prisma.user.findUnique.mockResolvedValue({ employeeId: 'emp-1' });
       prisma.employee.findMany.mockResolvedValue([{ id: 'emp-2' }]);
       const result = await service.resolveScope(Scope.EQUIPE, employeeLogin);
-      expect(result).toEqual(['emp-2']);
+      // O próprio funcionário vem PRIMEIRO, seguido dos subordinados diretos — sem propagação em
+      // cadeia (gerente do gerente não entra).
+      expect(result).toEqual(['emp-1', 'emp-2']);
       expect(prisma.employee.findMany).toHaveBeenCalledWith({
         where: { managerId: 'emp-1', companyId: 'company-1' },
         select: { id: true },
