@@ -954,9 +954,9 @@ export class AuthService {
       throw new ForbiddenException({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: SELF_LINK_DENIED_MESSAGE });
     }
 
-    // Funcionário da mesma empresa e sem outro login (validação compartilhada com
-    // UsersService.linkEmployee).
-    await assertEmployeeLinkable(this.prisma, companyId, employeeId);
+    // Funcionário da mesma empresa, ATIVO e sem outro login (validação compartilhada com
+    // UsersService.linkEmployee, mesma regra de ficha ativa da rota administrativa).
+    await assertEmployeeLinkable(this.prisma, companyId, employeeId, { requireActive: true });
 
     const currentUser = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     // Não permite trocar um vínculo já existente por esta rota — trocar de

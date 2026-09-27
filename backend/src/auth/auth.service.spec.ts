@@ -1053,7 +1053,7 @@ describe('AuthService', () => {
 
     it('permite alcance restrito quando o login também tem usuarios.gerenciar', async () => {
       authorization.getEffectivePermissions.mockResolvedValue({ 'funcionarios.ver': 'EQUIPE', 'usuarios.gerenciar': null });
-      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null);
       prisma.user.findUniqueOrThrow
         .mockResolvedValueOnce({ id: 'user-1', employeeId: null })
@@ -1078,16 +1078,28 @@ describe('AuthService', () => {
     });
 
     it('rejects when the target employee already has a different login linked', async () => {
-      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', companyId: 'company-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue({ id: 'user-someone-else', employeeId: 'employee-1' });
       await expect(
         service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-1'),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
+    // Mesma regra da rota administrativa (PATCH /companies/me/users/:id/employee): só ficha ativa.
+    it('rejects when the target employee is inactive, without linking', async () => {
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'INACTIVE' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'user-1', employeeId: null });
+
+      await expect(
+        service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2'),
+      ).rejects.toThrow('Funcionário inativo não pode ser vinculado a um login');
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
     // Um User que JÁ tem employeeId vinculado não pode trocar de vínculo por esta rota.
     it('rejects when the calling login already has an employeeId linked (no swapping via this route)', async () => {
-      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null); // employee-2 has no login yet
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'user-1', employeeId: 'employee-already-linked' });
 
@@ -1098,7 +1110,7 @@ describe('AuthService', () => {
     });
 
     it('links the calling login to the target employee and returns the updated profile', async () => {
-      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null); // no existing login for employee-2
       prisma.user.findUniqueOrThrow
         .mockResolvedValueOnce({ id: 'user-1', employeeId: null }) // caller, not yet linked
@@ -1114,7 +1126,7 @@ describe('AuthService', () => {
     });
 
     it('maps a lost race on employeeId (P2002) to a clean 409 instead of an unhandled 500', async () => {
-      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null); // pre-check passes, then loses the real race
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'user-1', employeeId: null });
       prisma.user.update.mockRejectedValue(
