@@ -370,7 +370,7 @@ export function summarizeArea(map: GrantMap, catalog: CatalogIndex, area: AreaDe
       } else {
         if (hasVer) {
           mainScope = ver ?? null;
-          lines.push({ ok: true, text: `Pode ver os funcionários${ver ? `, ${SCOPE_SUMMARY[ver]}` : ''}` });
+          lines.push({ ok: true, text: ver === 'PROPRIO' ? 'Pode ver só os próprios dados' : `Pode ver os funcionários${ver ? `, ${SCOPE_SUMMARY[ver]}` : ''}` });
         }
         if (hasManage) lines.push({ ok: true, text: `Pode cadastrar e alterar funcionários${manage ? `, ${SCOPE_SUMMARY[manage]}` : ''}` });
       }
@@ -409,7 +409,7 @@ export function summarizeArea(map: GrantMap, catalog: CatalogIndex, area: AreaDe
 
 /**
  * Uma linha curta para a lista de áreas do editor (ex.: "Pode ver e alterar", "Sem acesso",
- * "3 liberações", "Pode ver · só dela mesma"). Derivada do mesmo mapa de grants do resumo.
+ * "3 itens liberados", "Vê só os próprios dados"). Derivada do mesmo mapa de grants do resumo.
  */
 export function areaStatus(map: GrantMap, catalog: CatalogIndex, area: AreaDef): string {
   switch (area.key) {
@@ -427,6 +427,7 @@ export function areaStatus(map: GrantMap, catalog: CatalogIndex, area: AreaDef):
       const ver = map[FUNCIONARIOS_PAIR.verCode];
       const manage = map[FUNCIONARIOS_PAIR.manageCode];
       const withScope = (base: string, s: Scope | null | undefined) => (s ? `${base} · ${SCOPE_SUMMARY[s]}` : base);
+      if (hasVer && !hasManage && ver === 'PROPRIO') return 'Vê só os próprios dados';
       if (hasManage && hasVer && ver === manage) return withScope('Pode ver e alterar', manage);
       if (hasVer && !hasManage) return withScope('Pode ver', ver);
       break;
@@ -436,5 +437,6 @@ export function areaStatus(map: GrantMap, catalog: CatalogIndex, area: AreaDef):
   }
   const okCount = summarizeArea(map, catalog, area).filter((line) => line.ok).length;
   if (okCount === 0) return 'Sem acesso';
-  return `${okCount} ${okCount === 1 ? 'liberação' : 'liberações'}`;
+  if (area.key === 'inicio') return 'Liberado';
+  return `${okCount} ${okCount === 1 ? 'item liberado' : 'itens liberados'}`;
 }
