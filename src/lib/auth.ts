@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -60,7 +61,14 @@ export interface CurrentUser {
   // `emailVerificationRequired` é true.
   emailVerified: boolean;
   emailVerificationRequired: boolean;
+  // Permissões efetivas do perfil do login (código do catálogo -> alcance). Alcance só existe nas
+  // permissões de funcionários (PROPRIO/EQUIPE/DEPARTAMENTO/EMPRESA); as demais vêm com null. Mesma
+  // fonte do JWT (AuthorizationService.getEffectivePermissions). A tela só usa isso pra esconder o
+  // que o backend recusaria; a regra de verdade continua no backend (403 PERMISSION_REQUIRED).
+  permissions: Record<string, PermissionScope | null>;
 }
+
+export type PermissionScope = 'PROPRIO' | 'EQUIPE' | 'DEPARTAMENTO' | 'EMPRESA';
 
 export interface CompanyAddress {
   zipCode: string;
@@ -107,6 +115,7 @@ interface ApiUser {
   plan?: UserPlan | null;
   emailVerified?: boolean;
   emailVerificationRequired?: boolean;
+  permissions?: Record<string, PermissionScope | null>;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -130,6 +139,31 @@ export function subscribeCurrentUser(listener: CurrentUserListener): () => void 
   return () => {
     currentUserListeners.delete(listener);
   };
+}
+
+// Permissões por ação: `can('clientes.gerenciar')` diz se o perfil do login atual concede o código.
+// Sem usuário carregado, nega (as telas só existem com sessão, então isso não esconde nada à toa).
+export function can(code: string, user: CurrentUser | null = currentUser): boolean {
+  return !!user && code in (user.permissions ?? {});
+}
+
+// Alcance concedido para um código (null = sem alcance/toda a empresa; undefined = não concedido).
+export function permissionScope(code: string, user: CurrentUser | null = currentUser): PermissionScope | null | undefined {
+  if (!user || !(code in (user.permissions ?? {}))) return undefined;
+  return user.permissions[code];
+}
+
+// Hook pra componentes que precisam re-renderizar quando o usuário atual muda (login, /auth/me).
+export function useCurrentUser(): CurrentUser | null {
+  const [user, setUser] = useState<CurrentUser | null>(() => currentUser);
+  useEffect(() => subscribeCurrentUser(setUser), []);
+  return user;
+}
+
+// Atalho: função `can` ligada ao usuário atual, re-renderizando junto com ele.
+export function useCan(): (code: string) => boolean {
+  const user = useCurrentUser();
+  return (code: string) => can(code, user);
 }
 
 export function getAccessToken(): string | null {
@@ -164,6 +198,7 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     // defensivo, nunca deveria acontecer com um backend atualizado.
     emailVerified: user.emailVerified ?? true,
     emailVerificationRequired: user.emailVerificationRequired ?? false,
+    permissions: user.permissions ?? {},
   };
 }
 

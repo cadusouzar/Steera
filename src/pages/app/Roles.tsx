@@ -5,6 +5,7 @@ import { Plus, Search, X, FileQuestion, Briefcase, ChevronRight, Check, Ban, Rot
 import { useNavigate } from 'react-router-dom';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
+import { useCan } from '../../lib/auth';
 import type { Role } from '../../lib/api';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 
@@ -15,6 +16,9 @@ const COLOR_SWATCHES = [
 
 const Roles = () => {
   const navigate = useNavigate();
+  // Sem `cargos.gerenciar`: sem "Novo Cargo", e o drawer abre só pra consulta (campos travados,
+  // sem Inativar/Reativar/Salvar).
+  const canManageRoles = useCan()('cargos.gerenciar');
   const [roles, setRoles] = useState<Role[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -136,6 +140,7 @@ const Roles = () => {
               Estruture a hierarquia da sua empresa. Os cargos definidos aqui serão utilizados no cadastro de funcionários.
             </p>
           </div>
+          {canManageRoles && (
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -145,6 +150,7 @@ const Roles = () => {
             <Plus size={18} />
             Novo Cargo
           </motion.button>
+          )}
         </div>
 
         {/* Action Bar (Search) */}
@@ -323,7 +329,12 @@ const Roles = () => {
 
                 {/* Drawer Body (Form) */}
                 <div className="p-6 md:p-8 flex-1 overflow-y-auto">
-                  <div className="space-y-8">
+                  {!canManageRoles && (
+                    <p className="mb-6 rounded-xl border border-border/60 bg-secondary/30 px-4 py-3 text-sm text-muted">
+                      Seu perfil permite só consultar este cargo.
+                    </p>
+                  )}
+                  <fieldset disabled={!canManageRoles} className="space-y-8">
 
                     {/* Atribuições */}
                     <div>
@@ -371,7 +382,7 @@ const Roles = () => {
                       onChange={(v) => setSelectedRole({ ...selectedRole, customFields: v })}
                     />
 
-                  </div>
+                  </fieldset>
                 </div>
 
                 {/* Drawer Footer */}
@@ -381,7 +392,7 @@ const Roles = () => {
                   </div>
                 )}
                 <div className="p-6 md:p-8 border-t border-border/40 bg-secondary/10 flex items-center justify-between gap-4">
-                  {selectedRole.active ? (
+                  {!canManageRoles ? null : selectedRole.active ? (
                     isConfirmingDeactivate ? (
                       <motion.button
                         initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
@@ -412,8 +423,9 @@ const Roles = () => {
 
                   <div className="flex gap-3 ml-auto">
                     <button onClick={() => setSelectedRole(null)} className="px-5 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">
-                      Cancelar
+                      {canManageRoles ? 'Cancelar' : 'Fechar'}
                     </button>
+                    {canManageRoles && (
                     <motion.button
                       whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                       onClick={() => handleUpdateRole(selectedRole)}
@@ -422,6 +434,7 @@ const Roles = () => {
                     >
                       {isSaving ? 'Salvando...' : 'Salvar'}
                     </motion.button>
+                    )}
                   </div>
                 </div>
 

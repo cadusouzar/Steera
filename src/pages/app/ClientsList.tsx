@@ -8,6 +8,7 @@ import ClientReportModal from '../../components/ClientReportModal';
 import ClientTrashDrawer from '../../components/ClientTrashDrawer';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
+import { useCan } from '../../lib/auth';
 import type { ClientRecord, ClientTotals } from '../../lib/api';
 
 export type { Receivable, Subscription } from '../../lib/api';
@@ -24,6 +25,11 @@ const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 
 
 const ClientsList = () => {
   const navigate = useNavigate();
+  // Permissões por ação: "Novo Cliente" e restaurar da lixeira só com `clientes.gerenciar`;
+  // lançamentos/assinaturas no drawer só são buscados com `financas.lancamentos.ver`.
+  const can = useCan();
+  const canManageClients = can('clientes.gerenciar');
+  const canViewFinance = can('financas.lancamentos.ver');
   const [clients, setClients] = useState<Client[]>([]);
   const [totalsByClientId, setTotalsByClientId] = useState<Record<string, ClientTotals>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -88,6 +94,7 @@ const ClientsList = () => {
   // into both the open drawer (if it's this client) and the totals used by
   // the table's health badge.
   const refreshClientDetails = async (clientId: string) => {
+    if (!canViewFinance) return;
     const [receivables, subscriptions, totals] = await Promise.all([
       api.listReceivables(clientId),
       api.listSubscriptions(clientId),
@@ -101,6 +108,7 @@ const ClientsList = () => {
   const handleSelectClient = async (client: Client) => {
     setSelectedClient(client);
     setActionError(null);
+    if (!canViewFinance) return;
     setIsDrawerLoading(true);
     try {
       const [receivables, subscriptions] = await Promise.all([
@@ -269,6 +277,7 @@ const ClientsList = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          {canViewFinance && (
           <button
             onClick={() => setIsReportModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 text-foreground font-medium hover:bg-secondary transition-colors shadow-sm text-sm"
@@ -276,6 +285,7 @@ const ClientsList = () => {
             <FileText size={16} />
             Relatórios
           </button>
+          )}
           <button
             onClick={() => setIsTrashOpen(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 text-foreground font-medium hover:bg-secondary transition-colors shadow-sm text-sm"
@@ -283,6 +293,7 @@ const ClientsList = () => {
             <Trash2 size={16} />
             Lixeira
           </button>
+          {canManageClients && (
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -292,6 +303,7 @@ const ClientsList = () => {
             <Plus size={18} />
             Novo Cliente
           </motion.button>
+          )}
         </div>
       </div>
 
@@ -487,6 +499,7 @@ const ClientsList = () => {
         <ClientTrashDrawer
           onClose={() => setIsTrashOpen(false)}
           onRestored={loadClients}
+          canRestore={canManageClients}
         />,
         document.body
       )}

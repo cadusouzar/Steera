@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase, Undo2, Trash2, Ban, RotateCcw } from 'lucide-react';
 import * as api from '../lib/api';
+import { useCan } from '../lib/auth';
 import type { EmployeeDetail, EmployeePaymentRecord, EmployeeRecurringPaymentRecord } from '../lib/api';
 
 interface FinanceAndVacationModalProps {
@@ -20,7 +21,13 @@ const formatDateOnly = (dateStr: string) => {
 };
 
 const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ employeeId, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'finance' | 'vacation' | 'leave'>('finance');
+  // Permissões por ação (27/09/2026): pagamentos (ler e escrever) exigem `pagamentos.gerenciar`,
+  // então sem ela a aba Pagamentos nem aparece e nada de pagamento é buscado; agendar/cancelar/
+  // retomar férias e afastamentos exige `ferias.gerenciar` (o histórico continua visível).
+  const can = useCan();
+  const canManagePayments = can('pagamentos.gerenciar');
+  const canManageVacations = can('ferias.gerenciar');
+  const [activeTab, setActiveTab] = useState<'finance' | 'vacation' | 'leave'>(canManagePayments ? 'finance' : 'vacation');
   const [employee, setEmployee] = useState<EmployeeDetail | null>(null);
   const [payments, setPayments] = useState<EmployeePaymentRecord[]>([]);
   const [recurringPayments, setRecurringPayments] = useState<EmployeeRecurringPaymentRecord[]>([]);
@@ -50,8 +57,8 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       const [detail, paymentList, recurringList, schedules, leaveList] = await Promise.all([
         api.getEmployee(employeeId),
-        api.listEmployeePayments(employeeId),
-        api.listEmployeeRecurringPayments(employeeId),
+        canManagePayments ? api.listEmployeePayments(employeeId) : Promise.resolve([] as EmployeePaymentRecord[]),
+        canManagePayments ? api.listEmployeeRecurringPayments(employeeId) : Promise.resolve([] as EmployeeRecurringPaymentRecord[]),
         api.listVacationSchedules(employeeId),
         api.listLeaveSchedules(employeeId),
       ]);
@@ -65,7 +72,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     } finally {
       setIsLoading(false);
     }
-  }, [employeeId]);
+  }, [employeeId, canManagePayments]);
 
   useEffect(() => {
     loadFinance();
@@ -373,6 +380,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
               {/* Tabs */}
               <div className="flex border-b border-border/50 px-6 md:px-8 shrink-0">
+                {canManagePayments && (
                 <button
                   onClick={() => handleTabChange('finance')}
                   className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'finance'
@@ -382,6 +390,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                 >
                   <DollarSign size={16} /> Pagamentos
                 </button>
+                )}
                 <button
                   onClick={() => handleTabChange('vacation')}
                   className={`flex items-center gap-2 px-6 py-4 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === 'vacation'
@@ -404,7 +413,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
 
               {/* Body */}
               <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1">
-                {activeTab === 'finance' && (
+                {activeTab === 'finance' && canManagePayments && (
                   <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
                     {actionError && (
                       <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-600 rounded-xl text-sm font-medium flex items-center gap-2">
@@ -618,6 +627,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                             <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2">
                               <History size={18} className="text-primary/70" /> Histórico de Férias
                             </h3>
+                            {canManageVacations && (
                             <button
                               onClick={() => { setIsSchedulingOpen(true); setExceptionAuthorized(false); setActionError(null); setResumeCapErrorId(null); setResumeExceptionAuthorized(false); }}
                               disabled={isSchedulingOpen}
@@ -625,6 +635,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                             >
                               Agendar Férias
                             </button>
+                            )}
                           </div>
 
                           <div className="space-y-3">
@@ -647,7 +658,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                       <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
                                         {getScheduleStatusText(sched.status)}
                                       </span>
-                                      {(sched.status === 'scheduled' || sched.status === 'approved') && (
+                                      {canManageVacations && (sched.status === 'scheduled' || sched.status === 'approved') && (
                                         <button
                                           onClick={() => handleCancelVacation(sched.id)}
                                           disabled={busyId === sched.id}
@@ -656,7 +667,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                           {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
                                         </button>
                                       )}
-                                      {sched.status === 'cancelled' && (
+                                      {canManageVacations && sched.status === 'cancelled' && (
                                         <button
                                           onClick={() => handleResumeVacation(sched.id)}
                                           disabled={busyId === sched.id}
@@ -743,6 +754,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                         <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2">
                           <History size={18} className="text-primary/70" /> Histórico de Afastamentos
                         </h3>
+                        {canManageVacations && (
                         <button
                           onClick={() => setIsLeaveSchedulingOpen(true)}
                           disabled={isLeaveSchedulingOpen}
@@ -750,6 +762,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                         >
                           Agendar Afastamento
                         </button>
+                        )}
                       </div>
 
                       <div className="space-y-3">
@@ -774,7 +787,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                 <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
                                   {getScheduleStatusText(sched.status)}
                                 </span>
-                                {(sched.status === 'scheduled' || sched.status === 'approved') && (
+                                {canManageVacations && (sched.status === 'scheduled' || sched.status === 'approved') && (
                                   <button
                                     onClick={() => handleCancelLeave(sched.id)}
                                     disabled={busyId === sched.id}
@@ -783,7 +796,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                     {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
                                   </button>
                                 )}
-                                {sched.status === 'cancelled' && (
+                                {canManageVacations && sched.status === 'cancelled' && (
                                   <button
                                     onClick={() => handleResumeLeave(sched.id)}
                                     disabled={busyId === sched.id}

@@ -4,7 +4,9 @@ import { ArrowLeft, Save, Loader2, Check } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import FormField from '../../components/FormField';
+import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
 import * as api from '../../lib/api';
+import { useCan } from '../../lib/auth';
 import { inputBorderClass, NAME_MAX_LENGTH, TEXT_MAX_LENGTH } from '../../lib/validation';
 
 const COLOR_SWATCHES = [
@@ -14,6 +16,7 @@ const COLOR_SWATCHES = [
 
 const RoleForm = () => {
   const navigate = useNavigate();
+  const can = useCan();
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -67,6 +70,10 @@ const RoleForm = () => {
       setIsSaving(false);
     }
   };
+
+  if (!can('cargos.gerenciar')) {
+    return <PermissionDeniedNotice message="Seu perfil não permite cadastrar cargos." backTo="/app/cargos" backLabel="Voltar para Cargos" />;
+  }
 
   return (
     <div className="p-6 md:p-8">

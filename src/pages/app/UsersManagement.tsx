@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
-import { getCurrentUser } from '../../lib/auth';
+import { can, useCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { SystemUser, EmployeeListItem } from '../../lib/api';
 import { inputBorderClass, isValidEmail } from '../../lib/validation';
@@ -78,8 +78,15 @@ type UserNotice =
   | { kind: 'reset'; email: string; sent: boolean };
 
 const UsersManagement = () => {
-  const currentUser = getCurrentUser();
-  const isAdmin = currentUser?.role === 'admin';
+  // Permissões por ação (27/09/2026): gerenciar logins segue a permissão `usuarios.gerenciar` do
+  // perfil, não mais o papel ADMIN. O papel do CHAMADOR só importa pro que o backend reserva a
+  // administradores: criar outro login ADMIN, atribuir um perfil protegido (Administrador Geral) e
+  // reemitir o convite pendente de um ADMIN; essas opções somem pra quem não é ADMIN.
+  const currentUser = useCurrentUser();
+  const canManageUsers = can('usuarios.gerenciar', currentUser);
+  const callerIsAdmin = currentUser?.role === 'admin';
+  const roleOptions = callerIsAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((o) => o.value === 'employee');
+  const newUserForm: UserFormState = { ...emptyForm, role: callerIsAdmin ? 'admin' : 'employee' };
 
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
@@ -166,16 +173,14 @@ const UsersManagement = () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      // `api.listProfiles()` só pra admin (achado na revisão final da branch, 22/09/2026):
-      // `GET /profiles` é gated por `@Roles('ADMIN')`, mas esta tela continua visível (somente
-      // leitura) pra um login não-admin com o módulo de Funcionários — chamar incondicionalmente
-      // fazia a tela INTEIRA falhar com erro de carregamento pra esse visitante. Um não-admin
-      // também não precisa da lista: o seletor de Perfil só aparece nos fluxos de criar/editar
-      // login, ambos exclusivos de admin.
+      // `GET /profiles` e `GET /companies/me/users` exigem `usuarios.gerenciar`; sem ela, a
+      // listagem de logins recusa com 403 e a mensagem do backend aparece no banner de erro.
+      // `GET /employees` exige `funcionarios.ver` (e vem filtrada pelo alcance): sem ela a tela
+      // continua funcionando, só sem os nomes dos funcionários vinculados.
       const [systemUsers, employeeItems, profileItems] = await Promise.all([
         api.listSystemUsers(),
-        api.listEmployees(),
-        isAdmin ? api.listProfiles() : Promise.resolve([] as api.Profile[]),
+        api.listEmployees().catch(() => [] as EmployeeListItem[]),
+        canManageUsers ? api.listProfiles() : Promise.resolve([] as api.Profile[]),
       ]);
       setUsers(systemUsers);
       setEmployees(employeeItems);
@@ -185,7 +190,7 @@ const UsersManagement = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin]);
+  }, [canManageUsers]);
 
   useEffect(() => {
     loadData();
@@ -245,7 +250,7 @@ const UsersManagement = () => {
   }, [users, searchQuery, employeeById]);
 
   const openNewModal = () => {
-    setFormData(emptyForm);
+    setFormData(newUserForm);
     setActionError(null);
     setEmailError(undefined);
     setIsModalOpen(true);
@@ -281,7 +286,7 @@ const UsersManagement = () => {
       setUsers(prev => [...prev, result.user]);
       setUserNotice({ kind: 'invite', email: result.user.email, inviteUrl: result.inviteUrl, sent: result.sent });
       setIsModalOpen(false);
-      setFormData(emptyForm);
+      setFormData(newUserForm);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível criar o acesso.');
     } finally {
@@ -436,7 +441,7 @@ const UsersManagement = () => {
               Gerencie quem tem acesso ao sistema, crie novos logins e defina os módulos que cada um pode visualizar.
             </p>
           </div>
-          {isAdmin && (
+          {canManageUsers && (
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -512,7 +517,7 @@ const UsersManagement = () => {
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
                       Status
                     </th>
-                    {isAdmin && (
+                    {canManageUsers && (
                       <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">
                         Ações
                       </th>
@@ -530,8 +535,8 @@ const UsersManagement = () => {
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, scale: 0.95 }}
                           transition={{ duration: 0.2, delay: index * 0.03 }}
-                          onClick={() => isAdmin && openEditModal(user)}
-                          className={`hover:bg-secondary/40 transition-colors group ${isAdmin ? 'cursor-pointer' : ''}`}
+                          onClick={() => canManageUsers && openEditModal(user)}
+                          className={`hover:bg-secondary/40 transition-colors group ${canManageUsers ? 'cursor-pointer' : ''}`}
                         >
                           <td className="px-8 py-5">
                             <div className="flex items-center gap-4">
@@ -613,7 +618,7 @@ const UsersManagement = () => {
                               </span>
                             )}
                           </td>
-                          {isAdmin && (
+                          {canManageUsers && (
                             <td className="px-8 py-5 text-right">
                               <button
                                 type="button"
@@ -681,6 +686,7 @@ const UsersManagement = () => {
               Editar Perfil
             </button>
             {menuUser.status === 'invited' ? (
+              (callerIsAdmin || menuUser.role !== 'admin') && (
               <button
                 type="button"
                 onClick={() => { closeActionsMenu(); handleResendInvite(menuUser); }}
@@ -694,6 +700,7 @@ const UsersManagement = () => {
                 )}
                 Reenviar Convite
               </button>
+              )
             ) : (
               <button
                 type="button"
@@ -798,7 +805,7 @@ const UsersManagement = () => {
                     <CustomSelect
                       value={formData.role}
                       onChange={(val) => setFormData({ ...formData, role: val as UserFormState['role'], employeeId: '' })}
-                      options={ROLE_OPTIONS}
+                      options={roleOptions}
                     />
                   </div>
 
@@ -834,7 +841,9 @@ const UsersManagement = () => {
                   <CustomSelect
                     value={formData.profileId}
                     onChange={(val) => setFormData({ ...formData, profileId: val })}
-                    options={profiles.map((p) => ({ value: p.id, label: p.name }))}
+                    options={profiles
+                      .filter((p) => callerIsAdmin || !p.isProtected)
+                      .map((p) => ({ value: p.id, label: p.name }))}
                     placeholder="Selecione um perfil..."
                   />
                 </div>
@@ -924,7 +933,9 @@ const UsersManagement = () => {
                   <CustomSelect
                     value={editProfileId}
                     onChange={setEditProfileId}
-                    options={profiles.map((p) => ({ value: p.id, label: p.name }))}
+                    options={profiles
+                      .filter((p) => callerIsAdmin || !p.isProtected || p.id === editingUser?.profileId)
+                      .map((p) => ({ value: p.id, label: p.name }))}
                   />
                 </div>
 

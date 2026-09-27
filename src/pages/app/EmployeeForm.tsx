@@ -5,8 +5,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import CustomSelect from '../../components/CustomSelect';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import FormField from '../../components/FormField';
+import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
 import * as api from '../../lib/api';
 import type { EmployeeListItem, Role } from '../../lib/api';
+import { ApiError } from '../../lib/apiError';
+import { useCan } from '../../lib/auth';
 import {
   formatPhoneInput, formatCpfInput, inputBorderClass, isValidCpf, isValidEmail, isValidPhone,
   MONEY_MAX_VALUE, NAME_MAX_LENGTH,
@@ -14,6 +17,7 @@ import {
 
 const EmployeeForm = () => {
   const navigate = useNavigate();
+  const canCreate = useCan()('funcionarios.gerenciar');
   const [activeTab, setActiveTab] = useState('pessoal');
   const [roles, setRoles] = useState<Role[]>([]);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
@@ -53,14 +57,21 @@ const EmployeeForm = () => {
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
-    api.listActiveRoles().then(setRoles).catch(() => {
+    if (!canCreate) return;
+    api.listActiveRoles().then(setRoles).catch((err) => {
       setRoles([]);
-      setLoadError('Não foi possível carregar a lista de cargos. Recarregue a página para tentar novamente.');
+      // 403 PERMISSION_REQUIRED (perfil sem `cargos.ver`): mostra a mensagem do backend, que já
+      // explica o motivo; qualquer outra falha segue com o texto genérico.
+      setLoadError(
+        err instanceof ApiError && err.status === 403
+          ? err.message
+          : 'Não foi possível carregar a lista de cargos. Recarregue a página para tentar novamente.',
+      );
     });
     // Lista completa (não só ativos) — um funcionário pode reportar a alguém que depois foi
     // inativado; a empresa decide se isso é um problema, não escondemos a opção aqui.
     api.listEmployees().then(setEmployees).catch(() => setEmployees([]));
-  }, []);
+  }, [canCreate]);
 
   const tabs = [
     { id: 'pessoal', label: 'Dados Pessoais', icon: <User size={16} /> },
@@ -147,6 +158,10 @@ const EmployeeForm = () => {
       setIsSaving(false);
     }
   };
+
+  if (!canCreate) {
+    return <PermissionDeniedNotice message="Seu perfil não permite cadastrar funcionários." backTo="/app/funcionarios" backLabel="Voltar para Funcionários" />;
+  }
 
   return (
     <div className="p-6 md:p-8">

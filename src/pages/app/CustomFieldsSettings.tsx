@@ -6,7 +6,7 @@ import {
   HeartHandshake, Briefcase, User, ChevronDown,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
-import { getCurrentUser } from '../../lib/auth';
+import { can, useCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { CustomFieldDefinition, CustomFieldEntity, CustomFieldType } from '../../lib/api';
 import { TYPE_LABELS, renderTypedInput, parseDefaultForDisplay, serializeDefaultValue } from '../../lib/customFieldRendering';
@@ -78,8 +78,10 @@ type ConfirmAction =
     };
 
 const CustomFieldsSettings = () => {
-  const currentUser = getCurrentUser();
-  const isAdmin = currentUser?.role === 'admin';
+  // Permissões por ação (27/09/2026): criar/editar/desativar/excluir definições segue
+  // `campos-personalizados.gerenciar` do perfil, não mais o papel ADMIN (mesma regra do backend).
+  const currentUser = useCurrentUser();
+  const canManageFields = can('campos-personalizados.gerenciar', currentUser);
 
   const [entity, setEntity] = useState<CustomFieldEntity>('client');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive'>('active');
@@ -415,7 +417,7 @@ const CustomFieldsSettings = () => {
               Adicione campos próprios aos cadastros de Clientes, Cargos e Funcionários, sem precisar de código novo.
             </p>
           </div>
-          {isAdmin && (
+          {canManageFields && (
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -510,7 +512,7 @@ const CustomFieldsSettings = () => {
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Obrigatório</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Ordem</th>
                     <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Status</th>
-                    {isAdmin && (
+                    {canManageFields && (
                       <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Ações</th>
                     )}
                   </tr>
@@ -524,8 +526,8 @@ const CustomFieldsSettings = () => {
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2, delay: index * 0.03 }}
-                        onClick={() => isAdmin && openEditModal(field)}
-                        className={`hover:bg-secondary/40 transition-colors group ${isAdmin ? 'cursor-pointer' : ''}`}
+                        onClick={() => canManageFields && openEditModal(field)}
+                        className={`hover:bg-secondary/40 transition-colors group ${canManageFields ? 'cursor-pointer' : ''}`}
                       >
                         <td className="px-8 py-5">
                           <p className="text-base font-heading font-bold text-foreground">{field.displayName}</p>
@@ -558,7 +560,7 @@ const CustomFieldsSettings = () => {
                             </span>
                           )}
                         </td>
-                        {isAdmin && (
+                        {canManageFields && (
                           <td className="px-8 py-5 text-right">
                             <button
                               type="button"

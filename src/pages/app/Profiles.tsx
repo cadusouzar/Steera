@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Check, ChevronRight, Eye, Loader2, Lock, Pencil, Plus, Shield, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, Eye, Loader2, Lock, Pencil, Plus, Shield, Trash2, X } from 'lucide-react';
 import CustomSelect from '../../components/CustomSelect';
 import * as api from '../../lib/api';
 import type { PermissionCatalogEntry, Profile } from '../../lib/api';
@@ -113,13 +113,6 @@ const Question = ({ title, helper, kind = 'radiogroup', children }: { title: str
   );
 };
 
-const ViewOnlyNotice = () => (
-  <div className="flex gap-2 text-sm text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
-    <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-    <span>Por enquanto, quem pode ver esta área também consegue alterar os dados. Isso ainda vai ser ajustado.</span>
-  </div>
-);
-
 // ---------------------------------------------------------------------------------------------
 // Perguntas de cada área (painel da direita)
 // ---------------------------------------------------------------------------------------------
@@ -168,7 +161,6 @@ const LevelPanel = ({ area, grants, catalog, onChange }: PanelProps) => {
           />
         ))}
       </Question>
-      {level === 'view' && <ViewOnlyNotice />}
     </div>
   );
 };
@@ -208,7 +200,6 @@ const FuncionariosPanel = ({ grants, catalog, onChange }: PanelProps) => {
             />
           ))}
         </Question>
-        {view.level === 'view' && <ViewOnlyNotice />}
       </div>
 
       {showScope && (

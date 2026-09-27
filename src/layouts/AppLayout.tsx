@@ -8,7 +8,7 @@ import LockedNavItem from '../components/LockedNavItem';
 import PlanUpgradeNotice from '../components/PlanUpgradeNotice';
 import PlanUpgradeModal, { type PlanUpgradeTarget } from '../components/PlanUpgradeModal';
 import type { PlanCatalogItem } from '../lib/api';
-import { getCurrentUser } from '../lib/auth';
+import { can, useCurrentUser } from '../lib/auth';
 import { PLAN_ITEM_LABELS } from '../lib/planCatalog';
 import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield, Settings } from 'lucide-react';
 
@@ -43,7 +43,7 @@ type AppModule =
 const AppLayout = () => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
-  const currentUser = getCurrentUser();
+  const currentUser = useCurrentUser();
 
   // Filtro de navegação por módulo: convenção de UI apenas (esconde links
   // que o usuário não tem em `modules`) — não é a fronteira de segurança
@@ -52,7 +52,16 @@ const AppLayout = () => {
   // ADMIN e EMPLOYEE — nenhum bypass aqui pra `role === 'ADMIN'`.
   const userModules = currentUser?.modules ?? [];
   const hasModule = (module: AppModule) => userModules.includes(module);
-  const isAdmin = currentUser?.role === 'admin';
+  // Permissões por ação (Fase 2b, 27/09/2026): o módulo vem derivado do perfil e acende com QUALQUER
+  // permissão da área (ex.: só "Agendar férias" já liga RH_FUNCIONARIOS), mas a listagem exige o
+  // `.ver` — então o link da área só aparece com as duas coisas. Cadeado de plano não muda: estes
+  // três módulos são do plano Grátis. Administração segue a permissão, não o papel.
+  const hasPermission = (code: string) => can(code, currentUser);
+  const showClientes = hasModule('CLIENTES') && hasPermission('clientes.ver');
+  const showCargos = hasModule('RH_CARGOS') && hasPermission('cargos.ver');
+  const showFuncionarios = hasModule('RH_FUNCIONARIOS') && hasPermission('funcionarios.ver');
+  const canManageUsers = hasPermission('usuarios.gerenciar');
+  const canManageCustomFields = hasPermission('campos-personalizados.gerenciar');
 
   // Cadeado por plano (Task 6, 26/09/2026): módulo/recurso que o PERFIL do login concede mas o
   // PLANO da empresa não inclui — ver UserPlan em src/lib/auth.ts. `null`/empresa sem info de
@@ -128,7 +137,7 @@ const AppLayout = () => {
               Visão Geral
             </Link>
           )}
-          {hasModule('CLIENTES') && (
+          {showClientes && (
             <Link
               to="/app/clientes"
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
@@ -142,7 +151,7 @@ const AppLayout = () => {
 
           {/* Recursos Humanos Submenu — só Cargos/Funcionários desde 17/09/2026 (Ponto virou um
               menu próprio, independente, logo abaixo) */}
-          {(hasModule('RH_CARGOS') || hasModule('RH_FUNCIONARIOS')) && (
+          {(showCargos || showFuncionarios) && (
           <div className="space-y-1">
             <button
               onClick={() => setIsHrOpen(!isHrOpen)}
@@ -161,7 +170,7 @@ const AppLayout = () => {
 
             <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isHrOpen ? 'max-h-24 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <div className="pl-11 pr-2 space-y-1">
-                {hasModule('RH_FUNCIONARIOS') && (
+                {showFuncionarios && (
                 <Link
                   to="/app/funcionarios"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
@@ -171,7 +180,7 @@ const AppLayout = () => {
                   Funcionários
                 </Link>
                 )}
-                {hasModule('RH_CARGOS') && (
+                {showCargos && (
                 <Link
                   to="/app/cargos"
                   className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
@@ -355,15 +364,15 @@ const AppLayout = () => {
             )
           )}
 
-          {/* Seção Administração — achado num teste manual do usuário (17/09/2026): estava
-              aparecendo pra QUALQUER login autenticado, inclusive EMPLOYEE, mesmo o backend já
-              exigindo @Roles('ADMIN') pra qualquer ação de escrita nas duas telas. Gateada por
-              role agora (não por módulo — gerenciar logins/campos personalizados nunca foi uma
-              questão de módulo, sempre foi admin-only). */}
-          {isAdmin && (
+          {/* Seção Administração — gateada pelas permissões do perfil (27/09/2026), não mais por
+              `role === 'admin'`: Usuários e Perfis com `usuarios.gerenciar`, Campos Personalizados
+              com `campos-personalizados.gerenciar` (as mesmas que o backend exige). */}
+          {(canManageUsers || canManageCustomFields) && (
             <>
               <div className="text-xs font-semibold text-muted uppercase tracking-wider mt-8 pt-6 border-t border-border/40 mb-4 px-2">Administração</div>
 
+              {canManageUsers && (
+              <>
               <Link
                 to="/app/usuarios"
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
@@ -383,7 +392,10 @@ const AppLayout = () => {
                 <Shield size={18} />
                 Perfis de Acesso
               </Link>
+              </>
+              )}
 
+              {canManageCustomFields && (
               <Link
                 to="/app/campos-personalizados"
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
@@ -393,6 +405,7 @@ const AppLayout = () => {
                 <Settings size={18} />
                 Campos Personalizados
               </Link>
+              )}
             </>
           )}
         </nav>

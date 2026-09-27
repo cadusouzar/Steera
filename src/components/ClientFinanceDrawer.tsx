@@ -4,6 +4,7 @@ import { X, DollarSign, Calendar, CheckCircle2, Plus, Receipt, FileText, Repeat,
 import type { Client, Receivable, Subscription } from '../pages/app/ClientsList';
 import CustomFieldsFormSection from './CustomFieldsFormSection';
 import { inputBorderClass, isValidEmail } from '../lib/validation';
+import { useCan } from '../lib/auth';
 
 // Parses a date-only "YYYY-MM-DD" string as local midnight instead of
 // letting `new Date(str)` parse it as UTC midnight (which displays as the
@@ -43,6 +44,13 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
   onAddReceivable, onAddSubscription, onDeleteSubscription, onGenerateCharge, isLoading,
   actionError, onDismissError, onUpdateClient, onDeactivateClient, onRestoreClient
 }) => {
+  // Permissões por ação (27/09/2026): editar/excluir/reativar o cliente exige `clientes.gerenciar`;
+  // ver lançamentos/assinaturas exige `financas.lancamentos.ver`; criar/pagar/desfazer/excluir/gerar
+  // fatura exige `financas.lancamentos.gerenciar`. Sem a permissão, o botão nem aparece.
+  const can = useCan();
+  const canManageClient = can('clientes.gerenciar');
+  const canViewFinance = can('financas.lancamentos.ver');
+  const canManageFinance = can('financas.lancamentos.gerenciar');
   const [isAdding, setIsAdding] = useState(false);
   const [addType, setAddType] = useState<'single' | 'recurring'>('single');
 
@@ -223,7 +231,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
           {/* Header */}
           <div className="p-6 md:p-8 border-b border-border/40 shrink-0 bg-secondary/10">
             <div className="flex justify-between items-start mb-6">
-              {!isEditing && !isLoading ? (
+              {!isEditing && !isLoading && canManageClient ? (
                 <button onClick={handleEditClick} className="p-2 text-primary hover:text-primary bg-primary/10 hover:bg-primary/20 rounded-full transition-colors" title="Editar Cliente">
                   <Edit2 size={18} />
                 </button>
@@ -321,8 +329,16 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
               </div>
             )}
 
+            {!isLoading && !canViewFinance && (
+              <div className="text-center py-10 bg-secondary/10 border border-border/40 border-dashed rounded-2xl">
+                <Receipt size={32} className="mx-auto text-muted/50 mb-3" />
+                <p className="text-sm font-bold text-foreground">Lançamentos indisponíveis</p>
+                <p className="text-xs text-muted mt-1">Seu perfil não permite ver os lançamentos e assinaturas deste cliente.</p>
+              </div>
+            )}
+
             {/* Action Bar */}
-            {!isLoading && !isAdding && (
+            {!isLoading && !isAdding && canManageFinance && (
               <div className="flex justify-end">
                 <button 
                   onClick={() => setIsAdding(true)}
@@ -410,7 +426,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
             </AnimatePresence>
 
             {/* Subscriptions Section */}
-            {!isLoading && activeSubscriptions.length > 0 && (
+            {!isLoading && canViewFinance && activeSubscriptions.length > 0 && (
               <div>
                 <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2 mb-4">
                   <Repeat size={18} className="text-accent" /> Assinaturas Ativas
@@ -441,7 +457,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                             <span className="flex items-center gap-1.5 text-xs font-bold text-muted bg-secondary/50 px-3 py-2 rounded-xl border border-border/40">
                               <CheckCircle2 size={14} /> Fatura deste mês já gerada
                             </span>
-                          ) : (
+                          ) : canManageFinance && (
                             <button
                               onClick={() => triggerGenerateCharge(sub.id)}
                               className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-white bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm"
@@ -453,6 +469,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                       </div>
 
                       {/* Delete Subscription Action */}
+                      {canManageFinance && (
                       <div className="flex items-center gap-2 justify-end border-t border-border/40 pt-3 mt-3">
                         {confirmingDeleteSub === sub.id ? (
                           <>
@@ -480,6 +497,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                           </button>
                         )}
                       </div>
+                      )}
 
                     </div>
                   ))}
@@ -488,7 +506,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
             )}
 
             {/* Receivables History */}
-            {!isLoading && (
+            {!isLoading && canViewFinance && (
             <div>
               <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2 mb-4 mt-6">
                 <Receipt size={18} className="text-primary/70" /> Histórico de Lançamentos
@@ -549,7 +567,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                                  <Trash2 size={12} /> Confirmar Exclusão
                                </motion.button>
                              </div>
-                          ) : (
+                          ) : canManageFinance && (
                             /* Standard Actions */
                             <>
                               <button 
@@ -627,7 +645,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                 </button>
               </motion.div>
             ) : (
-              !isLoading && client.status === 'active' && (
+              !isLoading && canManageClient && client.status === 'active' && (
                 <motion.div
                   key="delete-footer"
                   initial={{ opacity: 0, y: 20 }}
@@ -645,7 +663,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                 </motion.div>
               )
             )}
-            {!isEditing && !isLoading && client.status === 'inactive' && (
+            {!isEditing && !isLoading && canManageClient && client.status === 'inactive' && (
               <motion.div
                 key="restore-footer"
                 initial={{ opacity: 0, y: 20 }}

@@ -4,11 +4,14 @@ import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import FormField from '../../components/FormField';
+import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
 import * as api from '../../lib/api';
+import { useCan } from '../../lib/auth';
 import { inputBorderClass, isValidEmail, NAME_MAX_LENGTH } from '../../lib/validation';
 
 const ClientForm = () => {
   const navigate = useNavigate();
+  const can = useCan();
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -59,6 +62,10 @@ const ClientForm = () => {
       setIsSaving(false);
     }
   };
+
+  if (!can('clientes.gerenciar')) {
+    return <PermissionDeniedNotice message="Seu perfil não permite cadastrar clientes." backTo="/app/clientes" backLabel="Voltar para Clientes" />;
+  }
 
   return (
     <div className="p-6 md:p-8">

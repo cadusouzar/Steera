@@ -10,6 +10,8 @@ interface ClientTrashDrawerProps {
   // listagem padrão de clientes (mais simples do que reconstruir o estado
   // completo do cliente a partir do payload parcial da lixeira).
   onRestored: () => void;
+  // Sem `clientes.gerenciar` a lixeira fica só em leitura (o botão Restaurar some).
+  canRestore: boolean;
 }
 
 const DAYS_UNTIL_PURGE = 30;
@@ -21,7 +23,7 @@ function daysRemaining(deactivatedAt: string | null): number {
   return Math.max(0, DAYS_UNTIL_PURGE - elapsedDays);
 }
 
-const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ onClose, onRestored }) => {
+const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ onClose, onRestored, canRestore }) => {
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +116,7 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ onClose, onRestor
                           {remaining > 0 ? `Expira em ${remaining} dia${remaining === 1 ? '' : 's'}` : 'Expira hoje'}
                         </p>
                       </div>
+                      {canRestore && (
                       <button
                         onClick={() => handleRestore(client.id)}
                         disabled={isRestoring}
@@ -122,6 +125,7 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ onClose, onRestor
                         <RotateCcw size={14} />
                         {isRestoring ? 'Restaurando...' : 'Restaurar'}
                       </button>
+                      )}
                     </div>
                   );
                 })}

@@ -6,12 +6,12 @@ import {
   Check, X, Loader2, Plus, Paperclip, Wrench,
 } from 'lucide-react';
 import {
-  listEmployees, listManageableEmployees, listTimeInconsistencies, listPendingAdjustmentRequests, approveAdjustmentRequest,
+  listManageableEmployees, listTimeInconsistencies, listPendingAdjustmentRequests, approveAdjustmentRequest,
   rejectAdjustmentRequest, listJustificationsForReview, reviewJustification, proactiveCorrection,
   listCompanyTimeEvents, listWorkSchedules, createWorkSchedule, listWorkLocations, createWorkLocation,
   updateWorkLocation, getTimeTrackingSettings, updateTimeTrackingSettings, fetchProtectedFileObjectUrl,
   hasDirectReports,
-  type EmployeeListItem, type TimePunch, type AdjustmentRequestRecord, type JustificationRecord,
+  type TimePunch, type AdjustmentRequestRecord, type JustificationRecord,
   type TimePunchType, type WorkScheduleRecord, type WorkLocationRecord, type TimeTrackingSettingsRecord,
 } from '../../lib/api';
 import { getCurrentUser } from '../../lib/auth';
@@ -95,8 +95,11 @@ const TimeTrackingAdmin = () => {
   const [activeTab, setActiveTab] = useState<TabKey>('inconsistencies');
 
   // Mapa employeeId -> nome, reaproveitado por todas as seções (nenhuma das listagens
-  // administrativas devolve o nome do funcionário junto, só o id).
-  const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
+  // administrativas devolve o nome do funcionário junto, só o id). Vem de
+  // GET /time-management/manageable-employees (exige só `ponto.administrar`, já no alcance do
+  // Ponto), não de GET /employees, que exige `funcionarios.ver`: quem administra o Ponto sem ver o
+  // cadastro de Funcionários continua vendo os nomes.
+  const [employees, setEmployees] = useState<{ id: string; fullName: string }[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const employeeName = useCallback(
     (id: string) => employees.find((e) => e.id === id)?.fullName ?? id,
@@ -104,7 +107,7 @@ const TimeTrackingAdmin = () => {
   );
 
   useEffect(() => {
-    listEmployees().then(setEmployees).catch(() => {}).finally(() => setLoadingEmployees(false));
+    listManageableEmployees().then(setEmployees).catch(() => {}).finally(() => setLoadingEmployees(false));
   }, []);
 
   return (

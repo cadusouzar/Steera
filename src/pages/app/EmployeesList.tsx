@@ -8,6 +8,7 @@ import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
+import { can, permissionScope, useCurrentUser } from '../../lib/auth';
 import type { EmployeeDetail, EmployeeListItem, EmployeeWarning, Role } from '../../lib/api';
 import { formatCpfInput, formatPhoneInput, inputBorderClass, isValidCpf, isValidEmail, isValidPhone } from '../../lib/validation';
 
@@ -28,8 +29,21 @@ const formatDateOnly = (dateStr: string) => {
 const EmployeesList = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  // Permissões por ação (27/09/2026): cada botão de escrita some sem a permissão da área
+  // (funcionarios.gerenciar pra novo/editar/inativar/reativar, advertencias.gerenciar pra registrar
+  // advertência). Alcance restrito (PROPRIO/EQUIPE/DEPARTAMENTO) sem ficha vinculada devolve lista
+  // vazia do backend; a tela explica o motivo em vez de "nenhum resultado".
+  const currentUser = useCurrentUser();
+  const canManageEmployees = can('funcionarios.gerenciar', currentUser);
+  const canManageWarnings = can('advertencias.gerenciar', currentUser);
+  const viewScope = permissionScope('funcionarios.ver', currentUser);
+  const isRestrictedWithoutRecord =
+    !!viewScope && viewScope !== 'EMPRESA' && !currentUser?.employeeId;
   const [employeeItems, setEmployeeItems] = useState<EmployeeListItem[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  // Cargos vêm de GET /roles/active, que exige `cargos.ver`; sem ela a lista de funcionários
+  // continua funcionando, só sem o nome do cargo.
+  const [rolesUnavailable, setRolesUnavailable] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -56,15 +70,20 @@ const EmployeesList = () => {
   const [warningDate, setWarningDate] = useState('');
   const [warningReason, setWarningReason] = useState('');
 
-  const roleNameById = (roleId: string) => roles.find(r => r.id === roleId)?.name ?? '(cargo inativo)';
+  const roleNameById = (roleId: string) =>
+    rolesUnavailable ? 'Cargo não disponível' : roles.find(r => r.id === roleId)?.name ?? '(cargo inativo)';
 
   const loadList = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [items, activeRoles] = await Promise.all([api.listEmployees(), api.listActiveRoles()]);
+      const [items, activeRoles] = await Promise.all([
+        api.listEmployees(),
+        api.listActiveRoles().catch(() => null),
+      ]);
       setEmployeeItems(items);
-      setRoles(activeRoles);
+      setRoles(activeRoles ?? []);
+      setRolesUnavailable(activeRoles === null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os funcionários.');
     } finally {
@@ -267,6 +286,7 @@ const EmployeesList = () => {
             <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Gestão de Funcionários</h1>
             <p className="text-muted text-sm mt-1">Gerencie a base de pessoas da sua empresa.</p>
           </div>
+          {canManageEmployees && (
           <Link
             to="/app/funcionarios/novo"
             className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
@@ -274,6 +294,7 @@ const EmployeesList = () => {
             <Plus size={18} />
             Novo Funcionário
           </Link>
+          )}
         </div>
 
         {/* Action Bar */}
@@ -401,6 +422,16 @@ const EmployeesList = () => {
                 </tbody>
               </table>
             </div>
+          ) : employeeItems.length === 0 && isRestrictedWithoutRecord ? (
+            <div className="py-24 px-6 text-center flex flex-col items-center justify-center">
+              <div className="w-20 h-20 bg-secondary/50 rounded-[2rem] flex items-center justify-center text-muted mb-6 shadow-sm border border-border/50">
+                <User size={40} />
+              </div>
+              <h3 className="text-xl font-heading font-bold text-foreground mb-2">Nenhuma ficha vinculada</h3>
+              <p className="text-muted max-w-md text-base">
+                Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário. Peça a quem administra os acessos para vincular.
+              </p>
+            </div>
           ) : (
             <div className="py-24 px-6 text-center flex flex-col items-center justify-center">
               <div className="w-20 h-20 bg-secondary/50 rounded-[2rem] flex items-center justify-center text-muted mb-6 rotate-12 shadow-sm border border-border/50">
@@ -495,7 +526,7 @@ const EmployeesList = () => {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      {!isEditing && (
+                      {!isEditing && canManageEmployees && (
                         <button
                           onClick={handleEditClick}
                           className="p-2 text-primary hover:text-primary bg-primary/10 hover:bg-primary/20 rounded-full transition-colors flex items-center justify-center"
@@ -542,7 +573,7 @@ const EmployeesList = () => {
                               INATIVO
                             </span>
                           )}
-                          {selectedEmployee.status === 'active' ? (
+                          {!canManageEmployees ? null : selectedEmployee.status === 'active' ? (
                             <button onClick={handleDeactivateEmployee} disabled={isSaving} className="ml-3 text-xs font-bold text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 disabled:opacity-60">
                               <Ban size={12} /> Inativar
                             </button>
@@ -648,12 +679,14 @@ const EmployeesList = () => {
                               <AlertCircle size={16} className="text-orange-500" />
                               Histórico de Advertências
                             </h4>
+                            {canManageWarnings && (
                             <button
                               onClick={openWarning}
                               className="text-xs font-bold text-red-500 hover:text-red-600 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg transition-colors"
                             >
                               + Adicionar
                             </button>
+                            )}
                           </div>
 
                           {selectedEmployee.warnings.length > 0 ? (
