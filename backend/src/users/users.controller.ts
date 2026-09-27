@@ -10,7 +10,9 @@ import { UsersService } from './users.service';
 // Permissões por ação e alcance (Task 6, 27/09/2026): toda rota de logins exige a permissão
 // `usuarios.gerenciar` do perfil, não mais o papel ADMIN (inclusive a listagem, que antes era livre
 // pra qualquer login autenticado). Criar login ADMIN / atribuir perfil protegido continua restrito a
-// chamador ADMIN, checado no service (UsersService.assertCallerCanGrant).
+// chamador ADMIN, assim como reemitir o convite de um ADMIN — checado no service via
+// assertCallerCanCreateRole/assertCallerCanAssignProfile/assertCallerCanReissueInvite
+// (users/caller-escalation.util.ts).
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('companies/me/users')
 export class UsersController {
@@ -60,7 +62,7 @@ export class UsersController {
   @RequirePermission('usuarios.gerenciar')
   @Patch(':id/reset-password')
   resetPassword(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.users.resetPassword(user.companyId, id);
+    return this.users.resetPassword(user.companyId, id, user);
   }
 
   // Só pra login INVITED (400 "Este login já aceitou o convite." caso contrário). Reemite o token (o
@@ -68,7 +70,7 @@ export class UsersController {
   @RequirePermission('usuarios.gerenciar')
   @Patch(':id/resend-invite')
   resendInvite(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.users.resendInvite(user.companyId, id);
+    return this.users.resendInvite(user.companyId, id, user);
   }
 
   @RequirePermission('usuarios.gerenciar')

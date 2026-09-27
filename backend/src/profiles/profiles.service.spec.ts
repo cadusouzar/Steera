@@ -554,6 +554,46 @@ describe('reassignAndDelete', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  // Task 6, fix round 1: mover logins pro perfil protegido (Administrador Geral) é atribuí-lo, a
+  // mesma regra de UsersService.create()/assignProfile(): só um chamador ADMIN.
+  it('lança 403 PERMISSION_REQUIRED se um chamador não ADMIN reatribuir para o perfil protegido, sem transação', async () => {
+    const prisma = {
+      profile: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce({ id: 'source', isProtected: false })
+          .mockResolvedValueOnce({ id: 'target', name: 'Administrador Geral', isProtected: true }),
+      },
+      $transaction: jest.fn(),
+    };
+    const service = new ProfilesService(prisma as any, makeTimeAuth());
+
+    const err = await service
+      .reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false }))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ForbiddenException);
+    expect(err.getResponse()).toEqual({
+      statusCode: 403,
+      code: 'PERMISSION_REQUIRED',
+      message: 'Só um administrador pode atribuir o perfil Administrador Geral.',
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('permite a um chamador ADMIN reatribuir para o perfil protegido', async () => {
+    const { prisma, tx } = makeTxPrisma();
+    prisma.profile.findFirst = jest
+      .fn()
+      .mockResolvedValueOnce({ id: 'source', isProtected: false })
+      .mockResolvedValueOnce({ id: 'target', name: 'Administrador Geral', isProtected: true });
+    tx.profilePermission.findMany.mockResolvedValue([]);
+    tx.user.findMany.mockResolvedValue([]);
+    const service = new ProfilesService(prisma as any, makeTimeAuth());
+
+    await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
+    expect(tx.profile.delete).toHaveBeenCalledWith({ where: { id: 'source' } });
+  });
+
   it('lança NotFoundException se o destino não existir na empresa', async () => {
     const prisma = {
       profile: {

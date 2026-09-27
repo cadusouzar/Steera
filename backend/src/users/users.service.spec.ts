@@ -562,7 +562,7 @@ describe('UsersService', () => {
   describe('resetPassword', () => {
     it('404s for a login from another company', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
-      await expect(service.resetPassword('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.resetPassword('c1', 'u-outra-empresa', makeCaller())).rejects.toBeInstanceOf(NotFoundException);
     });
 
     // Task 7 ("Acesso e sessões"): em vez de gerar 'Mudar@123', envia um link de redefinição pro
@@ -571,7 +571,7 @@ describe('UsersService', () => {
     it('ACTIVE login: issues a PASSWORD_RESET token and e-mails the link, changing nothing on the login', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'ana@a.com', role: 'EMPLOYEE', status: 'ACTIVE' });
 
-      const result: any = await service.resetPassword('c1', 'u1');
+      const result: any = await service.resetPassword('c1', 'u1', makeCaller());
 
       expect(userTokens.issue).toHaveBeenCalledWith('u1', 'PASSWORD_RESET');
       expect(email.send).toHaveBeenCalledTimes(1);
@@ -589,14 +589,14 @@ describe('UsersService', () => {
     it('reports sent: false when the provider refuses', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'ana@a.com', role: 'ADMIN', status: 'ACTIVE' });
       email.send.mockResolvedValue(false);
-      await expect(service.resetPassword('c1', 'u1')).resolves.toEqual({ sent: false });
+      await expect(service.resetPassword('c1', 'u1', makeCaller())).resolves.toEqual({ sent: false });
     });
 
     it('INVITED login: re-sends the invite instead and returns { sent, inviteUrl }', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'ana@a.com', role: 'EMPLOYEE', status: 'INVITED' });
       prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'Padaria Central' });
 
-      const result = await service.resetPassword('c1', 'u1');
+      const result = await service.resetPassword('c1', 'u1', makeCaller());
 
       expect(inviteMailer.sendInvite).toHaveBeenCalledWith('u1', 'ana@a.com', 'Padaria Central');
       expect(userTokens.issue).not.toHaveBeenCalled();
@@ -610,7 +610,7 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', role: 'EMPLOYEE', status });
       prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
       prisma.user.count.mockResolvedValue(2);
-      await expect(service.resetPassword('c1', 'u1')).resolves.toEqual({ sent: true });
+      await expect(service.resetPassword('c1', 'u1', makeCaller())).resolves.toEqual({ sent: true });
       expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(prisma.user.count).not.toHaveBeenCalled();
       expect(userTokens.issue).toHaveBeenCalledWith('u1', 'PASSWORD_RESET');
@@ -619,14 +619,14 @@ describe('UsersService', () => {
 
     it('does not check the plan limit for an already-ACTIVE EMPLOYEE login', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', role: 'EMPLOYEE', status: 'ACTIVE' });
-      await service.resetPassword('c1', 'u1');
+      await service.resetPassword('c1', 'u1', makeCaller());
       expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(email.send).toHaveBeenCalled();
     });
 
     it('never checks the plan limit for an ADMIN login', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1', email: 'a@a.com', role: 'ADMIN', status: 'BLOCKED' });
-      await service.resetPassword('c1', 'admin1');
+      await service.resetPassword('c1', 'admin1', makeCaller());
       expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(email.send).toHaveBeenCalled();
     });
@@ -635,21 +635,98 @@ describe('UsersService', () => {
   describe('resendInvite', () => {
     it('404s for a login from another company', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
-      await expect(service.resendInvite('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.resendInvite('c1', 'u-outra-empresa', makeCaller())).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it.each(['ACTIVE', 'BLOCKED', 'LOCKED'])('rejects a %s login with "Este login já aceitou o convite."', async (status) => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', status });
-      await expect(service.resendInvite('c1', 'u1')).rejects.toThrow(new BadRequestException('Este login já aceitou o convite.'));
+      await expect(service.resendInvite('c1', 'u1', makeCaller())).rejects.toThrow(new BadRequestException('Este login já aceitou o convite.'));
       expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
     });
 
     it('re-issues and re-sends the invite for an INVITED login, returning { inviteUrl, sent }', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'a@a.com', status: 'INVITED' });
       prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'Padaria Central' });
-      const result = await service.resendInvite('c1', 'u1');
+      const result = await service.resendInvite('c1', 'u1', makeCaller());
       expect(inviteMailer.sendInvite).toHaveBeenCalledWith('u1', 'a@a.com', 'Padaria Central');
       expect(result).toEqual({ inviteUrl: 'http://localhost:5173/aceitar-convite?token=raw-invite', sent: true });
+    });
+  });
+
+  // Task 6, fix round 1: com Usuários liberado por `usuarios.gerenciar` (não mais pelo papel), um
+  // login EMPLOYEE com a permissão podia reenviar o convite de um ADMIN ainda INVITED e receber o
+  // `inviteUrl` cru na resposta, aceitando o convite ele mesmo e virando ADMIN. Recusado ANTES de
+  // emitir token ou enviar e-mail.
+  describe('reemissão de convite de ADMIN por quem não é ADMIN', () => {
+    const BODY = {
+      statusCode: 403,
+      code: 'PERMISSION_REQUIRED',
+      message: 'Só um administrador pode reenviar o convite de outro administrador.',
+    };
+    const nonAdmin = () => makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false, permissions: { 'usuarios.gerenciar': null } });
+
+    it('resendInvite: alvo ADMIN INVITED + chamador EMPLOYEE -> 403, sem token nem e-mail', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'a1', companyId: 'c1', email: 'adm@a.com', role: 'ADMIN', status: 'INVITED' });
+      const err = await service.resendInvite('c1', 'a1', nonAdmin()).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toEqual(BODY);
+      expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
+      expect(userTokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('resendInvite: alvo ADMIN INVITED + chamador ADMIN -> reenviado como hoje', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'a1', companyId: 'c1', email: 'adm@a.com', role: 'ADMIN', status: 'INVITED' });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'Padaria Central' });
+      const result = await service.resendInvite('c1', 'a1', makeCaller());
+      expect(inviteMailer.sendInvite).toHaveBeenCalledWith('a1', 'adm@a.com', 'Padaria Central');
+      expect(result.inviteUrl).toBe('http://localhost:5173/aceitar-convite?token=raw-invite');
+    });
+
+    it('resendInvite: alvo EMPLOYEE INVITED + chamador EMPLOYEE com a permissão -> reenviado', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', email: 'f@a.com', role: 'EMPLOYEE', status: 'INVITED' });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'Padaria Central' });
+      await service.resendInvite('c1', 'u1', nonAdmin());
+      expect(inviteMailer.sendInvite).toHaveBeenCalled();
+    });
+
+    it('resetPassword: alvo ADMIN INVITED + chamador EMPLOYEE -> 403, sem token nem e-mail', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'a1', companyId: 'c1', email: 'adm@a.com', role: 'ADMIN', status: 'INVITED' });
+      const err = await service.resetPassword('c1', 'a1', nonAdmin()).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toEqual(BODY);
+      expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+    });
+
+    it('resetPassword: alvo ADMIN INVITED + chamador ADMIN -> reenvia o convite como hoje', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'a1', companyId: 'c1', email: 'adm@a.com', role: 'ADMIN', status: 'INVITED' });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'Padaria Central' });
+      const result = await service.resetPassword('c1', 'a1', makeCaller());
+      expect(inviteMailer.sendInvite).toHaveBeenCalled();
+      expect(result.inviteUrl).toBe('http://localhost:5173/aceitar-convite?token=raw-invite');
+    });
+
+    // O link de redefinição de um ADMIN ACTIVE vai só pro e-mail do próprio ADMIN (nunca volta na
+    // resposta), então não é uma via de tomada de conta: continua permitido.
+    it('resetPassword: alvo ADMIN ACTIVE + chamador EMPLOYEE -> só envia o link pro e-mail do alvo, sem devolvê-lo', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'a1', companyId: 'c1', email: 'adm@a.com', role: 'ADMIN', status: 'ACTIVE' });
+      const result = await service.resetPassword('c1', 'a1', nonAdmin());
+      expect(result).toEqual({ sent: true });
+      expect(email.send.mock.calls[0][0].to).toBe('adm@a.com');
+    });
+
+    // unblock() nunca emite token nem envia e-mail: só devolve um ADMIN que nunca aceitou o convite
+    // pra INVITED; a reemissão em si passa por resendInvite/resetPassword, já barrados acima.
+    it('unblock: devolve um ADMIN pra INVITED sem emitir token nem enviar e-mail', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'a1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: false,
+      });
+      const result = await service.unblock('c1', 'a1');
+      expect(result).toBeUndefined();
+      expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
     });
   });
 

@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { assertCallerCanAssignProfile } from '../users/caller-escalation.util';
 import { Scope } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
@@ -200,6 +201,9 @@ export class ProfilesService {
     if (!source) throw new NotFoundException(`Perfil ${id} não encontrado nesta empresa`);
     if (source.isProtected) throw new ForbiddenException('Este perfil é protegido e não pode ser excluído');
     if (!target) throw new NotFoundException(`Perfil ${dto.targetProfileId} não encontrado nesta empresa`);
+    // Task 6, fix round 1: mover logins pro perfil protegido é atribuí-lo — mesma trava de
+    // UsersService.create()/assignProfile(), antes de qualquer escrita.
+    assertCallerCanAssignProfile(target, currentUser);
 
     // Transação montada à mão no client CENTRAL (mesmo padrão e mesmo motivo de update() acima):
     // `User`/`Profile`/`ProfilePermission` são tabelas CENTRAIS, inalcançáveis por um client de

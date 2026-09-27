@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,11 @@ import { LAST_HOLDER_PROTECTED_PERMISSION_CODES } from '../permissions/protected
 import { planLimit } from '../plans/plan-catalog';
 import { assertBelowPlanLimit, PLAN_COUNTED_LOGIN_STATUSES } from '../plans/plan-limits.util';
 import { CreateUserDto } from './dto/create-user.dto';
+import {
+  assertCallerCanAssignProfile,
+  assertCallerCanCreateRole,
+  assertCallerCanReissueInvite,
+} from './caller-escalation.util';
 import { InviteMailer } from '../auth/user-tokens/invite-mailer';
 import { UserTokensService } from '../auth/user-tokens/user-tokens.service';
 import { EmailService } from '../email/email.service';
@@ -80,34 +85,9 @@ export class UsersService {
     return users.map((u) => this.toPublicUser(u));
   }
 
-  // Permissões por ação e alcance (Task 6, 27/09/2026): as rotas de Usuários passaram a exigir a
-  // permissão `usuarios.gerenciar` em vez do papel ADMIN, então um login EMPLOYEE com essa
-  // permissão administra logins. Sem esta regra, ele poderia se promover indiretamente: criar um
-  // login ADMIN novo (com convite pro próprio e-mail) ou atribuir o perfil protegido
-  // (Administrador Geral, com todas as permissões). Chamador ADMIN segue como antes.
-  private assertCallerCanCreateRole(role: 'ADMIN' | 'EMPLOYEE', currentUser: AuthenticatedUser): void {
-    if (role === 'ADMIN' && currentUser.role !== 'ADMIN') {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'PERMISSION_REQUIRED',
-        message: 'Só um administrador pode criar outro login de administrador.',
-      });
-    }
-  }
-
-  private assertCallerCanAssignProfile(profile: { name: string; isProtected: boolean }, currentUser: AuthenticatedUser): void {
-    if (profile.isProtected && currentUser.role !== 'ADMIN') {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'PERMISSION_REQUIRED',
-        message: `Só um administrador pode atribuir o perfil ${profile.name}.`,
-      });
-    }
-  }
-
   async create(companyId: string, dto: CreateUserDto, currentUser: AuthenticatedUser) {
     // Antes de qualquer leitura: recusa barata e sem efeito colateral.
-    this.assertCallerCanCreateRole(dto.role, currentUser);
+    assertCallerCanCreateRole(dto.role, currentUser);
 
     if (dto.role === 'EMPLOYEE') {
       if (!dto.employeeId) throw new BadRequestException('employeeId é obrigatório para login do tipo EMPLOYEE');
@@ -124,7 +104,7 @@ export class UsersService {
 
     const profile = await this.prisma.profile.findFirst({ where: { id: dto.profileId, companyId } });
     if (!profile) throw new BadRequestException(`Perfil ${dto.profileId} não encontrado nesta empresa`);
-    this.assertCallerCanAssignProfile(profile, currentUser);
+    assertCallerCanAssignProfile(profile, currentUser);
 
     // Convite por e-mail ("Acesso e sessões", 26/09/2026) — substitui a antiga senha temporária fixa
     // ('Mudar@123'), que qualquer um que soubesse o e-mail de um login recém-criado podia usar. O
@@ -219,10 +199,17 @@ export class UsersService {
 
   // PATCH /companies/me/users/:id/resend-invite — só pra login ainda INVITED. Reemite o token (o link
   // anterior deixa de valer) e reenvia; devolve o link pro admin poder copiar se o e-mail não chegar.
-  async resendInvite(companyId: string, userId: string): Promise<{ inviteUrl: string; sent: boolean }> {
+  async resendInvite(
+    companyId: string,
+    userId: string,
+    currentUser: AuthenticatedUser,
+  ): Promise<{ inviteUrl: string; sent: boolean }> {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     if (user.status !== 'INVITED') throw new BadRequestException('Este login já aceitou o convite.');
+    // Task 6, fix round 1: a resposta devolve o `inviteUrl` cru — sem esta trava, um login não
+    // ADMIN com `usuarios.gerenciar` tomaria o convite pendente de um ADMIN.
+    assertCallerCanReissueInvite(user, currentUser);
     return this.sendInvite(companyId, user.id, user.email);
   }
 
@@ -308,7 +295,7 @@ export class UsersService {
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     const newProfile = await this.prisma.profile.findFirst({ where: { id: profileId, companyId } });
     if (!newProfile) throw new BadRequestException(`Perfil ${profileId} não encontrado nesta empresa`);
-    this.assertCallerCanAssignProfile(newProfile, currentUser);
+    assertCallerCanAssignProfile(newProfile, currentUser);
 
     await runInsideExplicitTenantTransaction(() =>
       this.prisma.$transaction(async (tx) => {
@@ -408,11 +395,18 @@ export class UsersService {
   // próprio login. NADA muda no login aqui: senha, status e sessões só mudam quando a pessoa de fato
   // redefine (AuthService.resetPassword, que revoga as sessões e nunca desfaz um BLOCKED). Um login
   // INVITED não tem senha pra redefinir — recebe o convite de novo. Nunca devolve senha nenhuma.
-  async resetPassword(companyId: string, userId: string): Promise<{ sent: boolean; inviteUrl?: string }> {
+  async resetPassword(
+    companyId: string,
+    userId: string,
+    currentUser: AuthenticatedUser,
+  ): Promise<{ sent: boolean; inviteUrl?: string }> {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
 
     if (user.status === 'INVITED') {
+      // Mesma trava de resendInvite() (Task 6, fix round 1): este ramo também devolve o `inviteUrl`.
+      // O ramo de login ACTIVE não precisa dela — o link de redefinição só vai pro e-mail do alvo.
+      assertCallerCanReissueInvite(user, currentUser);
       const { inviteUrl, sent } = await this.sendInvite(companyId, user.id, user.email);
       return { sent, inviteUrl };
     }
