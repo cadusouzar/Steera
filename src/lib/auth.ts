@@ -66,6 +66,10 @@ export interface CurrentUser {
   // fonte do JWT (AuthorizationService.getEffectivePermissions). A tela só usa isso pra esconder o
   // que o backend recusaria; a regra de verdade continua no backend (403 PERMISSION_REQUIRED).
   permissions: Record<string, PermissionScope | null>;
+  // Pode se vincular sozinho a uma ficha de funcionário (PATCH /auth/me/employee-link)? Falso pra
+  // quem tem alcance restrito sem `usuarios.gerenciar`: o vínculo definiria o próprio alcance, então
+  // só quem administra os acessos pode fazê-lo (PATCH /companies/me/users/:id/employee).
+  canSelfLinkEmployee?: boolean;
 }
 
 export type PermissionScope = 'PROPRIO' | 'EQUIPE' | 'DEPARTAMENTO' | 'EMPRESA';
@@ -116,6 +120,7 @@ interface ApiUser {
   emailVerified?: boolean;
   emailVerificationRequired?: boolean;
   permissions?: Record<string, PermissionScope | null>;
+  canSelfLinkEmployee?: boolean;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -199,6 +204,7 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     emailVerified: user.emailVerified ?? true,
     emailVerificationRequired: user.emailVerificationRequired ?? false,
     permissions: user.permissions ?? {},
+    canSelfLinkEmployee: user.canSelfLinkEmployee ?? true,
   };
 }
 

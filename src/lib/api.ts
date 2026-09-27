@@ -926,6 +926,26 @@ export async function resendSystemUserInvite(id: string): Promise<{ inviteUrl: s
   return request<{ inviteUrl: string; sent: boolean }>(`/companies/me/users/${id}/resend-invite`, { method: 'PATCH' });
 }
 
+// Funcionários ativos da empresa que ainda não têm login (id + nome), pro seletor de "Novo Login" e
+// de "Vincular funcionário". Exige só `usuarios.gerenciar`, independente do alcance em Funcionários.
+export interface LinkableEmployee {
+  id: string;
+  fullName: string;
+}
+
+export async function listLinkableEmployees(): Promise<LinkableEmployee[]> {
+  return request<LinkableEmployee[]>('/companies/me/users/linkable-employees');
+}
+
+// Vincula um login existente (ainda sem funcionário) a um funcionário sem login.
+export async function linkUserToEmployee(userId: string, employeeId: string): Promise<SystemUser> {
+  const res = await request<ApiSystemUser>(`/companies/me/users/${userId}/employee`, {
+    method: 'PATCH',
+    body: JSON.stringify({ employeeId }),
+  });
+  return mapSystemUser(res);
+}
+
 export async function blockSystemUser(id: string): Promise<void> {
   await request(`/companies/me/users/${id}/block`, { method: 'PATCH' });
 }

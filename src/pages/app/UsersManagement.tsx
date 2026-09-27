@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, Search, X, UserPlus, FileQuestion, LayoutDashboard, HeartHandshake, Users,
   TrendingUp, Package, BarChart3, Loader2, KeyRound, Copy, Check, ShieldOff, ShieldCheck,
-  Pencil, Trash2, AlertTriangle, Clock, ChevronDown, Send, Mail,
+  Pencil, Trash2, AlertTriangle, Clock, ChevronDown, Send, Mail, Link2,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
@@ -90,6 +90,9 @@ const UsersManagement = () => {
 
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
+  // Funcionários ativos sem login (id + nome), vindos de `GET /companies/me/users/linkable-employees`:
+  // depende só de `usuarios.gerenciar`, não do alcance em Funcionários de quem está na tela.
+  const [linkableEmployees, setLinkableEmployees] = useState<api.LinkableEmployee[]>([]);
   const [profiles, setProfiles] = useState<api.Profile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -112,6 +115,12 @@ const UsersManagement = () => {
   // Exclusão de verdade (17/09/2026) — confirmação em duas etapas, nunca window.confirm().
   const [deletingUser, setDeletingUser] = useState<SystemUser | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Vincular um login ainda sem ficha de funcionário (27/09/2026). Quem tem alcance restrito não se
+  // vincula sozinho no Ponto, então quem administra os acessos faz isso por aqui.
+  const [linkingUser, setLinkingUser] = useState<SystemUser | null>(null);
+  const [linkEmployeeId, setLinkEmployeeId] = useState('');
+  const [isLinking, setIsLinking] = useState(false);
 
   // Redefinição de senha por um admin (17/09/2026) — confirmação em duas etapas antes de gerar.
   const [resettingPasswordUser, setResettingPasswordUser] = useState<SystemUser | null>(null);
@@ -176,15 +185,20 @@ const UsersManagement = () => {
       // `GET /profiles` e `GET /companies/me/users` exigem `usuarios.gerenciar`; sem ela, a
       // listagem de logins recusa com 403 e a mensagem do backend aparece no banner de erro.
       // `GET /employees` exige `funcionarios.ver` (e vem filtrada pelo alcance): sem ela a tela
-      // continua funcionando, só sem os nomes dos funcionários vinculados.
-      const [systemUsers, employeeItems, profileItems] = await Promise.all([
+      // continua funcionando, só sem os nomes dos funcionários vinculados. Os seletores de
+      // funcionário (novo login, vincular) usam `linkable-employees`, que não depende desse alcance.
+      const [systemUsers, employeeItems, profileItems, linkableItems] = await Promise.all([
         api.listSystemUsers(),
         api.listEmployees().catch(() => [] as EmployeeListItem[]),
         canManageUsers ? api.listProfiles() : Promise.resolve([] as api.Profile[]),
+        canManageUsers
+          ? api.listLinkableEmployees().catch(() => [] as api.LinkableEmployee[])
+          : Promise.resolve([] as api.LinkableEmployee[]),
       ]);
       setUsers(systemUsers);
       setEmployees(employeeItems);
       setProfiles(profileItems);
+      setLinkableEmployees(linkableItems);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os usuários.');
     } finally {
@@ -200,13 +214,14 @@ const UsersManagement = () => {
     if (isModalOpen) setIsModalOpen(false);
     if (editingUser) setEditingUser(null);
     if (deletingUser) setDeletingUser(null);
+    if (linkingUser) setLinkingUser(null);
     if (resettingPasswordUser) setResettingPasswordUser(null);
     if (viewingModulesUser) setViewingModulesUser(null);
     if (openActionsMenuUserId) closeActionsMenu();
   });
 
   useEffect(() => {
-    if (isModalOpen || editingUser || deletingUser || resettingPasswordUser || userNotice || viewingModulesUser) {
+    if (isModalOpen || editingUser || deletingUser || linkingUser || resettingPasswordUser || userNotice || viewingModulesUser) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -214,13 +229,16 @@ const UsersManagement = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isModalOpen, editingUser, deletingUser, resettingPasswordUser, userNotice, viewingModulesUser]);
+  }, [isModalOpen, editingUser, deletingUser, linkingUser, resettingPasswordUser, userNotice, viewingModulesUser]);
 
-  const employeeById = useMemo(() => {
-    const map = new Map<string, EmployeeListItem>();
-    employees.forEach(e => map.set(e.id, e));
+  // Nome por id: a lista de funcionários (filtrada pelo alcance de quem vê) mais os sem login, pra
+  // um vínculo feito nesta tela já mostrar o nome mesmo sem `funcionarios.ver`.
+  const employeeNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    linkableEmployees.forEach(e => map.set(e.id, e.fullName));
+    employees.forEach(e => map.set(e.id, e.fullName));
     return map;
-  }, [employees]);
+  }, [employees, linkableEmployees]);
 
   // Funcionários que ainda não têm login vinculado — cruza a lista de
   // funcionários com os employeeId já presentes em `users`. Filtro
@@ -231,15 +249,15 @@ const UsersManagement = () => {
     [users],
   );
   const availableEmployees = useMemo(
-    () => employees.filter(e => !linkedEmployeeIds.has(e.id)),
-    [employees, linkedEmployeeIds],
+    () => linkableEmployees.filter(e => !linkedEmployeeIds.has(e.id)),
+    [linkableEmployees, linkedEmployeeIds],
   );
 
   const filteredUsers = useMemo(() => {
     const lowerQuery = searchQuery.toLowerCase().trim();
     if (!lowerQuery) return users;
     return users.filter(u => {
-      const employeeName = u.employeeId ? employeeById.get(u.employeeId)?.fullName ?? '' : '';
+      const employeeName = u.employeeId ? employeeNameById.get(u.employeeId) ?? '' : '';
       const roleLabel = u.role === 'admin' ? 'administrador' : 'funcionário';
       return (
         u.email.toLowerCase().includes(lowerQuery) ||
@@ -247,7 +265,7 @@ const UsersManagement = () => {
         roleLabel.includes(lowerQuery)
       );
     });
-  }, [users, searchQuery, employeeById]);
+  }, [users, searchQuery, employeeNameById]);
 
   const openNewModal = () => {
     setFormData(newUserForm);
@@ -395,6 +413,33 @@ const UsersManagement = () => {
     }
   };
 
+  const openLinkModal = (user: SystemUser) => {
+    setLinkingUser(user);
+    setLinkEmployeeId('');
+    setActionError(null);
+  };
+
+  const closeLinkModal = () => {
+    setLinkingUser(null);
+    setActionError(null);
+  };
+
+  const handleConfirmLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkingUser || !linkEmployeeId || isLinking) return;
+    setIsLinking(true);
+    setActionError(null);
+    try {
+      await api.linkUserToEmployee(linkingUser.id, linkEmployeeId);
+      setLinkingUser(null);
+      await loadData();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Não foi possível vincular este login ao funcionário.');
+    } finally {
+      setIsLinking(false);
+    }
+  };
+
   const handleConfirmResetPassword = async () => {
     if (!resettingPasswordUser || isResettingPassword) return;
     setIsResettingPassword(true);
@@ -527,7 +572,7 @@ const UsersManagement = () => {
                 <tbody className="divide-y divide-border/40">
                   <AnimatePresence>
                     {filteredUsers.map((user, index) => {
-                      const linkedEmployee = user.employeeId ? employeeById.get(user.employeeId) : undefined;
+                      const linkedEmployeeName = user.employeeId ? employeeNameById.get(user.employeeId) : undefined;
                       return (
                         <motion.tr
                           key={user.id}
@@ -555,8 +600,11 @@ const UsersManagement = () => {
                           </td>
                           <td className="px-8 py-5 text-sm font-medium text-foreground/80">
                             {user.role === 'employee'
-                              ? (linkedEmployee ? linkedEmployee.fullName : '(funcionário não encontrado)')
+                              ? (user.employeeId ? linkedEmployeeName ?? 'Funcionário vinculado' : 'Sem funcionário vinculado')
                               : 'Login administrativo'}
+                            {user.role === 'admin' && user.employeeId && (
+                              <p className="text-xs text-muted mt-0.5">{linkedEmployeeName ?? 'Funcionário vinculado'}</p>
+                            )}
                           </td>
                           <td className="px-8 py-5">
                             <div className="flex flex-wrap items-center gap-1.5 max-w-xs mb-1.5">
@@ -685,6 +733,16 @@ const UsersManagement = () => {
               <Pencil size={15} className="text-muted shrink-0" />
               Editar Perfil
             </button>
+            {!menuUser.employeeId && (
+              <button
+                type="button"
+                onClick={() => { closeActionsMenu(); openLinkModal(menuUser); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
+              >
+                <Link2 size={15} className="text-muted shrink-0" />
+                Vincular funcionário
+              </button>
+            )}
             {menuUser.status === 'invited' ? (
               (callerIsAdmin || menuUser.role !== 'admin') && (
               <button
@@ -818,12 +876,12 @@ const UsersManagement = () => {
                         <CustomSelect
                           value={formData.employeeId}
                           onChange={(val) => setFormData({ ...formData, employeeId: val })}
-                          options={availableEmployees.map(e => ({ value: e.id, label: `${e.fullName} — ${e.department}` }))}
+                          options={availableEmployees.map(e => ({ value: e.id, label: e.fullName }))}
                           placeholder="Selecione um funcionário sem login..."
                         />
                       ) : (
                         <p className="text-sm text-muted bg-secondary/30 border border-border/40 rounded-xl px-4 py-3">
-                          Todos os funcionários já possuem um login. Cadastre um novo funcionário primeiro.
+                          Nenhum funcionário ativo sem login. Cadastre um novo funcionário primeiro.
                         </p>
                       )}
                     </div>
@@ -960,6 +1018,96 @@ const UsersManagement = () => {
                   >
                     {isSavingEdit && <Loader2 size={16} className="animate-spin" />}
                     {isSavingEdit ? 'Salvando...' : 'Salvar Perfil'}
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* Vincular funcionário (27/09/2026): liga um login ainda sem ficha a um funcionário ativo sem
+          login. Mesmo visual do modal de edição de perfil. */}
+      {linkingUser && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeLinkModal}
+            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
+          />
+          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-lg shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
+              <div className="flex items-center justify-between mb-6 mt-2">
+                <div>
+                  <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
+                    <Link2 size={22} className="text-primary"/>
+                    Vincular funcionário
+                  </h2>
+                  <p className="text-sm text-muted mt-1 break-all">{linkingUser.email}</p>
+                </div>
+                <button
+                  onClick={closeLinkModal}
+                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors shrink-0"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {actionError && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
+                  {actionError}
+                </div>
+              )}
+
+              <form onSubmit={handleConfirmLink} className="space-y-6">
+                <div>
+                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
+                    Funcionário <span className="text-red-500">*</span>
+                  </label>
+                  <p className="text-xs text-muted mb-4">
+                    O alcance deste login (próprio cadastro, equipe ou departamento) passa a ser calculado a partir desta ficha.
+                  </p>
+                  {availableEmployees.length > 0 ? (
+                    <CustomSelect
+                      value={linkEmployeeId}
+                      onChange={setLinkEmployeeId}
+                      options={availableEmployees.map(e => ({ value: e.id, label: e.fullName }))}
+                      placeholder="Selecione um funcionário sem login..."
+                    />
+                  ) : (
+                    <p className="text-sm text-muted bg-secondary/30 border border-border/40 rounded-xl px-4 py-3">
+                      Nenhum funcionário ativo sem login. Cadastre um novo funcionário primeiro.
+                    </p>
+                  )}
+                </div>
+
+                <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
+                  <button
+                    type="button"
+                    onClick={closeLinkModal}
+                    className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
+                  >
+                    Cancelar
+                  </button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    type="submit"
+                    disabled={isLinking || !linkEmployeeId}
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                  >
+                    {isLinking && <Loader2 size={16} className="animate-spin" />}
+                    {isLinking ? 'Vinculando...' : 'Vincular'}
                   </motion.button>
                 </div>
               </form>

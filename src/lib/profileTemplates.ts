@@ -43,6 +43,7 @@ export const PROFILE_TEMPLATES: ProfileTemplate[] = [
     grants: [
       { code: 'dashboard.ver' },
       { code: 'clientes.ver', scope: 'EMPRESA' },
+      { code: 'funcionarios.ver', scope: 'EMPRESA' },
       { code: 'financas.lancamentos.ver', scope: 'EMPRESA' },
       { code: 'financas.lancamentos.gerenciar', scope: 'EMPRESA' },
       { code: 'pagamentos.gerenciar', scope: 'EMPRESA' },

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase, Undo2, Trash2, Ban, RotateCcw } from 'lucide-react';
 import * as api from '../lib/api';
 import { useCan } from '../lib/auth';
+import { ApiError } from '../lib/apiError';
 import type { EmployeeDetail, EmployeePaymentRecord, EmployeeRecurringPaymentRecord } from '../lib/api';
 
 interface FinanceAndVacationModalProps {
@@ -19,6 +20,15 @@ const formatDateOnly = (dateStr: string) => {
   const [year, month, day] = dateStr.slice(0, 10).split('-');
   return `${day}/${month}/${year}`;
 };
+
+// O alcance de `pagamentos.gerenciar` pode ser menor que o de `funcionarios.ver` (ex.: vê a empresa
+// toda, mas só cuida dos pagamentos da equipe). Fora desse alcance o backend responde 404 nas listas
+// de pagamento; isso vira lista vazia, pra férias e afastamentos continuarem carregando.
+const emptyWhenOutOfScope = <T,>(promise: Promise<T[]>): Promise<T[]> =>
+  promise.catch((err: unknown) => {
+    if (err instanceof ApiError && err.status === 404) return [] as T[];
+    throw err;
+  });
 
 const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ employeeId, onClose }) => {
   // Permissões por ação (27/09/2026): pagamentos (ler e escrever) exigem `pagamentos.gerenciar`,
@@ -57,8 +67,8 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       const [detail, paymentList, recurringList, schedules, leaveList] = await Promise.all([
         api.getEmployee(employeeId),
-        canManagePayments ? api.listEmployeePayments(employeeId) : Promise.resolve([] as EmployeePaymentRecord[]),
-        canManagePayments ? api.listEmployeeRecurringPayments(employeeId) : Promise.resolve([] as EmployeeRecurringPaymentRecord[]),
+        canManagePayments ? emptyWhenOutOfScope(api.listEmployeePayments(employeeId)) : Promise.resolve([] as EmployeePaymentRecord[]),
+        canManagePayments ? emptyWhenOutOfScope(api.listEmployeeRecurringPayments(employeeId)) : Promise.resolve([] as EmployeeRecurringPaymentRecord[]),
         api.listVacationSchedules(employeeId),
         api.listLeaveSchedules(employeeId),
       ]);

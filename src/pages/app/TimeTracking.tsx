@@ -99,9 +99,12 @@ const TimeTracking = () => {
   const [selectedLinkId, setSelectedLinkId] = useState('');
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState('');
+  // Login com alcance restrito não escolhe a própria ficha (o vínculo definiria o próprio alcance):
+  // só quem administra os acessos vincula, em Usuários.
+  const canSelfLink = currentUser?.canSelfLinkEmployee !== false;
 
   useEffect(() => {
-    if (linkedEmployeeId) return;
+    if (linkedEmployeeId || !canSelfLink) return;
     let cancelled = false;
     setLoadingLinkable(true);
     listEmployees()
@@ -109,7 +112,7 @@ const TimeTracking = () => {
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoadingLinkable(false); });
     return () => { cancelled = true; };
-  }, [linkedEmployeeId]);
+  }, [linkedEmployeeId, canSelfLink]);
 
   const handleLinkEmployee = async () => {
     if (!selectedLinkId) return;
@@ -447,6 +450,23 @@ const TimeTracking = () => {
   const extraFromBalance = totals.balanceMinutes > 0 ? totals.balanceMinutes : totals.extraMinutes;
 
   // ==== Estado vazio: login sem employeeId vinculado ====
+  if (!linkedEmployeeId && !canSelfLink) {
+    return (
+      <div className="p-8 h-full flex flex-col items-center justify-center">
+        <div className="max-w-md w-full bg-panel border border-border rounded-2xl shadow-sm p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <UserPlus size={28} className="text-primary" />
+          </div>
+          <h2 className="text-xl font-heading font-bold text-foreground mb-2">Cadastro de funcionário necessário</h2>
+          <p className="text-muted text-sm">
+            Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário.
+            Peça a quem administra os acessos para vincular.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!linkedEmployeeId) {
     return (
       <div className="p-8 h-full flex flex-col items-center justify-center">
