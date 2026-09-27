@@ -400,7 +400,7 @@ const Profiles: React.FC = () => {
 
       {editingProfile && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          <div className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+          <div className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-heading font-bold text-foreground">
                 {editingProfile === 'new' ? 'Novo Perfil' : `Editar "${(editingProfile as Profile).name}"`}
@@ -414,7 +414,7 @@ const Profiles: React.FC = () => {
               <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 dark:text-red-400 text-sm">{formError}</div>
             )}
 
-            <form onSubmit={handleSave} className="space-y-5">
+            <form onSubmit={handleSave} className="space-y-5 flex flex-col min-h-0 flex-1">
               <div>
                 <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">Nome do Perfil</label>
                 <input
@@ -441,7 +441,7 @@ const Profiles: React.FC = () => {
                 <button type="button" onClick={collapseAllGroups} className="hover:underline">Recolher tudo</button>
               </div>
 
-              <div className="space-y-2 max-h-[26rem] overflow-y-auto custom-scrollbar pr-1">
+              <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
                 {groups.map((group) => {
                   const isExpanded = !!expandedGroups[group.key];
                   const enabledCount = countEnabledInGroup(group);
