@@ -159,6 +159,13 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
 
   const FULL_PONTO = [{ permissionCode: 'ponto.administrar', scope: Scope.EMPRESA }];
   const PONTO_DE_EQUIPE = [{ permissionCode: 'ponto.administrar', scope: Scope.EQUIPE }];
+  // Permissões por ação e alcance (27/09/2026): gerir logins e perfis passou a exigir a permissão
+  // `usuarios.gerenciar` (não mais só `role: ADMIN`). Os ADMINs restritos que atacam por HTTP abaixo
+  // precisam dela pra chegar ao GATE de acesso total ao Ponto, que é o que estes testes exercitam;
+  // sem ela, o PermissionsGuard barraria antes com 403.
+  const USUARIOS = { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA };
+  const RESTRITO_COM_USUARIOS = [...PONTO_DE_EQUIPE, USUARIOS];
+  const FULL_PONTO_COM_USUARIOS = [...FULL_PONTO, USUARIOS];
 
   let pontoTotalId: string;
   let extraId: string;
@@ -234,7 +241,7 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
 
   it('BARRA com 404 um ADMIN restrito que tenta se reatribuir a um perfil de acesso total (a escalação demonstrada pelo revisor)', async () => {
     const restrito = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Admin Restrito no Ponto', grants: PONTO_DE_EQUIPE }),
+      profiles.create(companyId, { name: 'Admin Restrito no Ponto', grants: RESTRITO_COM_USUARIOS }),
     );
     const restrictedAdmin = await createAdmin('restrito-http', restrito.id, 'senha-propria-12345');
 
@@ -328,7 +335,7 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
   // dele virava `true` no token seguinte.
   it('BARRA com 404 um ADMIN restrito que edita o PRÓPRIO perfil pra CONCEDER acesso total', async () => {
     const autoPromocao = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Auto Promoção', grants: PONTO_DE_EQUIPE }),
+      profiles.create(companyId, { name: 'Auto Promoção', grants: RESTRITO_COM_USUARIOS }),
     );
     expect(autoPromocao.isProtected).toBe(false); // nada protege o próprio perfil dele
 
@@ -351,14 +358,13 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     await request(app.getHttpServer())
       .patch(`/profiles/${autoPromocao.id}`)
       .set('Authorization', selfToken)
-      .send({ name: 'Auto Promoção', grants: FULL_PONTO })
+      .send({ name: 'Auto Promoção', grants: FULL_PONTO_COM_USUARIOS })
       .expect(404);
 
     // Nada foi escrito: o perfil segue concedendo só EQUIPE, e ele segue sem acesso total.
     const grantsAfter = await sys(() => prisma.profilePermission.findMany({ where: { profileId: autoPromocao.id } }));
-    expect(grantsAfter).toHaveLength(1);
-    expect(grantsAfter[0].permissionCode).toBe('ponto.administrar');
-    expect(grantsAfter[0].scope).toBe(Scope.EQUIPE);
+    expect(grantsAfter).toHaveLength(2);
+    expect(grantsAfter.find((g) => g.permissionCode === 'ponto.administrar')?.scope).toBe(Scope.EQUIPE);
     const stillRestricted = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: selfPromoter.id } }));
     expect(stillRestricted.hasFullPontoAccess).toBe(false);
 
@@ -367,7 +373,7 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     await request(app.getHttpServer())
       .patch(`/profiles/${autoPromocao.id}`)
       .set('Authorization', adminToken)
-      .send({ name: 'Auto Promoção', grants: FULL_PONTO })
+      .send({ name: 'Auto Promoção', grants: FULL_PONTO_COM_USUARIOS })
       .expect(200);
 
     const promoted = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: selfPromoter.id } }));
@@ -381,7 +387,7 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
   // (já nasce com acesso total), e entrar nele aceitando o próprio convite por e-mail.
   it('BARRA com 404 um ADMIN restrito CRIANDO um login ADMIN novo com acesso total', async () => {
     const restrito = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Restrito Criador', grants: PONTO_DE_EQUIPE }),
+      profiles.create(companyId, { name: 'Restrito Criador', grants: RESTRITO_COM_USUARIOS }),
     );
     const creator = await createAdmin('criador-restrito', restrito.id, 'senha-propria-98765');
     const loginRes = await request(app.getHttpServer())
