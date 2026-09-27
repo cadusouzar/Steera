@@ -1,6 +1,8 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ModulesGuard } from '../auth/guards/modules.guard';
 import { TimeClockService } from './time-clock.service';
 
@@ -9,8 +11,9 @@ import { TimeClockService } from './time-clock.service';
 // rota dentro de TimeClockController (que já tem prefixo de classe 'time-clock', e que
 // deliberadamente NÃO exige o módulo RH — bater o próprio ponto é ação de "quem sou eu"). Esta
 // rota É administrativa (mesmo espírito de EmployeesController), então exige RH.
-@UseGuards(ModulesGuard)
+@UseGuards(ModulesGuard, PermissionsGuard)
 @RequireModule('PONTO_ADMINISTRACAO')
+@RequirePermission('ponto.administrar')
 @Controller()
 export class TimeEventsAdminController {
   constructor(private readonly timeClock: TimeClockService) {}

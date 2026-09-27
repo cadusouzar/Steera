@@ -2,8 +2,10 @@ import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, 
 import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
 import { FriendlyThrottlerGuard } from '../auth/guards/friendly-throttler.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ModulesGuard } from '../auth/guards/modules.guard';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { TimeAttendanceCalculationService } from './time-attendance-calculation.service';
@@ -27,8 +29,9 @@ interface UploadedPhoto {
 // que agora precisa ser concedida explicitamente pra cada login — Ponto virou um menu próprio,
 // independente de RH. JwtAuthGuard já é global (APP_GUARD em app.module.ts) — todo endpoint aqui
 // também exige login válido, além do módulo.
-@UseGuards(ModulesGuard)
+@UseGuards(ModulesGuard, PermissionsGuard)
 @RequireModule('PONTO_REGISTRO')
+@RequirePermission('ponto.registrar')
 @Controller('time-clock')
 export class TimeClockController {
   constructor(

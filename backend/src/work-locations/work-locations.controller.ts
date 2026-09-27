@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ModulesGuard } from '../auth/guards/modules.guard';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { CreateWorkLocationDto } from './dto/create-work-location.dto';
@@ -10,8 +12,9 @@ import { WorkLocationsService } from './work-locations.service';
 
 // Local de trabalho é infraestrutura física da empresa toda — mutação exige hasFullPontoAccess
 // (nunca "meu time", ver a spec de 15/09/2026). RolesGuard/@Roles('ADMIN') removidos desta classe.
-@UseGuards(ModulesGuard)
+@UseGuards(ModulesGuard, PermissionsGuard)
 @RequireModule('PONTO_ADMINISTRACAO')
+@RequirePermission('ponto.administrar')
 @Controller('work-locations')
 export class WorkLocationsController {
   constructor(

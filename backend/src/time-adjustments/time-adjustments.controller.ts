@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ModulesGuard } from '../auth/guards/modules.guard';
 import { CreateAdjustmentRequestDto } from './dto/create-adjustment-request.dto';
 import { ProactiveCorrectionDto } from './dto/proactive-correction.dto';
@@ -27,8 +29,9 @@ export class TimeAdjustmentsController {
   // espírito de TimeClockController não exigir módulo RH pra bater o próprio ponto — mas, desde a
   // auditoria de segurança de 17/09/2026, exige o módulo `PONTO_REGISTRO` (antes disso não exigia
   // módulo nenhum; ver o comentário completo em TimeClockController). Nunca `PONTO_ADMINISTRACAO`.
-  @UseGuards(ModulesGuard)
+  @UseGuards(ModulesGuard, PermissionsGuard)
   @RequireModule('PONTO_REGISTRO')
+  @RequirePermission('ponto.registrar')
   @Post('time-adjustment-requests')
   @UseInterceptors(FileInterceptor('attachment', { limits: { fileSize: 5 * 1024 * 1024 } }))
   create(
@@ -39,15 +42,17 @@ export class TimeAdjustmentsController {
     return this.service.create(user, dto, attachment);
   }
 
-  @UseGuards(ModulesGuard)
+  @UseGuards(ModulesGuard, PermissionsGuard)
   @RequireModule('PONTO_REGISTRO')
+  @RequirePermission('ponto.registrar')
   @Get('time-adjustment-requests/me')
   listOwn(@CurrentUser() user: AuthenticatedUser) {
     return this.service.listOwn(user);
   }
 
-  @UseGuards(ModulesGuard)
+  @UseGuards(ModulesGuard, PermissionsGuard)
   @RequireModule('PONTO_REGISTRO')
+  @RequirePermission('ponto.registrar')
   @Patch('time-adjustment-requests/:id/cancel')
   cancel(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.service.cancel(user, id);
@@ -58,8 +63,9 @@ export class TimeAdjustmentsController {
   // aqui no controller). @RequireModule('PONTO_ADMINISTRACAO') aqui (e nas outras rotas
   // administrativas abaixo, nunca nas de auto-atendimento acima) — Ponto virou um menu próprio,
   // independente de RH, desde 17/09/2026 (era RH até então).
-  @UseGuards(ModulesGuard)
+  @UseGuards(ModulesGuard, PermissionsGuard)
   @RequireModule('PONTO_ADMINISTRACAO')
+  @RequirePermission('ponto.administrar')
   @Get('time-adjustment-requests')
   listForAdmin(
     @CurrentUser() user: AuthenticatedUser,
@@ -70,22 +76,25 @@ export class TimeAdjustmentsController {
     return this.service.listForAdmin(user, status, page ? Number(page) : undefined, pageSize ? Number(pageSize) : undefined);
   }
 
-  @UseGuards(ModulesGuard)
+  @UseGuards(ModulesGuard, PermissionsGuard)
   @RequireModule('PONTO_ADMINISTRACAO')
+  @RequirePermission('ponto.administrar')
   @Patch('time-adjustment-requests/:id/approve')
   approve(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewAdjustmentRequestDto) {
     return this.service.approve(user, id, dto.reviewNote);
   }
 
-  @UseGuards(ModulesGuard)
+  @UseGuards(ModulesGuard, PermissionsGuard)
   @RequireModule('PONTO_ADMINISTRACAO')
+  @RequirePermission('ponto.administrar')
   @Patch('time-adjustment-requests/:id/reject')
   reject(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReviewAdjustmentRequestDto) {
     return this.service.reject(user, id, dto.reviewNote);
   }
 
-  @UseGuards(ModulesGuard)
+  @UseGuards(ModulesGuard, PermissionsGuard)
   @RequireModule('PONTO_ADMINISTRACAO')
+  @RequirePermission('ponto.administrar')
   @Post('employees/:employeeId/time-events/correct')
   proactiveCorrect(
     @CurrentUser() user: AuthenticatedUser,

@@ -1,6 +1,8 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ModulesGuard } from '../auth/guards/modules.guard';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { QueryTimeEventsDto } from '../time-clock/dto/query-time-events.dto';
@@ -76,6 +78,8 @@ export class EmployeesController {
   // cadastro de funcionário, então pertencem ao módulo de Ponto desde 17/09/2026, mesmo estando
   // fisicamente aninhadas sob /employees por conveniência de rota.
   @RequireModule('PONTO_ADMINISTRACAO')
+  @UseGuards(PermissionsGuard)
+  @RequirePermission('ponto.administrar')
   @Get(':employeeId/time-events')
   async listTimeEvents(
     @Param('employeeId') employeeId: string,
@@ -88,6 +92,8 @@ export class EmployeesController {
 
   // Mesma sobrescrita de módulo do endpoint acima — ver o comentário lá.
   @RequireModule('PONTO_ADMINISTRACAO')
+  @UseGuards(PermissionsGuard)
+  @RequirePermission('ponto.administrar')
   @Get(':employeeId/time-summary')
   async timeSummary(
     @Param('employeeId') employeeId: string,

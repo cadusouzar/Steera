@@ -2,7 +2,9 @@ import {
   Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
 import { AuthenticatedUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { RequireModule } from '../auth/decorators/require-module.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ModulesGuard } from '../auth/guards/modules.guard';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { CreateWorkScheduleDto } from './dto/create-work-schedule.dto';
@@ -13,8 +15,9 @@ import { WorkSchedulesService } from './work-schedules.service';
 // Mutação não é mais @Roles('ADMIN') puro — WorkSchedulesService.assertValidTierAndAuthorized
 // decide por camada (empresa exige hasFullPontoAccess; time exige ser o próprio superior ou ter
 // hasFullPontoAccess; individual exige assertCanManage). RolesGuard não é mais usado aqui.
-@UseGuards(ModulesGuard)
+@UseGuards(ModulesGuard, PermissionsGuard)
 @RequireModule('PONTO_ADMINISTRACAO')
+@RequirePermission('ponto.administrar')
 @Controller('work-schedules')
 export class WorkSchedulesController {
   constructor(
