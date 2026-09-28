@@ -1,7 +1,9 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { FriendlyThrottlerGuard } from '../src/auth/guards/friendly-throttler.guard';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { runAsSystem } from '../src/prisma/tenant-context';
@@ -46,6 +48,7 @@ describe('Permissões por ação e alcance (e2e)', () => {
   let proprioToken: string;
   let usersMgrToken: string;
   let adminNoEmployeeToken: string;
+  let restrictedUsersMgrToken: string;
 
   let proprioProfileId: string;
 
@@ -155,7 +158,13 @@ describe('Permissões por ação e alcance (e2e)', () => {
     if (!/\/quickflow_test(\?|$)/.test(url)) {
       throw new Error('DATABASE_URL must point to a *_test database for e2e tests');
     }
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    // Throttlers sobrescritos (mesmo padrão de users-management/access-and-sessions): a suíte aceita
+    // mais de 10 convites (limite por IP de POST /auth/accept-invite) desde os casos do ruling F1b.
+    const allow = { canActivate: () => true };
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideGuard(ThrottlerGuard).useValue(allow)
+      .overrideGuard(FriendlyThrottlerGuard).useValue(allow)
+      .compile();
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
     app.useGlobalFilters(new HttpExceptionFilter());
@@ -195,9 +204,15 @@ describe('Permissões por ação e alcance (e2e)', () => {
     ]);
     proprioProfileId = await createProfile('Só a própria ficha', [{ permissionCode: 'funcionarios.ver', scope: 'PROPRIO' }]);
     // Concessão limitada (28/09/2026): quem gerencia acessos só concede/age sobre o que também tem —
-    // este gerente cria e vincula logins com o perfil "Só a própria ficha", então precisa ter
-    // `funcionarios.ver` no mesmo alcance (PROPRIO).
+    // este gerente cria e vincula logins com o perfil "Só a própria ficha", então precisa cobrir
+    // `funcionarios.ver@PROPRIO`. Ruling F1b (28/09/2026): vincular um login a uma ficha exige
+    // alcance EMPRESA em tudo, então este gerente tem `funcionarios.ver@EMPRESA` (que cobre PROPRIO).
     const usersMgrProfileId = await createProfile('Gerente de acessos', [
+      { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
+      { permissionCode: 'funcionarios.ver', scope: 'EMPRESA' },
+    ]);
+    // Ruling F1b: gerente de acessos de alcance restrito, SEM ficha — não vincula ninguém (nem a si).
+    const restrictedUsersMgrProfileId = await createProfile('Gerente de acessos restrito', [
       { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
       { permissionCode: 'funcionarios.ver', scope: 'PROPRIO' },
     ]);
@@ -209,6 +224,7 @@ describe('Permissões por ação e alcance (e2e)', () => {
     proprioToken = await createLogin({ role: 'EMPLOYEE', profileId: proprioProfileId, employeeId: subordinadoId });
     usersMgrToken = await createLogin({ role: 'EMPLOYEE', profileId: usersMgrProfileId, employeeId: usersMgrEmployeeId });
     adminNoEmployeeToken = await createLogin({ role: 'ADMIN', profileId: adminLimitedProfileId });
+    restrictedUsersMgrToken = await createLogin({ role: 'ADMIN', profileId: restrictedUsersMgrProfileId });
 
     deptLeaderId = await createEmployee('Líder Departamento X');
     deptPeerId = await createEmployee('Colega Departamento X');
@@ -442,6 +458,54 @@ describe('Permissões por ação e alcance (e2e)', () => {
           .send({ employeeId: secondLinkTargetEmployeeId }),
       );
       expect((await sys(() => prisma.user.findUniqueOrThrow({ where: { id: targetUserId } }))).employeeId).toBeNull();
+    });
+  });
+
+  // Ruling F1b (28/09/2026): o alcance PROPRIO/EQUIPE/DEPARTAMENTO é ancorado na ficha vinculada ao
+  // login. Um gerente de acessos de alcance restrito que vinculasse a si mesmo (ou outro login) à
+  // ficha de outro gestor passaria a alcançar a equipe desse gestor.
+  describe('vínculo por gerente de acessos de alcance restrito (ruling F1b)', () => {
+    const LINK_MSG = 'Só quem tem acesso a todos os funcionários da empresa pode vincular um login a uma ficha.';
+
+    it('não vincula a si mesmo nem outro login à ficha do gestor (PATCH :id/employee e auto-vínculo) e nada é gravado', async () => {
+      const token = auth(restrictedUsersMgrToken);
+      const selfId = await currentUserId(restrictedUsersMgrToken);
+      const targetToken = await createLogin({ role: 'ADMIN', profileId: proprioProfileId });
+      const targetUserId = await currentUserId(targetToken);
+      // Outro gestor, com equipe e ainda sem login (ficha vinculável).
+      const otherManagerId = await createEmployee('Outro Gestor Sem Login');
+      const otherTeamMemberId = await createEmployee('Equipe do Outro Gestor', otherManagerId);
+
+      for (const userId of [selfId, targetUserId]) {
+        const res = await http().patch(`/companies/me/users/${userId}/employee`).set('Authorization', token).send({ employeeId: otherManagerId });
+        expect(res.status).toBe(403);
+        expect(res.body).toMatchObject({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: LINK_MSG });
+      }
+      const self = await http().patch('/auth/me/employee-link').set('Authorization', token).send({ employeeId: otherManagerId });
+      expect(self.status).toBe(403);
+      expect(self.body.code).toBe('PERMISSION_REQUIRED');
+      expect(self.body.message).toBe(
+        'Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário. Peça a quem administra os acessos para vincular.',
+      );
+
+      expect((await sys(() => prisma.user.findUniqueOrThrow({ where: { id: selfId } }))).employeeId).toBeNull();
+      expect((await sys(() => prisma.user.findUniqueOrThrow({ where: { id: targetUserId } }))).employeeId).toBeNull();
+      expect(await sys(() => prisma.user.findUnique({ where: { employeeId: otherManagerId } }))).toBeNull();
+      // A equipe do outro gestor continua fora do alcance.
+      await http().get(`/employees/${otherTeamMemberId}`).set('Authorization', token).expect(404);
+      const me = await http().get('/auth/me').set('Authorization', token).expect(200);
+      expect(me.body.canSelfLinkEmployee).toBe(false);
+    });
+
+    it('não cria login EMPLOYEE (que nasce vinculado a uma ficha) e nada é criado', async () => {
+      const email = `perm-scope-f1b-${runId}@test.com`;
+      const res = await http()
+        .post('/companies/me/users')
+        .set('Authorization', auth(restrictedUsersMgrToken))
+        .send({ email, role: 'EMPLOYEE', employeeId: secondLinkTargetEmployeeId, profileId: proprioProfileId });
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: LINK_MSG });
+      expect(await sys(() => prisma.user.findUnique({ where: { email } }))).toBeNull();
     });
   });
 

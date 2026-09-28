@@ -1448,6 +1448,90 @@ describe('UsersService', () => {
       expectNothingWrittenOrSent();
     });
 
+    // Ruling F1b (28/09/2026): o alcance PROPRIO/EQUIPE/DEPARTAMENTO é ancorado na ficha
+    // vinculada ao login, então vincular uma ficha escolhe a raiz de alcance. Só quem tem todo grant
+    // com alcance em EMPRESA vincula (criar com employeeId e PATCH :id/employee).
+    const LINK_MSG = 'Só quem tem acesso a todos os funcionários da empresa pode vincular um login a uma ficha.';
+
+    it('create com employeeId: chamador de alcance restrito → 403, nada gravado nem enviado', async () => {
+      useLimitedCaller({ 'p-within': WITHIN });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'e1' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.count.mockResolvedValue(0);
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'EMPRESARIAL', name: 'X' });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p-within', name: 'Time', isProtected: false });
+
+      await expectPermissionRequired(
+        service.create('c1', { email: 'n@n.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'p-within' } as any, makeCaller({ role: 'EMPLOYEE', userId: 'me' })),
+        LINK_MSG,
+      );
+      expect(authz.getEffectivePermissions).toHaveBeenCalledWith('me');
+      expectNothingWrittenOrSent();
+    });
+
+    it('create com employeeId: 400 de funcionário inexistente continua vindo antes', async () => {
+      useLimitedCaller({ 'p-within': WITHIN });
+      prisma.employee.findFirst.mockResolvedValue(null);
+      await expect(
+        service.create('c1', { email: 'n@n.com', role: 'EMPLOYEE', employeeId: 'e-x', profileId: 'p-within' } as any, makeCaller({ role: 'EMPLOYEE' })),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expectNothingWrittenOrSent();
+    });
+
+    it('create sem ficha (login ADMIN) por chamador de alcance restrito não é afetado', async () => {
+      useLimitedCaller({ 'p-within': WITHIN });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p-within', name: 'Time', isProtected: false });
+      prisma.profilePermission.findMany.mockResolvedValue([{ permissionCode: 'funcionarios.ver', scope: 'EQUIPE' }]);
+      prisma.user.create.mockResolvedValue({ id: 'new', role: 'ADMIN', hasFullPontoAccess: false, employeeId: null });
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+      await service.create('c1', { email: 'n@n.com', role: 'ADMIN', profileId: 'p-within' } as any, makeCaller({ role: 'ADMIN' }));
+      expect(prisma.user.create).toHaveBeenCalled();
+    });
+
+    it('create com employeeId: chamador com todo alcance EMPRESA passa', async () => {
+      authz.getEffectivePermissions.mockResolvedValue({ 'usuarios.gerenciar': 'EMPRESA', 'funcionarios.ver': 'EMPRESA' });
+      authz.getProfileGrants.mockResolvedValue([{ permissionCode: 'funcionarios.ver', scope: 'EQUIPE' }]);
+      prisma.employee.findFirst.mockResolvedValue({ id: 'e1' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.count.mockResolvedValue(0);
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'EMPRESARIAL', name: 'X' });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p-within', name: 'Time', isProtected: false });
+      prisma.user.create.mockResolvedValue({ id: 'new', role: 'EMPLOYEE', hasFullPontoAccess: false, employeeId: 'e1' });
+      await service.create('c1', { email: 'n@n.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'p-within' } as any, makeCaller({ role: 'EMPLOYEE' }));
+      expect(prisma.user.create).toHaveBeenCalled();
+    });
+
+    it('linkEmployee: chamador de alcance restrito → 403, nada vinculado (inclusive o próprio login)', async () => {
+      useLimitedCaller({ 'p-within': WITHIN });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'e1', status: 'ACTIVE' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      for (const targetId of ['u2', 'me']) {
+        prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, id: targetId, profileId: 'p-within' });
+        await expectPermissionRequired(service.linkEmployee('c1', targetId, 'e1', makeCaller({ role: 'EMPLOYEE', userId: 'me' })), LINK_MSG);
+      }
+      expectNothingWrittenOrSent();
+    });
+
+    it('linkEmployee: 400 de funcionário inexistente continua vindo antes', async () => {
+      useLimitedCaller({ 'p-within': WITHIN });
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, profileId: 'p-within' });
+      prisma.employee.findFirst.mockResolvedValue(null);
+      await expect(service.linkEmployee('c1', 'u2', 'e-x', makeCaller())).rejects.toBeInstanceOf(BadRequestException);
+      expectNothingWrittenOrSent();
+    });
+
+    it('linkEmployee: chamador com todo alcance EMPRESA passa', async () => {
+      authz.getEffectivePermissions.mockResolvedValue({ 'usuarios.gerenciar': 'EMPRESA', 'funcionarios.ver': 'EMPRESA' });
+      authz.getProfileGrants.mockResolvedValue(WITHIN);
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, profileId: 'p-within' });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'e1', status: 'ACTIVE' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ ...TARGET_ABOVE, employeeId: 'e1' });
+      await service.linkEmployee('c1', 'u2', 'e1', makeCaller({ role: 'EMPLOYEE' }));
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({ where: { id: 'u2', employeeId: null }, data: { employeeId: 'e1' } });
+    });
+
     it('404 de login inexistente continua vindo antes da checagem de poder', async () => {
       useLimitedCaller({});
       prisma.user.findFirst.mockResolvedValue(null);

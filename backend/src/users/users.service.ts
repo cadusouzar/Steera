@@ -18,6 +18,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import {
   assertCallerCanAssignProfile,
   assertCallerCanCreateRole,
+  assertCallerCanLinkEmployee,
   assertCallerCanReissueInvite,
   assertGrantsWithinCaller,
   assertLoginWithinCaller,
@@ -145,6 +146,7 @@ export class UsersService {
     if (target.employeeId) throw new BadRequestException('Este login já está vinculado a um funcionário');
 
     await assertEmployeeLinkable(this.prisma, companyId, employeeId, { requireActive: true });
+    assertCallerCanLinkEmployee(await this.authorization.getEffectivePermissions(currentUser.userId));
     await saveEmployeeLink(this.prisma, userId, employeeId);
     const updated = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: SAFE_USER_SELECT });
     return this.toPublicUser(updated);
@@ -171,6 +173,10 @@ export class UsersService {
     if (!profile) throw new BadRequestException(`Perfil ${dto.profileId} não encontrado nesta empresa`);
     assertCallerCanAssignProfile(profile, currentUser);
     await this.assertProfileGrantableByCaller(companyId, dto.profileId, currentUser);
+    // Ruling F1b: login EMPLOYEE nasce vinculado à ficha, então criar um é vincular.
+    if (dto.role === 'EMPLOYEE') {
+      assertCallerCanLinkEmployee(await this.authorization.getEffectivePermissions(currentUser.userId));
+    }
 
     // Convite por e-mail ("Acesso e sessões", 26/09/2026) — substitui a antiga senha temporária fixa
     // ('Mudar@123'), que qualquer um que soubesse o e-mail de um login recém-criado podia usar. O

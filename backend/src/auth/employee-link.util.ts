@@ -12,13 +12,15 @@ export const SELF_LINK_DENIED_MESSAGE =
 // Achado 1 da revisão final (27/09/2026): o alcance (PROPRIO/EQUIPE/DEPARTAMENTO) é ancorado no
 // Employee vinculado ao login. Se um login de alcance restrito pudesse escolher a própria ficha,
 // escolheria também a própria raiz de alcance (ex.: vincular-se a um gerente e ver o time dele).
-// Por isso o auto-vínculo só vale quando não amplia nada: o login gerencia usuários (já poderia
-// vincular qualquer um) ou toda permissão com alcance que ele tem é EMPRESA. Função pura, também
-// exposta no usuário público (`canSelfLinkEmployee`) pro frontend não duplicar a regra.
+// Por isso o auto-vínculo só vale quando não amplia nada: toda permissão com alcance que o login
+// tem é EMPRESA. Ruling F1b (28/09/2026): a antiga exceção pra quem gerencia usuários caiu — um
+// gerente de alcance restrito vinculava a si mesmo (ou outro login) à ficha de outro gerente e
+// alcançava um time que ele não alcança. A mesma regra vale agora pra QUALQUER vínculo feito por
+// quem gerencia usuários (UsersService.create com employeeId e linkEmployee, ver
+// assertCallerCanLinkEmployee em users/caller-escalation.util.ts). Função pura, também exposta no
+// usuário público (`canSelfLinkEmployee`) pro frontend não duplicar a regra.
 export function canSelfLinkEmployee(permissions: Record<string, string | null> | undefined | null): boolean {
-  const grants = permissions ?? {};
-  if ('usuarios.gerenciar' in grants) return true;
-  return Object.values(grants).every((scope) => scope === null || scope === 'EMPRESA');
+  return Object.values(permissions ?? {}).every((scope) => scope === null || scope === 'EMPRESA');
 }
 
 type EmployeeLinkPrisma = Pick<PrismaService, 'employee' | 'user'>;

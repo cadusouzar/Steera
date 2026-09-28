@@ -30,8 +30,15 @@ describe('canSelfLinkEmployee', () => {
     expect(canSelfLinkEmployee({ 'funcionarios.ver': 'DEPARTAMENTO' })).toBe(false);
   });
 
-  it('permite com alcance restrito quando o login gerencia usuários (usuarios.gerenciar)', () => {
-    expect(canSelfLinkEmployee({ 'funcionarios.ver': 'EQUIPE', 'usuarios.gerenciar': null })).toBe(true);
+  // Ruling F1b (28/09/2026): gerenciar usuários não é mais exceção — vincular qualquer login a
+  // uma ficha escolhe a raiz de alcance dele, então só quem tem tudo em EMPRESA vincula.
+  it('recusa alcance restrito mesmo quando o login gerencia usuários (usuarios.gerenciar)', () => {
+    expect(canSelfLinkEmployee({ 'funcionarios.ver': 'EQUIPE', 'usuarios.gerenciar': null })).toBe(false);
+    expect(canSelfLinkEmployee({ 'funcionarios.ver': 'PROPRIO', 'usuarios.gerenciar': 'EMPRESA' })).toBe(false);
+  });
+
+  it('permite quem gerencia usuários com todo alcance EMPRESA', () => {
+    expect(canSelfLinkEmployee({ 'funcionarios.ver': 'EMPRESA', 'usuarios.gerenciar': null })).toBe(true);
   });
 
   it('a mensagem de recusa é o texto da spec', () => {

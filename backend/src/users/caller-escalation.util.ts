@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { Scope } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { canSelfLinkEmployee } from '../auth/employee-link.util';
 import { findUncoveredGrants, GrantLike, permissionLabels } from '../permissions/grant-coverage.util';
 
 // Permissões por ação e alcance (Task 6, 27/09/2026): Usuários e Perfis passaram a exigir a
@@ -53,6 +54,15 @@ export function assertGrantsWithinCaller(callerGrants: CallerGrants, grants: Gra
     throw permissionRequired(
       `Você só pode dar permissões que o seu próprio perfil também tem: ${permissionLabels(uncovered)}.`,
     );
+  }
+}
+
+// Ruling F1b (28/09/2026): vincular um login a uma ficha de funcionário (criar login com
+// employeeId, PATCH :id/employee) escolhe a raiz do alcance PROPRIO/EQUIPE/DEPARTAMENTO desse login.
+// Só quem tem todo grant com alcance em EMPRESA vincula — mesma regra do auto-vínculo.
+export function assertCallerCanLinkEmployee(callerGrants: CallerGrants): void {
+  if (!canSelfLinkEmployee(callerGrants)) {
+    throw permissionRequired('Só quem tem acesso a todos os funcionários da empresa pode vincular um login a uma ficha.');
   }
 }
 

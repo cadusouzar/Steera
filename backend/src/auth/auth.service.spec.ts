@@ -1051,8 +1051,22 @@ describe('AuthService', () => {
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
-    it('permite alcance restrito quando o login também tem usuarios.gerenciar', async () => {
+    it('recusa alcance restrito mesmo quando o login também tem usuarios.gerenciar (ruling F1b)', async () => {
       authorization.getEffectivePermissions.mockResolvedValue({ 'funcionarios.ver': 'EQUIPE', 'usuarios.gerenciar': null });
+      const err = await service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2').catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toEqual({
+        statusCode: 403,
+        code: 'PERMISSION_REQUIRED',
+        message:
+          'Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário. Peça a quem administra os acessos para vincular.',
+      });
+      expect(prisma.employee.findFirst).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('permite quem gerencia usuários com todo alcance EMPRESA', async () => {
+      authorization.getEffectivePermissions.mockResolvedValue({ 'funcionarios.ver': 'EMPRESA', 'usuarios.gerenciar': null });
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null);
       prisma.user.updateMany.mockResolvedValue({ count: 1 });
