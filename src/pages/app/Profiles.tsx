@@ -309,7 +309,7 @@ const FuncionariosPanel = ({ grants, catalog, onChange, caller }: PanelProps) =>
       )}
 
       {catalog.has(OWN_DATA_CODE) && ownDataQuestionVisible(grants) && (
-        <Question title="Pode alterar os próprios dados?" helper="(salário, pagamentos, férias)">
+        <Question title="Pode alterar os próprios dados?" helper="(salário, pagamentos, férias, advertências)">
           <ChoiceRow name="proprios-dados" checked={!view.ownData} onSelect={() => apply({ ...view, ownData: false })} title="Não" />
           <ChoiceRow
             name="proprios-dados"

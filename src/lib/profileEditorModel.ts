@@ -152,11 +152,11 @@ export const FUNCIONARIOS_EXTRAS: { code: string; label: string; summary: string
 
 /**
  * "Pode alterar os próprios dados?" (funcionarios.proprios.gerenciar, sem alcance): sem ela, quem pode
- * alterar funcionários, pagamentos ou férias não mexe na PRÓPRIA ficha. A pergunta só aparece quando
+ * alterar funcionários, pagamentos, férias ou advertências não mexe na PRÓPRIA ficha. A pergunta só aparece quando
  * o perfil pode alterar uma dessas coisas; fora disso a permissão é retirada ao mexer na área.
  */
 export const OWN_DATA_CODE = 'funcionarios.proprios.gerenciar';
-export const OWN_DATA_TRIGGERS = ['funcionarios.gerenciar', 'pagamentos.gerenciar', 'ferias.gerenciar'];
+export const OWN_DATA_TRIGGERS = ['funcionarios.gerenciar', 'pagamentos.gerenciar', 'ferias.gerenciar', 'advertencias.gerenciar'];
 export const OWN_DATA_SUMMARY = 'Pode alterar os próprios dados';
 export const OWN_DATA_DENIED_SUMMARY = 'Não pode alterar os próprios dados';
 
