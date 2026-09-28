@@ -25,14 +25,17 @@ export class EmployeeRecurringPaymentsController {
     private readonly employeeScope: EmployeeScopeService,
   ) {}
 
-  private async assertRecurringInScope(id: string): Promise<void> {
+  // Devolve o funcionário dono pra escrita reaproveitar na checagem de próprios dados.
+  private async assertRecurringInScope(id: string): Promise<string> {
     const employeeId = await this.service.findEmployeeIdOf(id);
     await this.employeeScope.assertEmployeeInScope(CODE, employeeId, `Recorrência ${id} não encontrada`);
+    return employeeId;
   }
 
   @Post('employees/:employeeId/recurring-payments')
   async create(@Param('employeeId') employeeId: string, @Body() dto: CreateEmployeeRecurringPaymentDto) {
     await this.employeeScope.assertEmployeeInScope(CODE, employeeId);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.create(employeeId, dto);
   }
 
@@ -50,19 +53,22 @@ export class EmployeeRecurringPaymentsController {
 
   @Patch('employee-recurring-payments/:id')
   async update(@Param('id') id: string, @Body() dto: UpdateEmployeeRecurringPaymentDto) {
-    await this.assertRecurringInScope(id);
+    const employeeId = await this.assertRecurringInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.update(id, dto);
   }
 
   @Delete('employee-recurring-payments/:id')
   async remove(@Param('id') id: string) {
-    await this.assertRecurringInScope(id);
+    const employeeId = await this.assertRecurringInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.remove(id);
   }
 
   @Post('employee-recurring-payments/:id/generate-charge')
   async generateCharge(@Param('id') id: string) {
-    await this.assertRecurringInScope(id);
+    const employeeId = await this.assertRecurringInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.generateCharge(id);
   }
 }

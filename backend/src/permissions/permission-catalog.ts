@@ -39,6 +39,12 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   // permissão já decide quem VÊ as ações de compra no frontend e quem aparece como contato
   // (`GET /plans/me`); a futura rota de checkout precisa exigi-la (ver plans.controller.ts).
   { code: 'assinatura.gerenciar', resource: 'assinatura', action: 'gerenciar', labelPt: 'Gerenciar assinatura e plano', validScopes: [] },
+  // "Pode alterar os próprios dados?" (28/09/2026): exigida ALÉM da permissão e do alcance normais em
+  // toda escrita cuja ficha-alvo é a do próprio login (salário, pagamentos, férias/afastamentos,
+  // advertências, desativar/reativar) — ver EmployeeScopeService.assertCanWriteOwn. Sem escopo: só
+  // existe uma "própria ficha". Nenhum módulo legado a concede, então perfis derivados de ADMIN a
+  // recebem (getRoleOnlyGatedPermissionCodes) e os de EMPLOYEE não.
+  { code: 'funcionarios.proprios.gerenciar', resource: 'funcionarios', action: 'proprios.gerenciar', labelPt: 'Alterar os próprios dados', validScopes: [] },
 ];
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]['code'];

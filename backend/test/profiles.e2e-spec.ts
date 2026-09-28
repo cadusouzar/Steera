@@ -59,12 +59,12 @@ describe('Profiles (e2e)', () => {
     await app.close();
   });
 
-  it('GET /profiles/catalog devolve as 20 permissões (assinatura.gerenciar desde 27/09/2026), sem exigir empresa', async () => {
+  it('GET /profiles/catalog devolve as 21 permissões (assinatura.gerenciar desde 27/09/2026, funcionarios.proprios.gerenciar desde 28/09/2026), sem exigir empresa', async () => {
     const res = await request(app.getHttpServer())
       .get('/profiles/catalog')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
-    expect(res.body.length).toBe(20);
+    expect(res.body.length).toBe(21);
     expect(res.body.some((p: { code: string }) => p.code === 'usuarios.gerenciar')).toBe(true);
   });
 

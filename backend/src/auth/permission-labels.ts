@@ -22,6 +22,7 @@ const AREA_BY_CODE: Record<string, string> = {
   'cargos.gerenciar': 'Cargos',
   'funcionarios.ver': 'Funcionários',
   'funcionarios.gerenciar': 'Funcionários',
+  'funcionarios.proprios.gerenciar': 'Funcionários',
   'advertencias.gerenciar': 'Advertências',
   'pagamentos.gerenciar': 'Pagamentos',
   'ferias.gerenciar': 'Férias e afastamentos',

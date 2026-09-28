@@ -25,6 +25,7 @@ export class EmployeeWarningsController {
   @Post('employees/:employeeId/warnings')
   async create(@Param('employeeId') employeeId: string, @Body() dto: CreateEmployeeWarningDto) {
     await this.employeeScope.assertEmployeeInScope('advertencias.gerenciar', employeeId);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.warningsService.create(employeeId, dto);
   }
 
@@ -46,6 +47,7 @@ export class EmployeeWarningsController {
   @Patch('employees/:employeeId/warnings/:id')
   async update(@Param('employeeId') employeeId: string, @Param('id') id: string, @Body() dto: UpdateEmployeeWarningDto) {
     await this.employeeScope.assertEmployeeInScope('advertencias.gerenciar', employeeId);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.warningsService.update(id, employeeId, dto);
   }
 }

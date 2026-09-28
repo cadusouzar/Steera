@@ -21,15 +21,18 @@ export class VacationSchedulesController {
     private readonly employeeScope: EmployeeScopeService,
   ) {}
 
-  private async assertScheduleInScope(id: string): Promise<void> {
+  // Devolve o funcionário dono pra escrita reaproveitar na checagem de próprios dados.
+  private async assertScheduleInScope(id: string): Promise<string> {
     const employeeId = await this.service.findEmployeeIdOf(id);
     await this.employeeScope.assertEmployeeInScope('ferias.gerenciar', employeeId, `Agendamento de férias ${id} não encontrado`);
+    return employeeId;
   }
 
   @RequirePermission('ferias.gerenciar')
   @Post('employees/:employeeId/vacation/schedule')
   async schedule(@Param('employeeId') employeeId: string, @Body() dto: ScheduleVacationDto) {
     await this.employeeScope.assertEmployeeInScope('ferias.gerenciar', employeeId);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.schedule(employeeId, dto);
   }
 
@@ -43,14 +46,16 @@ export class VacationSchedulesController {
   @RequirePermission('ferias.gerenciar')
   @Patch('vacation-schedules/:id/cancel')
   async cancel(@Param('id') id: string) {
-    await this.assertScheduleInScope(id);
+    const employeeId = await this.assertScheduleInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.cancel(id);
   }
 
   @RequirePermission('ferias.gerenciar')
   @Patch('vacation-schedules/:id/resume')
   async resume(@Param('id') id: string, @Body() dto: ResumeVacationDto) {
-    await this.assertScheduleInScope(id);
+    const employeeId = await this.assertScheduleInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.resume(id, dto);
   }
 }

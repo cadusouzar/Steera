@@ -25,4 +25,15 @@ describe('PERMISSION_CATALOG', () => {
       validScopes: [],
     });
   });
+
+  // "Pode alterar os próprios dados?" (28/09/2026): sem escopo — vale só pra ficha do próprio login.
+  it('inclui funcionarios.proprios.gerenciar, sem escopo', () => {
+    expect(getPermissionDefinition('funcionarios.proprios.gerenciar')).toEqual({
+      code: 'funcionarios.proprios.gerenciar',
+      resource: 'funcionarios',
+      action: 'proprios.gerenciar',
+      labelPt: 'Alterar os próprios dados',
+      validScopes: [],
+    });
+  });
 });

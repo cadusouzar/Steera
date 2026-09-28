@@ -1,9 +1,16 @@
-import { Inject, Injectable, NotFoundException, Scope as NestScope } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException, Scope as NestScope } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { Request } from 'express';
 import { Scope } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { AuthorizationService } from './authorization.service';
+
+// "Pode alterar os próprios dados?" (28/09/2026): permissão sem escopo exigida, ALÉM da permissão e do
+// alcance normais da rota, em toda escrita cujo funcionário-alvo é a ficha vinculada ao próprio login
+// (salário, pagamentos, férias/afastamentos, advertências, desativar/reativar).
+export const OWN_DATA_PERMISSION = 'funcionarios.proprios.gerenciar';
+export const OWN_DATA_DENIED_MESSAGE =
+  'Seu perfil não permite alterar os próprios dados. Fale com quem administra os acessos da empresa.';
 
 // Ponte entre `req.user.permissions` (claim do JWT) e o resto do backend: resolve, pra UMA
 // permissão específica, quais Employee.id um handler pode enxergar/administrar — sempre por
@@ -65,5 +72,18 @@ export class EmployeeScopeService {
     const ids = await this.allowedEmployeeIds(permissionCode);
     if (ids === 'ALL') return {};
     return { [field]: { in: ids } };
+  }
+
+  // Chamado nas rotas de ESCRITA logo DEPOIS de assertEmployeeInScope (fora do alcance continua
+  // sendo 404 primeiro; este 403 só existe pra registros dentro do alcance). O vínculo login ->
+  // funcionário vem do banco (User.employeeId), a mesma fonte do alcance PROPRIO/EQUIPE; a permissão
+  // vem do claim do JWT, como todas as outras deste serviço. Login sem funcionário vinculado nunca é
+  // "o próprio" de ninguém.
+  async assertCanWriteOwn(employeeId: string): Promise<void> {
+    const user = this.currentUser;
+    if (user.permissions[OWN_DATA_PERMISSION] !== undefined) return;
+    const ownEmployeeId = await this.authorization.getOwnEmployeeIdOrNull(user);
+    if (!ownEmployeeId || ownEmployeeId !== employeeId) return;
+    throw new ForbiddenException({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: OWN_DATA_DENIED_MESSAGE });
   }
 }

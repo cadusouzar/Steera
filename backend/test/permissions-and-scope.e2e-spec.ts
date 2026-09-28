@@ -473,6 +473,87 @@ describe('Permissões por ação e alcance (e2e)', () => {
     });
   });
 
+  // "Pode alterar os próprios dados?" (28/09/2026): mexer na PRÓPRIA ficha exige
+  // funcionarios.proprios.gerenciar além de funcionarios.gerenciar + alcance. Fora do alcance
+  // continua 404; dentro do alcance, na própria ficha e sem a permissão, 403 com a mensagem exata.
+  describe('alterar os próprios dados', () => {
+    const OWN_DENIED = {
+      statusCode: 403,
+      code: 'PERMISSION_REQUIRED',
+      message: 'Seu perfil não permite alterar os próprios dados. Fale com quem administra os acessos da empresa.',
+    };
+    const editorGrants: Grant[] = [
+      { permissionCode: 'funcionarios.ver', scope: 'EQUIPE' },
+      { permissionCode: 'funcionarios.gerenciar', scope: 'EQUIPE' },
+    ];
+    let editorProfileId: string;
+    let editorEmployeeId: string;
+    let editorReportId: string;
+    let editorEmail: string;
+    let editorToken: string;
+
+    async function readBaseValue(employeeId: string): Promise<number> {
+      const schemaName = await getTenantSchemaName(prisma, companyId);
+      const rows = await selectBypassingRls<{ baseValue: string }[]>(
+        prisma,
+        `SELECT "baseValue"::text AS "baseValue" FROM "${schemaName}"."Employee" WHERE "id" = '${employeeId}'`,
+      );
+      expect(rows).toHaveLength(1);
+      return Number(rows[0].baseValue);
+    }
+
+    async function login(email: string): Promise<string> {
+      const res = await http().post('/auth/login').set('x-requested-with', 'XMLHttpRequest').send({ email, password }).expect(201);
+      return res.body.accessToken;
+    }
+
+    beforeAll(async () => {
+      editorEmployeeId = await createEmployee('Gestor Que Edita');
+      editorReportId = await createEmployee('Subordinado Do Gestor Que Edita', editorEmployeeId);
+      editorProfileId = await createProfile('Gestor que edita a equipe', editorGrants);
+      editorEmail = `perm-scope-own-${runId}@test.com`;
+      const res = await http()
+        .post('/companies/me/users')
+        .set('Authorization', auth(founderToken))
+        .send({ email: editorEmail, role: 'EMPLOYEE', profileId: editorProfileId, employeeId: editorEmployeeId })
+        .expect(201);
+      await acceptInvite(app, res.body.inviteUrl, password);
+      editorToken = await login(editorEmail);
+    });
+
+    it('sem a permissão: PATCH na própria ficha → 403 exato e o salário não muda no banco', async () => {
+      const before = await readBaseValue(editorEmployeeId);
+      const res = await http()
+        .patch(`/employees/${editorEmployeeId}`)
+        .set('Authorization', auth(editorToken))
+        .send({ baseValue: 99999 });
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject(OWN_DENIED);
+      expect(await readBaseValue(editorEmployeeId)).toBe(before);
+    });
+
+    it('sem a permissão: PATCH no subordinado → 200 e o salário muda', async () => {
+      await http().patch(`/employees/${editorReportId}`).set('Authorization', auth(editorToken)).send({ baseValue: 4321 }).expect(200);
+      expect(await readBaseValue(editorReportId)).toBe(4321);
+    });
+
+    it('fora do alcance continua 404 (não 403), mesmo sem a permissão', async () => {
+      await http().patch(`/employees/${outsiderId}`).set('Authorization', auth(editorToken)).send({ baseValue: 1 }).expect(404);
+    });
+
+    it('com funcionarios.proprios.gerenciar no perfil (novo login): PATCH na própria ficha → 200', async () => {
+      // O fundador (Administrador Geral semeado com o catálogo inteiro) tem a permissão, então pode concedê-la.
+      await http()
+        .patch(`/profiles/${editorProfileId}`)
+        .set('Authorization', auth(founderToken))
+        .send({ name: 'Gestor que edita a equipe', grants: [...editorGrants, { permissionCode: 'funcionarios.proprios.gerenciar', scope: null }] })
+        .expect(200);
+      const token = await login(editorEmail);
+      await http().patch(`/employees/${editorEmployeeId}`).set('Authorization', auth(token)).send({ baseValue: 5555 }).expect(200);
+      expect(await readBaseValue(editorEmployeeId)).toBe(5555);
+    });
+  });
+
   describe('Administrador Geral (EMPRESA) sem regressão', () => {
     it('vê todos, abre qualquer ficha, advertências e pagamentos de qualquer um, e altera', async () => {
       const token = auth(founderToken);

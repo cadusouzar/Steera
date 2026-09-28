@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { Scope } from '@prisma/client';
@@ -121,6 +121,51 @@ describe('EmployeeScopeService', () => {
       await expect(service.whereEmployeeIn('funcionarios.ver', 'employeeId')).resolves.toEqual({
         employeeId: { in: ['emp-1'] },
       });
+    });
+  });
+  // "Pode alterar os próprios dados?" (28/09/2026): escrever na PRÓPRIA ficha exige
+  // funcionarios.proprios.gerenciar além da permissão/alcance normal da rota.
+  describe('assertCanWriteOwn', () => {
+    const OWN_DENIED = {
+      statusCode: 403,
+      code: 'PERMISSION_REQUIRED',
+      message: 'Seu perfil não permite alterar os próprios dados. Fale com quem administra os acessos da empresa.',
+    };
+
+    it('403 exato quando o alvo é o próprio funcionário e falta funcionarios.proprios.gerenciar', async () => {
+      const authorizationMock = { resolveScope: jest.fn(), getOwnEmployeeIdOrNull: jest.fn().mockResolvedValue('emp-1') };
+      const { service } = await buildService(buildUser({ 'funcionarios.gerenciar': Scope.EQUIPE }), authorizationMock);
+      const error = await service.assertCanWriteOwn('emp-1').catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).getResponse()).toEqual(OWN_DENIED);
+    });
+
+    it('passa quando o alvo é o próprio funcionário e o perfil tem funcionarios.proprios.gerenciar', async () => {
+      const authorizationMock = { resolveScope: jest.fn(), getOwnEmployeeIdOrNull: jest.fn().mockResolvedValue('emp-1') };
+      const { service } = await buildService(
+        buildUser({ 'funcionarios.gerenciar': Scope.EQUIPE, 'funcionarios.proprios.gerenciar': null }),
+        authorizationMock,
+      );
+      await expect(service.assertCanWriteOwn('emp-1')).resolves.toBeUndefined();
+    });
+
+    it('passa para outro funcionário mesmo sem a permissão', async () => {
+      const authorizationMock = { resolveScope: jest.fn(), getOwnEmployeeIdOrNull: jest.fn().mockResolvedValue('emp-1') };
+      const { service } = await buildService(buildUser({ 'funcionarios.gerenciar': Scope.EQUIPE }), authorizationMock);
+      await expect(service.assertCanWriteOwn('emp-2')).resolves.toBeUndefined();
+    });
+
+    it('passa quando o login não tem funcionário vinculado', async () => {
+      const authorizationMock = { resolveScope: jest.fn(), getOwnEmployeeIdOrNull: jest.fn().mockResolvedValue(null) };
+      const { service } = await buildService(buildUser({ 'funcionarios.gerenciar': Scope.EMPRESA }), authorizationMock);
+      await expect(service.assertCanWriteOwn('emp-1')).resolves.toBeUndefined();
+    });
+
+    it('lê o funcionário vinculado do banco (AuthorizationService), com o login atual', async () => {
+      const authorizationMock = { resolveScope: jest.fn(), getOwnEmployeeIdOrNull: jest.fn().mockResolvedValue('emp-1') };
+      const { service } = await buildService(buildUser({}), authorizationMock);
+      await service.assertCanWriteOwn('emp-3');
+      expect(authorizationMock.getOwnEmployeeIdOrNull).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1' }));
     });
   });
 });

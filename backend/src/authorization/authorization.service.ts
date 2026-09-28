@@ -110,7 +110,9 @@ export class AuthorizationService implements OnApplicationBootstrap {
     return peers.map((p) => p.id);
   }
 
-  private async getOwnEmployeeIdOrNull(currentUser: AuthenticatedUser): Promise<string | null> {
+  // Público desde 28/09/2026: EmployeeScopeService.assertCanWriteOwn usa a MESMA fonte (User.employeeId
+  // lido do banco, nunca do JWT) pra saber se o alvo de uma escrita é a própria ficha do login.
+  async getOwnEmployeeIdOrNull(currentUser: AuthenticatedUser): Promise<string | null> {
     const userRecord = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
     return userRecord?.employeeId ?? null;
   }

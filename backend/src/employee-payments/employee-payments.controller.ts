@@ -26,14 +26,17 @@ export class EmployeePaymentsController {
     private readonly employeeScope: EmployeeScopeService,
   ) {}
 
-  private async assertPaymentInScope(id: string): Promise<void> {
+  // Devolve o funcionário dono pra escrita reaproveitar na checagem de próprios dados.
+  private async assertPaymentInScope(id: string): Promise<string> {
     const employeeId = await this.service.findEmployeeIdOf(id);
     await this.employeeScope.assertEmployeeInScope(CODE, employeeId, `Pagamento ${id} não encontrado`);
+    return employeeId;
   }
 
   @Post('employees/:employeeId/payments')
   async create(@Param('employeeId') employeeId: string, @Body() dto: CreateEmployeePaymentDto) {
     await this.employeeScope.assertEmployeeInScope(CODE, employeeId);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.create(employeeId, dto);
   }
 
@@ -51,25 +54,29 @@ export class EmployeePaymentsController {
 
   @Patch('employee-payments/:id')
   async update(@Param('id') id: string, @Body() dto: UpdateEmployeePaymentDto) {
-    await this.assertPaymentInScope(id);
+    const employeeId = await this.assertPaymentInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.update(id, dto);
   }
 
   @Patch('employee-payments/:id/pay')
   async pay(@Param('id') id: string) {
-    await this.assertPaymentInScope(id);
+    const employeeId = await this.assertPaymentInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.pay(id);
   }
 
   @Patch('employee-payments/:id/unpay')
   async unpay(@Param('id') id: string) {
-    await this.assertPaymentInScope(id);
+    const employeeId = await this.assertPaymentInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.unpay(id);
   }
 
   @Delete('employee-payments/:id')
   async remove(@Param('id') id: string) {
-    await this.assertPaymentInScope(id);
+    const employeeId = await this.assertPaymentInScope(id);
+    await this.employeeScope.assertCanWriteOwn(employeeId);
     return this.service.remove(id);
   }
 }

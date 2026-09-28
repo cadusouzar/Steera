@@ -43,7 +43,7 @@ describe('EmployeesController#findOne', () => {
       undefined as never,
       undefined as never,
       undefined as never,
-      { assertEmployeeInScope: jest.fn().mockResolvedValue(undefined) } as never,
+      { assertEmployeeInScope: jest.fn().mockResolvedValue(undefined), assertCanWriteOwn: jest.fn().mockResolvedValue(undefined) } as never,
     );
   });
 
@@ -162,7 +162,7 @@ describe('EmployeesController — alcance de funcionarios.ver/gerenciar', () => 
 
   let controller: EmployeesController;
   let service: Record<string, jest.Mock>;
-  let scope: { whereEmployeeIn: jest.Mock; assertEmployeeInScope: jest.Mock };
+  let scope: { whereEmployeeIn: jest.Mock; assertEmployeeInScope: jest.Mock; assertCanWriteOwn: jest.Mock };
 
   beforeEach(() => {
     service = {
@@ -175,6 +175,7 @@ describe('EmployeesController — alcance de funcionarios.ver/gerenciar', () => 
     scope = {
       whereEmployeeIn: jest.fn().mockResolvedValue({ id: { in: ['e1', 'e2'] } }),
       assertEmployeeInScope: jest.fn().mockRejectedValue(outOfScope),
+      assertCanWriteOwn: jest.fn().mockResolvedValue(undefined),
     };
     controller = new EmployeesController(
       service as unknown as EmployeesService,
@@ -226,5 +227,63 @@ describe('EmployeesController — alcance de funcionarios.ver/gerenciar', () => 
     service.update.mockResolvedValue({ id: 'e1', baseValue: 1000, customFields: {} });
     await controller.update('e1', {});
     expect(service.update).toHaveBeenCalledWith('e1', {});
+  });
+});
+
+// "Pode alterar os próprios dados?" (28/09/2026): toda ESCRITA checa o alcance primeiro (404) e, só
+// dentro do alcance, assertCanWriteOwn (403 quando o alvo é a própria ficha sem
+// funcionarios.proprios.gerenciar). Recusado -> nenhuma escrita no serviço.
+describe('EmployeesController — próprios dados', () => {
+  const OWN_MSG = 'Seu perfil não permite alterar os próprios dados. Fale com quem administra os acessos da empresa.';
+  let service: Record<string, jest.Mock>;
+  let calls: string[];
+  let scope: { assertEmployeeInScope: jest.Mock; assertCanWriteOwn: jest.Mock };
+  let controller: EmployeesController;
+
+  beforeEach(() => {
+    calls = [];
+    service = {
+      update: jest.fn().mockResolvedValue({}),
+      deactivate: jest.fn().mockResolvedValue({}),
+      reactivate: jest.fn().mockResolvedValue({}),
+    };
+    scope = {
+      assertEmployeeInScope: jest.fn(async () => {
+        calls.push('scope');
+      }),
+      assertCanWriteOwn: jest.fn(async () => {
+        calls.push('own');
+        throw new ForbiddenException({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: OWN_MSG });
+      }),
+    };
+    controller = new EmployeesController(service as never, undefined as never, undefined as never, undefined as never, scope as never);
+  });
+
+  const writeRoutes: Array<[string, (c: EmployeesController) => Promise<unknown>, string, string]> = [
+    ['update', (c) => c.update('e1', {} as never), 'update', 'e1'],
+    ['deactivate', (c) => c.deactivate('e1'), 'deactivate', 'e1'],
+    ['reactivate', (c) => c.reactivate('e1'), 'reactivate', 'e1'],
+  ];
+
+  it.each(writeRoutes)('%s na própria ficha sem a permissão -> 403 exato depois do alcance, sem escrita', async (_n, call, method, employeeId) => {
+    const error = await call(controller).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ForbiddenException);
+    expect((error as ForbiddenException).getResponse()).toEqual({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: OWN_MSG });
+    expect(calls).toEqual(['scope', 'own']);
+    expect(scope.assertCanWriteOwn).toHaveBeenCalledWith(employeeId);
+    expect(service[method]).not.toHaveBeenCalled();
+  });
+
+  it.each(writeRoutes)('%s fora do alcance -> 404 sem chegar na checagem de próprios dados', async (_n, call, method) => {
+    scope.assertEmployeeInScope.mockRejectedValue(new NotFoundException('fora'));
+    await expect(call(controller)).rejects.toBeInstanceOf(NotFoundException);
+    expect(scope.assertCanWriteOwn).not.toHaveBeenCalled();
+    expect(service[method]).not.toHaveBeenCalled();
+  });
+
+  it.each(writeRoutes)('%s liberado pela checagem de próprios dados segue pro serviço', async (_n, call, method) => {
+    scope.assertCanWriteOwn.mockResolvedValue(undefined);
+    await call(controller);
+    expect(service[method]).toHaveBeenCalled();
   });
 });

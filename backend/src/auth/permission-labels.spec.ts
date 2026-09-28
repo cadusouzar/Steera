@@ -13,6 +13,7 @@ describe('permission-labels', () => {
       expect(getPermissionLabel('clientes.gerenciar')).toEqual({ area: 'Clientes', action: 'alterar' });
       expect(getPermissionLabel('cargos.gerenciar')).toEqual({ area: 'Cargos', action: 'alterar' });
       expect(getPermissionLabel('funcionarios.gerenciar')).toEqual({ area: 'Funcionários', action: 'alterar' });
+      expect(getPermissionLabel('funcionarios.proprios.gerenciar')).toEqual({ area: 'Funcionários', action: 'alterar' });
       expect(getPermissionLabel('advertencias.gerenciar')).toEqual({ area: 'Advertências', action: 'alterar' });
       expect(getPermissionLabel('pagamentos.gerenciar')).toEqual({ area: 'Pagamentos', action: 'alterar' });
       expect(getPermissionLabel('ferias.gerenciar')).toEqual({ area: 'Férias e afastamentos', action: 'alterar' });

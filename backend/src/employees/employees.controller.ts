@@ -68,11 +68,13 @@ export class EmployeesController {
     return toEmployeeDetail(await this.employeesService.findOne(id));
   }
 
-  // Escritas: alcance de funcionarios.gerenciar checado antes de tocar o banco (fora → 404, sem escrita).
+  // Escritas: alcance de funcionarios.gerenciar checado antes de tocar o banco (fora → 404, sem escrita);
+  // depois, na própria ficha, exige também funcionarios.proprios.gerenciar (403, ver EmployeeScopeService).
   @RequirePermission('funcionarios.gerenciar')
   @Patch(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
     await this.employeeScope.assertEmployeeInScope('funcionarios.gerenciar', id);
+    await this.employeeScope.assertCanWriteOwn(id);
     return toEmployeeDetail(await this.employeesService.update(id, dto));
   }
 
@@ -80,6 +82,7 @@ export class EmployeesController {
   @Patch(':id/deactivate')
   async deactivate(@Param('id') id: string) {
     await this.employeeScope.assertEmployeeInScope('funcionarios.gerenciar', id);
+    await this.employeeScope.assertCanWriteOwn(id);
     return toEmployeeDetail(await this.employeesService.deactivate(id));
   }
 
@@ -87,6 +90,7 @@ export class EmployeesController {
   @Patch(':id/reactivate')
   async reactivate(@Param('id') id: string) {
     await this.employeeScope.assertEmployeeInScope('funcionarios.gerenciar', id);
+    await this.employeeScope.assertCanWriteOwn(id);
     return toEmployeeDetail(await this.employeesService.reactivate(id));
   }
 
