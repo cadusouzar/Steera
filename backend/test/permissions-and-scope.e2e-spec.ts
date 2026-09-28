@@ -194,7 +194,13 @@ describe('Permissões por ação e alcance (e2e)', () => {
       { permissionCode: 'pagamentos.gerenciar', scope: 'EQUIPE' },
     ]);
     proprioProfileId = await createProfile('Só a própria ficha', [{ permissionCode: 'funcionarios.ver', scope: 'PROPRIO' }]);
-    const usersMgrProfileId = await createProfile('Gerente de acessos', [{ permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' }]);
+    // Concessão limitada (28/09/2026): quem gerencia acessos só concede/age sobre o que também tem —
+    // este gerente cria e vincula logins com o perfil "Só a própria ficha", então precisa ter
+    // `funcionarios.ver` no mesmo alcance (PROPRIO).
+    const usersMgrProfileId = await createProfile('Gerente de acessos', [
+      { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
+      { permissionCode: 'funcionarios.ver', scope: 'PROPRIO' },
+    ]);
     // Perfil de equipe SEM usuarios.gerenciar, pra um login ADMIN sem ficha vinculada.
     const adminLimitedProfileId = await createProfile('Admin limitado', [{ permissionCode: 'funcionarios.ver', scope: 'EQUIPE' }]);
 

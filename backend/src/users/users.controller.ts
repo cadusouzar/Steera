@@ -48,21 +48,21 @@ export class UsersController {
   @Patch(':id/block')
   @HttpCode(204)
   block(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.users.block(user.companyId, id);
+    return this.users.block(user.companyId, id, user);
   }
 
   @RequirePermission('usuarios.gerenciar')
   @Patch(':id/unblock')
   @HttpCode(204)
   unblock(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.users.unblock(user.companyId, id);
+    return this.users.unblock(user.companyId, id, user);
   }
 
   @RequirePermission('usuarios.gerenciar')
   @Delete(':id')
   @HttpCode(204)
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.users.remove(user.companyId, id);
+    return this.users.remove(user.companyId, id, user);
   }
 
   // "Acesso e sessões" (26/09/2026): não devolve mais senha nenhuma — envia um link de redefinição
@@ -94,6 +94,6 @@ export class UsersController {
   @RequirePermission('usuarios.gerenciar')
   @Patch(':id/employee')
   linkEmployee(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: LinkUserEmployeeDto) {
-    return this.users.linkEmployee(user.companyId, id, dto.employeeId);
+    return this.users.linkEmployee(user.companyId, id, dto.employeeId, user);
   }
 }

@@ -8,6 +8,7 @@ import {
 import { reassignUserProfile } from '../permissions/profile-assignment.util';
 import { TimeManagementAuthService } from '../time-management/time-management-auth.service';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 
 jest.mock('../users/last-permission-holder.util');
 jest.mock('../permissions/profile-assignment.util', () => ({
@@ -30,6 +31,28 @@ function makePrisma() {
 // métodos, nenhum deles usado aqui.
 function makeTimeAuth() {
   return new TimeManagementAuthService({} as any);
+}
+
+// Concessão limitada (28/09/2026): o poder do chamador vem do banco (getEffectivePermissions) e os
+// grants ATUAIS de um perfil de getProfileGrants. Padrão: chamador com o catálogo inteiro no alcance
+// máximo (como o Administrador Geral), então passa por toda checagem de poder — a intenção dos
+// testes existentes não muda. `profileGrants` mapeia profileId → grants atuais (padrão: nenhum).
+function fullCallerGrants(): Record<string, Scope | null> {
+  return Object.fromEntries(
+    PERMISSION_CATALOG.map((p) => [p.code, p.validScopes.includes(Scope.EMPRESA) ? Scope.EMPRESA : null]),
+  );
+}
+
+function makeAuthz(
+  callerGrants: Record<string, Scope | null> = fullCallerGrants(),
+  profileGrants: Record<string, { permissionCode: string; scope: Scope | null }[]> = {},
+) {
+  return {
+    getEffectivePermissions: jest.fn().mockResolvedValue(callerGrants),
+    getProfileGrants: jest.fn((_companyId: string, profileId: string | null) =>
+      Promise.resolve(profileId ? (profileGrants[profileId] ?? []) : []),
+    ),
+  } as any;
 }
 
 // Chamador padrão: ADMIN que JÁ tem acesso total ao Ponto — passa livremente pelo gate. Testes do
@@ -58,7 +81,7 @@ describe('ProfilesService', () => {
           _count: { users: 1 },
         },
       ]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       const result = await service.findAllForCompany('company-1');
 
@@ -78,7 +101,7 @@ describe('ProfilesService', () => {
     it('lança NotFoundException se o perfil não existir na empresa', async () => {
       const prisma = makePrisma();
       prisma.profile.findFirst.mockResolvedValue(null);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(service.findOne('company-1', 'missing')).rejects.toThrow(NotFoundException);
     });
@@ -87,35 +110,35 @@ describe('ProfilesService', () => {
   describe('create', () => {
     it('rejeita permissionCode desconhecido', async () => {
       const prisma = makePrisma();
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(
-        service.create('company-1', { name: 'Teste', grants: [{ permissionCode: 'inexistente.foo', scope: null }] }),
+        service.create('company-1', { name: 'Teste', grants: [{ permissionCode: 'inexistente.foo', scope: null }] }, makeCaller()),
       ).rejects.toThrow(BadRequestException);
       expect(prisma.profile.create).not.toHaveBeenCalled();
     });
 
     it('rejeita scope ausente numa permissão que exige scope', async () => {
       const prisma = makePrisma();
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(
-        service.create('company-1', { name: 'Teste', grants: [{ permissionCode: 'clientes.ver', scope: null }] }),
+        service.create('company-1', { name: 'Teste', grants: [{ permissionCode: 'clientes.ver', scope: null }] }, makeCaller()),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rejeita scope presente numa permissão sem validScopes', async () => {
       const prisma = makePrisma();
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(
-        service.create('company-1', { name: 'Teste', grants: [{ permissionCode: 'dashboard.ver', scope: Scope.EMPRESA }] }),
+        service.create('company-1', { name: 'Teste', grants: [{ permissionCode: 'dashboard.ver', scope: Scope.EMPRESA }] }, makeCaller()),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rejeita permissionCode duplicado na mesma lista', async () => {
       const prisma = makePrisma();
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(
         service.create('company-1', {
@@ -124,7 +147,7 @@ describe('ProfilesService', () => {
             { permissionCode: 'dashboard.ver', scope: null },
             { permissionCode: 'dashboard.ver', scope: null },
           ],
-        }),
+        }, makeCaller()),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -135,12 +158,12 @@ describe('ProfilesService', () => {
         permissions: [{ permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }],
         _count: { users: 0 },
       });
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       const result = await service.create('company-1', {
         name: 'Financeiro',
         grants: [{ permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }],
-      });
+      }, makeCaller());
 
       expect(prisma.profile.create).toHaveBeenCalledWith({
         data: {
@@ -219,7 +242,7 @@ describe('ProfilesService', () => {
     it('lança ForbiddenException se o perfil for protegido', async () => {
       const { prisma } = makeTxPrisma('p1', []);
       (prisma.profile.findFirst as jest.Mock).mockResolvedValue({ id: 'p1', isProtected: true });
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(service.update('company-1', 'p1', { name: 'X', grants: [] }, makeCaller())).rejects.toThrow(ForbiddenException);
     });
@@ -227,7 +250,7 @@ describe('ProfilesService', () => {
     it('lança NotFoundException se o perfil não existir na empresa', async () => {
       const { prisma } = makeTxPrisma('p1', []);
       (prisma.profile.findFirst as jest.Mock).mockResolvedValue(null);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(service.update('company-1', 'p1', { name: 'X', grants: [] }, makeCaller())).rejects.toThrow(NotFoundException);
     });
@@ -241,7 +264,7 @@ describe('ProfilesService', () => {
     // UMA chamada só, por PERFIL sendo editado, não por usuário.
     it('chama assertOtherProfileGrantsPermission uma única vez, pelo PERFIL sendo editado, ao remover usuarios.gerenciar', async () => {
       const { prisma, tx } = makeTxPrisma('p1', ['u1', 'u2'], [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.update('company-1', 'p1', { name: 'Financeiro', grants: [{ permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }] }, makeCaller());
 
@@ -255,7 +278,7 @@ describe('ProfilesService', () => {
     // confuso numa edição que não removia a permissão de ninguém.
     it('NÃO chama a trava quando o perfil nunca concedeu usuarios.gerenciar (nada está sendo removido)', async () => {
       const { prisma } = makeTxPrisma('p1', ['u1'], [{ permissionCode: 'dashboard.ver', scope: null }]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.update('company-1', 'p1', { name: 'Financeiro', grants: [{ permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }] }, makeCaller());
 
@@ -264,7 +287,7 @@ describe('ProfilesService', () => {
 
     it('NÃO chama a trava se a nova lista ainda concede usuarios.gerenciar', async () => {
       const { prisma } = makeTxPrisma('p1', ['u1']);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.update('company-1', 'p1', { name: 'Admin', grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }] }, makeCaller());
 
@@ -278,7 +301,7 @@ describe('ProfilesService', () => {
         { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA },
         { permissionCode: 'assinatura.gerenciar', scope: null },
       ]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.update('company-1', 'p1', { name: 'Admin', grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }] }, makeCaller());
 
@@ -288,7 +311,7 @@ describe('ProfilesService', () => {
 
     it('regrava as ProfilePermission e recalcula cada usuário afetado', async () => {
       const { prisma, tx } = makeTxPrisma('p1', ['u1', 'u2']);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.update('company-1', 'p1', { name: 'Financeiro', grants: [{ permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }] }, makeCaller());
 
@@ -309,7 +332,7 @@ describe('ProfilesService', () => {
         { id: 'ativo', role: 'EMPLOYEE' },
         { id: 'bloqueado', role: 'EMPLOYEE' },
       ]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.update('company-1', 'p1', { name: 'Financeiro', grants: [{ permissionCode: 'financas.lancamentos.ver', scope: Scope.EMPRESA }] }, makeCaller());
 
@@ -328,7 +351,7 @@ describe('ProfilesService', () => {
 
       it('BARRA (404) um ADMIN restrito rebaixando o acesso total de um perfil que admins usam', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], FULL_PONTO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await expect(
           service.update(
@@ -342,7 +365,7 @@ describe('ProfilesService', () => {
 
       it('chama o invariante (excluindo o próprio perfil) quando um admin de acesso total faz o rebaixamento', async () => {
         const { prisma, tx } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], FULL_PONTO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await service.update('company-1', 'p1', { name: 'Perfil', grants: RESTRITO }, makeCaller());
 
@@ -352,7 +375,7 @@ describe('ProfilesService', () => {
 
       it('trata REMOVER ponto.administrar por completo como rebaixamento (não só trocar o scope)', async () => {
         const { prisma, tx } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], FULL_PONTO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await service.update('company-1', 'p1', { name: 'Perfil', grants: [] }, makeCaller());
 
@@ -361,7 +384,7 @@ describe('ProfilesService', () => {
 
       it('NÃO checa nada quando nenhum dos afetados é ADMIN (EMPLOYEE nunca tem acesso total)', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'e1', role: 'EMPLOYEE' }], FULL_PONTO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await service.update(
           'company-1',
@@ -375,7 +398,7 @@ describe('ProfilesService', () => {
 
       it('NÃO checa nada quando o perfil continua concedendo ponto.administrar@EMPRESA', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], FULL_PONTO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await service.update(
           'company-1',
@@ -391,7 +414,7 @@ describe('ProfilesService', () => {
       // Um chamador restrito passando sem lançar É a asserção de que o gate não disparou.
       it('NÃO checa nada quando o acesso total não muda (já não dava antes, continua sem dar)', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], RESTRITO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await service.update(
           'company-1',
@@ -411,7 +434,7 @@ describe('ProfilesService', () => {
       // `recomputeAndSaveUserAccess`, o `hasFullPontoAccess` dele virava `true`.
       it('BARRA (404) um ADMIN restrito CONCEDENDO acesso total (a escalação pelo sentido oposto)', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], RESTRITO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await expect(
           service.update(
@@ -425,7 +448,7 @@ describe('ProfilesService', () => {
 
       it('BARRA (404) a concessão mesmo partindo de um perfil que não tinha ponto.administrar nenhum', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], []);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await expect(
           service.update(
@@ -439,7 +462,7 @@ describe('ProfilesService', () => {
 
       it('PERMITE a concessão quando o chamador já tem acesso total, sem acionar o invariante', async () => {
         const { prisma } = makeTxPrisma('p1', [{ id: 'a1', role: 'ADMIN' }], RESTRITO);
-        const service = new ProfilesService(prisma as any, makeTimeAuth());
+        const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
         await service.update('company-1', 'p1', { name: 'Perfil', grants: FULL_PONTO }, makeCaller());
 
@@ -455,25 +478,25 @@ describe('remove', () => {
     const prisma = {
       profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: true, _count: { users: 0 } }) },
     };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
-    await expect(service.remove('company-1', 'p1')).rejects.toThrow(ForbiddenException);
+    await expect(service.remove('company-1', 'p1', makeCaller())).rejects.toThrow(ForbiddenException);
   });
 
   it('lança NotFoundException se o perfil não existir na empresa', async () => {
     const prisma = { profile: { findFirst: jest.fn().mockResolvedValue(null) } };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
-    await expect(service.remove('company-1', 'missing')).rejects.toThrow(NotFoundException);
+    await expect(service.remove('company-1', 'missing', makeCaller())).rejects.toThrow(NotFoundException);
   });
 
   it('lança BadRequestException se o perfil ainda estiver em uso', async () => {
     const prisma = {
       profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: false, _count: { users: 3 } }) },
     };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
-    await expect(service.remove('company-1', 'p1')).rejects.toThrow(BadRequestException);
+    await expect(service.remove('company-1', 'p1', makeCaller())).rejects.toThrow(BadRequestException);
   });
 
   it('exclui um perfil não-protegido sem usuários', async () => {
@@ -483,9 +506,9 @@ describe('remove', () => {
         delete: jest.fn(),
       },
     };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
-    await service.remove('company-1', 'p1');
+    await service.remove('company-1', 'p1', makeCaller());
 
     expect(prisma.profile.delete).toHaveBeenCalledWith({ where: { id: 'p1' } });
   });
@@ -520,7 +543,7 @@ describe('reassignAndDelete', () => {
 
   it('lança BadRequestException se destino for igual à origem', async () => {
     const prisma = { profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: false }) } };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await expect(
       service.reassignAndDelete('company-1', 'p1', { targetProfileId: 'p1' }, makeCaller()),
@@ -531,7 +554,7 @@ describe('reassignAndDelete', () => {
     const prisma = {
       profile: { findFirst: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'target' }) },
     };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await expect(
       service.reassignAndDelete('company-1', 'missing', { targetProfileId: 'target' }, makeCaller()),
@@ -547,7 +570,7 @@ describe('reassignAndDelete', () => {
           .mockResolvedValueOnce({ id: 'target' }),
       },
     };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await expect(
       service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller()),
@@ -566,7 +589,7 @@ describe('reassignAndDelete', () => {
       },
       $transaction: jest.fn(),
     };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     const err = await service
       .reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false }))
@@ -588,7 +611,7 @@ describe('reassignAndDelete', () => {
       .mockResolvedValueOnce({ id: 'target', name: 'Administrador Geral', isProtected: true });
     tx.profilePermission.findMany.mockResolvedValue([]);
     tx.user.findMany.mockResolvedValue([]);
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
     expect(tx.profile.delete).toHaveBeenCalledWith({ where: { id: 'source' } });
@@ -600,7 +623,7 @@ describe('reassignAndDelete', () => {
         findFirst: jest.fn().mockResolvedValueOnce({ id: 'source', isProtected: false }).mockResolvedValueOnce(null),
       },
     };
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await expect(
       service.reassignAndDelete('company-1', 'source', { targetProfileId: 'missing' }, makeCaller()),
@@ -611,7 +634,7 @@ describe('reassignAndDelete', () => {
     const { prisma, tx } = makeTxPrisma();
     tx.profilePermission.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     tx.user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
 
@@ -630,7 +653,7 @@ describe('reassignAndDelete', () => {
     const { prisma, tx } = makeTxPrisma();
     tx.profilePermission.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     tx.user.findMany.mockResolvedValue([{ id: 'ativo' }, { id: 'bloqueado' }]);
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
 
@@ -649,7 +672,7 @@ describe('reassignAndDelete', () => {
       .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }])
       .mockResolvedValueOnce([]);
     tx.user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
 
@@ -663,7 +686,7 @@ describe('reassignAndDelete', () => {
       .mockResolvedValueOnce([{ permissionCode: 'assinatura.gerenciar' }])
       .mockResolvedValueOnce([]);
     tx.user.findMany.mockResolvedValue([{ id: 'u1' }]);
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
 
@@ -677,7 +700,7 @@ describe('reassignAndDelete', () => {
       .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }])
       .mockResolvedValueOnce([{ permissionCode: 'usuarios.gerenciar' }]);
     tx.user.findMany.mockResolvedValue([{ id: 'u1' }]);
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
 
@@ -688,7 +711,7 @@ describe('reassignAndDelete', () => {
     const { prisma, tx } = makeTxPrisma();
     tx.profilePermission.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     tx.user.findMany.mockResolvedValue([{ id: 'u1' }]);
-    const service = new ProfilesService(prisma as any, makeTimeAuth());
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
     await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
 
@@ -708,7 +731,7 @@ describe('reassignAndDelete', () => {
       const { prisma, tx } = makeTxPrisma();
       tx.profilePermission.findMany.mockResolvedValueOnce(RESTRITO).mockResolvedValueOnce(FULL_PONTO);
       tx.user.findMany.mockResolvedValue([{ id: 'a1', role: 'ADMIN' }]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await expect(
         service.reassignAndDelete(
@@ -724,7 +747,7 @@ describe('reassignAndDelete', () => {
       const { prisma, tx } = makeTxPrisma();
       tx.profilePermission.findMany.mockResolvedValueOnce(FULL_PONTO).mockResolvedValueOnce(RESTRITO);
       tx.user.findMany.mockResolvedValue([{ id: 'a1', role: 'ADMIN' }]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller());
 
@@ -736,7 +759,7 @@ describe('reassignAndDelete', () => {
       const { prisma, tx } = makeTxPrisma();
       tx.profilePermission.findMany.mockResolvedValueOnce(FULL_PONTO).mockResolvedValueOnce(RESTRITO);
       tx.user.findMany.mockResolvedValue([{ id: 'e1', role: 'EMPLOYEE' }]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.reassignAndDelete(
         'company-1',
@@ -752,7 +775,7 @@ describe('reassignAndDelete', () => {
       const { prisma, tx } = makeTxPrisma();
       tx.profilePermission.findMany.mockResolvedValueOnce(FULL_PONTO).mockResolvedValueOnce(FULL_PONTO);
       tx.user.findMany.mockResolvedValue([{ id: 'a1', role: 'ADMIN' }]);
-      const service = new ProfilesService(prisma as any, makeTimeAuth());
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz());
 
       await service.reassignAndDelete(
         'company-1',
@@ -763,5 +786,213 @@ describe('reassignAndDelete', () => {
 
       expect(assertOtherAdminGrantsFullPontoAccess).not.toHaveBeenCalled();
     });
+  });
+});
+
+// Concessão limitada (28/09/2026): quem gerencia acessos só concede o que o próprio perfil também
+// tem — o poder do chamador é lido do BANCO, e vale pra todo papel (sem exceção de ADMIN).
+describe('concessão limitada (no-escalation)', () => {
+  const GRANT_MSG = (labels: string) => `Você só pode dar permissões que o seu próprio perfil também tem: ${labels}.`;
+  const PROFILE_MSG = 'Este perfil tem permissões que o seu perfil não tem. Só quem tem todas elas pode alterá-lo.';
+
+  // Chamador "gerente de RH": gerencia usuários, vê funcionários só do time, sem pagamentos.
+  const LIMITED_CALLER: Record<string, Scope | null> = {
+    'usuarios.gerenciar': Scope.EMPRESA,
+    'funcionarios.ver': Scope.EQUIPE,
+    'dashboard.ver': null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  async function expectPermissionRequired(promise: Promise<unknown>, message: string) {
+    const err: any = await promise.catch((e) => e);
+    expect(err).toBeInstanceOf(ForbiddenException);
+    expect(err.getResponse()).toEqual({ statusCode: 403, code: 'PERMISSION_REQUIRED', message });
+  }
+
+  describe('create', () => {
+    it('recusa (403) grants fora do poder do chamador, listando os rótulos, sem criar nada', async () => {
+      const prisma = makePrisma();
+      const authz = makeAuthz(LIMITED_CALLER);
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), authz);
+
+      await expectPermissionRequired(
+        service.create('company-1', {
+          name: 'Gerente',
+          grants: [
+            { permissionCode: 'funcionarios.ver', scope: Scope.EMPRESA },
+            { permissionCode: 'dashboard.ver', scope: null },
+            { permissionCode: 'pagamentos.gerenciar', scope: Scope.EQUIPE },
+          ],
+        }, makeCaller({ userId: 'caller-x' })),
+        GRANT_MSG('Ver Funcionários, Gerenciar pagamentos de Funcionários'),
+      );
+      expect(authz.getEffectivePermissions).toHaveBeenCalledWith('caller-x');
+      expect(prisma.profile.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa mesmo um chamador de papel ADMIN (sem exceção por papel)', async () => {
+      const prisma = makePrisma();
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER));
+
+      await expectPermissionRequired(
+        service.create('company-1', { name: 'X', grants: [{ permissionCode: 'clientes.ver', scope: Scope.EMPRESA }] }, makeCaller({ role: 'ADMIN' })),
+        GRANT_MSG('Ver Clientes'),
+      );
+      expect(prisma.profile.create).not.toHaveBeenCalled();
+    });
+
+    it('permite grants dentro do poder do chamador', async () => {
+      const prisma = makePrisma();
+      prisma.profile.create.mockResolvedValue({ id: 'p9', name: 'Time', isProtected: false, permissions: [], _count: { users: 0 } });
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER));
+
+      await service.create('company-1', {
+        name: 'Time',
+        grants: [{ permissionCode: 'funcionarios.ver', scope: Scope.EQUIPE }, { permissionCode: 'dashboard.ver', scope: null }],
+      }, makeCaller({ role: 'EMPLOYEE' }));
+      expect(prisma.profile.create).toHaveBeenCalled();
+    });
+  });
+
+  describe('update', () => {
+    function makeUpdatePrisma() {
+      const tx = {
+        $executeRaw: jest.fn(),
+        user: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
+        profilePermission: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+        profile: { update: jest.fn() },
+      };
+      const prisma = {
+        profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: false, permissions: [], _count: { users: 0 } }) },
+        $transaction: jest.fn((cb: any) => cb(tx)),
+      };
+      return { prisma, tx };
+    }
+
+    it('recusa (403) editar um perfil cujos grants ATUAIS estão acima do chamador, sem transação', async () => {
+      const { prisma } = makeUpdatePrisma();
+      const authz = makeAuthz(LIMITED_CALLER, { p1: [{ permissionCode: 'pagamentos.gerenciar', scope: Scope.EMPRESA }] });
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), authz);
+
+      await expectPermissionRequired(
+        service.update('company-1', 'p1', { name: 'X', grants: [{ permissionCode: 'dashboard.ver', scope: null }] }, makeCaller()),
+        PROFILE_MSG,
+      );
+      expect(authz.getProfileGrants).toHaveBeenCalledWith('company-1', 'p1');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('recusa (403) uma nova lista de grants acima do chamador, listando os rótulos, sem transação', async () => {
+      const { prisma } = makeUpdatePrisma();
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER, { p1: [{ permissionCode: 'dashboard.ver', scope: null }] }));
+
+      await expectPermissionRequired(
+        service.update('company-1', 'p1', { name: 'X', grants: [{ permissionCode: 'funcionarios.ver', scope: Scope.DEPARTAMENTO }] }, makeCaller()),
+        GRANT_MSG('Ver Funcionários'),
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('perfil protegido continua com o 403 de sempre, antes da checagem de poder', async () => {
+      const { prisma } = makeUpdatePrisma();
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p1', isProtected: true });
+      const authz = makeAuthz(LIMITED_CALLER);
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), authz);
+
+      await expect(service.update('company-1', 'p1', { name: 'X', grants: [] }, makeCaller())).rejects.toThrow(
+        'Este perfil é protegido e não pode ser editado',
+      );
+      expect(authz.getEffectivePermissions).not.toHaveBeenCalled();
+    });
+
+    it('permite quando perfil atual e nova lista estão dentro do chamador', async () => {
+      const { prisma, tx } = makeUpdatePrisma();
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER, { p1: [{ permissionCode: 'funcionarios.ver', scope: Scope.EQUIPE }] }));
+
+      await service.update('company-1', 'p1', { name: 'X', grants: [{ permissionCode: 'dashboard.ver', scope: null }] }, makeCaller());
+      expect(tx.profilePermission.createMany).toHaveBeenCalled();
+    });
+  });
+
+  describe('remove', () => {
+    it('recusa (403) excluir um perfil acima do chamador, sem excluir', async () => {
+      const prisma = {
+        profile: { findFirst: jest.fn().mockResolvedValue({ id: 'p1', isProtected: false, _count: { users: 0 } }), delete: jest.fn() },
+      };
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER, { p1: [{ permissionCode: 'clientes.gerenciar', scope: Scope.EMPRESA }] }));
+
+      await expectPermissionRequired(service.remove('company-1', 'p1', makeCaller()), PROFILE_MSG);
+      expect(prisma.profile.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reassignAndDelete', () => {
+    function makeReassignPrisma() {
+      const tx = {
+        $executeRaw: jest.fn(),
+        profilePermission: { findMany: jest.fn().mockResolvedValue([]) },
+        user: { findMany: jest.fn().mockResolvedValue([]) },
+        profile: { delete: jest.fn() },
+      };
+      const prisma = {
+        profile: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValueOnce({ id: 'source', isProtected: false })
+            .mockResolvedValueOnce({ id: 'target', name: 'Destino', isProtected: false }),
+        },
+        $transaction: jest.fn((cb: any) => cb(tx)),
+      };
+      return { prisma, tx };
+    }
+
+    it('recusa (403) quando o perfil de ORIGEM está acima do chamador, sem transação', async () => {
+      const { prisma } = makeReassignPrisma();
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER, { source: [{ permissionCode: 'cargos.gerenciar', scope: Scope.EMPRESA }] }));
+
+      await expectPermissionRequired(
+        service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller()),
+        PROFILE_MSG,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('recusa (403) quando o perfil de DESTINO está acima do chamador, listando os rótulos, sem transação', async () => {
+      const { prisma } = makeReassignPrisma();
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER, { target: [{ permissionCode: 'ferias.gerenciar', scope: Scope.EQUIPE }] }));
+
+      await expectPermissionRequired(
+        service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller()),
+        GRANT_MSG('Agendar/cancelar Férias e Afastamentos'),
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('permite quando origem e destino estão dentro do chamador', async () => {
+      const { prisma, tx } = makeReassignPrisma();
+      const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(LIMITED_CALLER, {
+        source: [{ permissionCode: 'dashboard.ver', scope: null }],
+        target: [{ permissionCode: 'funcionarios.ver', scope: Scope.EQUIPE }],
+      }));
+
+      await service.reassignAndDelete('company-1', 'source', { targetProfileId: 'target' }, makeCaller({ role: 'EMPLOYEE', hasFullPontoAccess: false }));
+      expect(tx.profile.delete).toHaveBeenCalledWith({ where: { id: 'source' } });
+    });
+  });
+
+  it('um chamador tipo Administrador Geral passa por toda checagem de poder', async () => {
+    const everything = PERMISSION_CATALOG.map((p) => ({
+      permissionCode: p.code,
+      scope: p.validScopes.includes(Scope.EMPRESA) ? Scope.EMPRESA : null,
+    }));
+    const prisma = makePrisma();
+    prisma.profile.create.mockResolvedValue({ id: 'p9', name: 'Tudo', isProtected: false, permissions: [], _count: { users: 0 } });
+    const service = new ProfilesService(prisma as any, makeTimeAuth(), makeAuthz(undefined, { p1: everything }));
+
+    await service.create('company-1', { name: 'Tudo', grants: everything }, makeCaller());
+    expect(prisma.profile.create).toHaveBeenCalled();
   });
 });

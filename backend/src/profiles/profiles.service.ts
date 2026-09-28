@@ -1,5 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { assertCallerCanAssignProfile } from '../users/caller-escalation.util';
+import {
+  assertCallerCanAssignProfile,
+  assertGrantsWithinCaller,
+  assertProfileWithinCaller,
+} from '../users/caller-escalation.util';
+import { AuthorizationService } from '../authorization/authorization.service';
 import { Scope } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
@@ -30,7 +35,18 @@ export class ProfilesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly timeManagementAuth: TimeManagementAuthService,
+    private readonly authorization: AuthorizationService,
   ) {}
+
+  // Concessão limitada (28/09/2026): poder do chamador lido do BANCO (perfil atual), nunca do JWT.
+  private callerGrants(currentUser: AuthenticatedUser) {
+    return this.authorization.getEffectivePermissions(currentUser.userId);
+  }
+
+  // Grants do DTO no formato de comparação (scope ausente = null).
+  private dtoGrants(grants: ProfileGrantDto[]) {
+    return grants.map((g) => ({ permissionCode: g.permissionCode, scope: g.scope ?? null }));
+  }
 
   async findAllForCompany(companyId: string) {
     const profiles = await this.prisma.profile.findMany({
@@ -50,8 +66,10 @@ export class ProfilesService {
     return this.toPublicProfile(profile);
   }
 
-  async create(companyId: string, dto: CreateProfileDto) {
+  async create(companyId: string, dto: CreateProfileDto, currentUser: AuthenticatedUser) {
     this.validateGrants(dto.grants);
+    // Concessão limitada: só cria um perfil com permissões que o próprio chamador tem.
+    assertGrantsWithinCaller(await this.callerGrants(currentUser), this.dtoGrants(dto.grants));
     const profile = await this.prisma.profile.create({
       data: {
         companyId,
@@ -73,6 +91,13 @@ export class ProfilesService {
     if (profile.isProtected) {
       throw new ForbiddenException('Este perfil é protegido e não pode ser editado');
     }
+
+    // Concessão limitada: o perfil ATUAL precisa estar dentro do poder do chamador (não dá pra mexer
+    // num perfil mais poderoso que o seu) e a lista NOVA também (não dá pra conceder o que não tem).
+    // Antes de qualquer escrita — a transação abaixo nem começa.
+    const callerGrants = await this.callerGrants(currentUser);
+    assertProfileWithinCaller(callerGrants, await this.authorization.getProfileGrants(companyId, id));
+    assertGrantsWithinCaller(callerGrants, this.dtoGrants(dto.grants));
 
     // Mesma derivação usada em todo o resto do projeto, em vez de uma reimplementação à mão —
     // hoje as duas concordam (validateGrants já rejeita permissionCode duplicado), mas sem isso
@@ -170,13 +195,18 @@ export class ProfilesService {
     return this.findOne(companyId, id);
   }
 
-  async remove(companyId: string, id: string) {
+  async remove(companyId: string, id: string, currentUser: AuthenticatedUser) {
     const profile = await this.prisma.profile.findFirst({
       where: { id, companyId },
       include: { _count: { select: { users: true } } },
     });
     if (!profile) throw new NotFoundException(`Perfil ${id} não encontrado nesta empresa`);
     if (profile.isProtected) throw new ForbiddenException('Este perfil é protegido e não pode ser excluído');
+    // Concessão limitada: só exclui um perfil que esteja inteiro dentro do poder do chamador.
+    assertProfileWithinCaller(
+      await this.callerGrants(currentUser),
+      await this.authorization.getProfileGrants(companyId, id),
+    );
     if (profile._count.users > 0) {
       throw new BadRequestException(
         `Este perfil está em uso por ${profile._count.users} login(s). Use a opção de reatribuir antes de excluir.`,
@@ -204,6 +234,11 @@ export class ProfilesService {
     // Task 6, fix round 1: mover logins pro perfil protegido é atribuí-lo — mesma trava de
     // UsersService.create()/assignProfile(), antes de qualquer escrita.
     assertCallerCanAssignProfile(target, currentUser);
+    // Concessão limitada: a ORIGEM precisa estar dentro do poder do chamador (é um perfil sendo
+    // excluído) e o DESTINO também (os logins da origem passam a recebê-lo — é uma atribuição).
+    const callerGrants = await this.callerGrants(currentUser);
+    assertProfileWithinCaller(callerGrants, await this.authorization.getProfileGrants(companyId, id));
+    assertGrantsWithinCaller(callerGrants, await this.authorization.getProfileGrants(companyId, dto.targetProfileId));
 
     // Transação montada à mão no client CENTRAL (mesmo padrão e mesmo motivo de update() acima):
     // `User`/`Profile`/`ProfilePermission` são tabelas CENTRAIS, inalcançáveis por um client de

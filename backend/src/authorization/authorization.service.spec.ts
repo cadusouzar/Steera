@@ -53,6 +53,23 @@ describe('AuthorizationService', () => {
     });
   });
 
+  describe('getProfileGrants', () => {
+    it('lê os grants do perfil filtrando por empresa', async () => {
+      prisma.profilePermission.findMany.mockResolvedValue([{ permissionCode: 'dashboard.ver', scope: null }]);
+      const result = await service.getProfileGrants('company-1', 'profile-1');
+      expect(prisma.profilePermission.findMany).toHaveBeenCalledWith({
+        where: { profileId: 'profile-1', companyId: 'company-1' },
+        select: { permissionCode: true, scope: true },
+      });
+      expect(result).toEqual([{ permissionCode: 'dashboard.ver', scope: null }]);
+    });
+
+    it('login sem perfil: lista vazia, sem consultar o banco', async () => {
+      await expect(service.getProfileGrants('company-1', null)).resolves.toEqual([]);
+      expect(prisma.profilePermission.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getEffectivePermissions', () => {
     it('returns a map of permissionCode to scope for the user\'s profile', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'user-1', companyId: 'company-1', profileId: 'profile-1' });

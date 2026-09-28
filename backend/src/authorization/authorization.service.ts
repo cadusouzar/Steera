@@ -61,6 +61,20 @@ export class AuthorizationService implements OnApplicationBootstrap {
     return result;
   }
 
+  // Grants ATUAIS de um perfil (concessão limitada, 28/09/2026) — usado por Perfis/Usuários pra
+  // comparar o "poder" de um perfil com o do chamador. Login sem perfil não concede nada: lista vazia.
+  // `companyId` explícito pela mesma defesa em profundidade de getEffectivePermissions.
+  async getProfileGrants(
+    companyId: string,
+    profileId: string | null,
+  ): Promise<{ permissionCode: string; scope: Scope | null }[]> {
+    if (!profileId) return [];
+    return this.prisma.profilePermission.findMany({
+      where: { profileId, companyId },
+      select: { permissionCode: true, scope: true },
+    });
+  }
+
   // Resolve o Employee vinculado ao login atual — retorna null se não houver vínculo (fundador
   // ainda não linkado), nunca lança. Todo resolvedor abaixo depende disso.
   private async resolveOwnEmployee(currentUser: AuthenticatedUser): Promise<{ id: string; departmentId: string | null } | null> {

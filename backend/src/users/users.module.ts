@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { AuthorizationModule } from '../authorization/authorization.module';
 import { UserTokensModule } from '../auth/user-tokens/user-tokens.module';
 import { TimeManagementAuthModule } from '../time-management/time-management-auth.module';
 import { UsersController } from './users.controller';
@@ -20,7 +21,7 @@ import { UsersService } from './users.service';
 // deliberadamente sem rota HTTP por enquanto.
 @Module({
   // UserTokensModule: InviteMailer (convite) + UserTokensService (link de redefinição de senha).
-  imports: [PrismaModule, TimeManagementAuthModule, UserTokensModule],
+  imports: [PrismaModule, TimeManagementAuthModule, UserTokensModule, AuthorizationModule],
   controllers: [UsersController],
   providers: [UsersService],
 })

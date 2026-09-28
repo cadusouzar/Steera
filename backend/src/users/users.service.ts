@@ -19,7 +19,10 @@ import {
   assertCallerCanAssignProfile,
   assertCallerCanCreateRole,
   assertCallerCanReissueInvite,
+  assertGrantsWithinCaller,
+  assertLoginWithinCaller,
 } from './caller-escalation.util';
+import { AuthorizationService } from '../authorization/authorization.service';
 import { InviteMailer } from '../auth/user-tokens/invite-mailer';
 import { UserTokensService } from '../auth/user-tokens/user-tokens.service';
 import { EmailService } from '../email/email.service';
@@ -56,7 +59,35 @@ export class UsersService {
     private readonly inviteMailer: InviteMailer,
     private readonly userTokens: UserTokensService,
     private readonly email: EmailService,
+    private readonly authorization: AuthorizationService,
   ) {}
+
+  // Concessão limitada (28/09/2026): quem gerencia acessos só age sobre um login cujo perfil ATUAL
+  // esteja inteiro dentro do poder do próprio chamador (lido do BANCO, nunca do JWT). Login sem
+  // perfil não concede nada, então está sempre dentro.
+  private async assertTargetLoginWithinCaller(
+    companyId: string,
+    target: { profileId: string | null },
+    currentUser: AuthenticatedUser,
+  ): Promise<void> {
+    assertLoginWithinCaller(
+      await this.authorization.getEffectivePermissions(currentUser.userId),
+      await this.authorization.getProfileGrants(companyId, target.profileId),
+    );
+  }
+
+  // Atribuir um perfil a um login (criar login, trocar perfil): o perfil precisa estar dentro do
+  // poder do chamador — a recusa lista as permissões que ele não tem.
+  private async assertProfileGrantableByCaller(
+    companyId: string,
+    profileId: string,
+    currentUser: AuthenticatedUser,
+  ): Promise<void> {
+    assertGrantsWithinCaller(
+      await this.authorization.getEffectivePermissions(currentUser.userId),
+      await this.authorization.getProfileGrants(companyId, profileId),
+    );
+  }
 
   private countPlanEmployeeLogins(companyId: string): Promise<number> {
     return this.prisma.user.count({ where: { companyId, role: 'EMPLOYEE', status: { in: PLAN_COUNTED_LOGIN_STATUSES } } });
@@ -107,9 +138,10 @@ export class UsersService {
   // usuários vincula o login de OUTRA pessoa a uma ficha de funcionário — o caminho pra logins de
   // alcance restrito, que não podem mais se auto-vincular. Não troca um vínculo existente e não
   // encerra sessões (o alcance é resolvido pelo vínculo lido do banco, então vale na hora).
-  async linkEmployee(companyId: string, userId: string, employeeId: string) {
+  async linkEmployee(companyId: string, userId: string, employeeId: string, currentUser: AuthenticatedUser) {
     const target = await this.prisma.user.findFirst({ where: { id: userId, companyId }, select: SAFE_USER_SELECT });
     if (!target) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    await this.assertTargetLoginWithinCaller(companyId, target, currentUser);
     if (target.employeeId) throw new BadRequestException('Este login já está vinculado a um funcionário');
 
     await assertEmployeeLinkable(this.prisma, companyId, employeeId, { requireActive: true });
@@ -138,6 +170,7 @@ export class UsersService {
     const profile = await this.prisma.profile.findFirst({ where: { id: dto.profileId, companyId } });
     if (!profile) throw new BadRequestException(`Perfil ${dto.profileId} não encontrado nesta empresa`);
     assertCallerCanAssignProfile(profile, currentUser);
+    await this.assertProfileGrantableByCaller(companyId, dto.profileId, currentUser);
 
     // Convite por e-mail ("Acesso e sessões", 26/09/2026) — substitui a antiga senha temporária fixa
     // ('Mudar@123'), que qualquer um que soubesse o e-mail de um login recém-criado podia usar. O
@@ -243,16 +276,18 @@ export class UsersService {
     // Task 6, fix round 1: a resposta devolve o `inviteUrl` cru — sem esta trava, um login não
     // ADMIN com `usuarios.gerenciar` tomaria o convite pendente de um ADMIN.
     assertCallerCanReissueInvite(user, currentUser);
+    await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
     return this.sendInvite(companyId, user.id, user.email);
   }
 
-  async block(companyId: string, userId: string) {
+  async block(companyId: string, userId: string, currentUser: AuthenticatedUser) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     // NotFoundException (404), not BadRequestException — consistente com o
     // padrão já usado em RolesService/ReceivablesService para "registro não
     // encontrado nesta empresa" (nunca vaza pra um admin de outra empresa se
     // o id existe em outro tenant).
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
     // NUNCA runTenantTransaction/runTenantInteractiveTransaction aqui — ver o comentário completo
     // em AuthService.changePassword (achado durante a auditoria de segurança, 17/09/2026): `User`/
     // `RefreshToken` são tabelas CENTRAIS, e nenhum client de TENANT consegue alcançá-las via
@@ -277,9 +312,10 @@ export class UsersService {
     );
   }
 
-  async unblock(companyId: string, userId: string) {
+  async unblock(companyId: string, userId: string, currentUser: AuthenticatedUser) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
     // Convite pendente: não há o que "reativar" (INVITED já conta no limite e ainda não tem senha) —
     // só limpa uma eventual trava temporária. Promover pra ACTIVE deixaria um login com hash
     // inutilizável e e-mail nunca confirmado, fora do fluxo de aceite.
@@ -329,6 +365,9 @@ export class UsersService {
     const newProfile = await this.prisma.profile.findFirst({ where: { id: profileId, companyId } });
     if (!newProfile) throw new BadRequestException(`Perfil ${profileId} não encontrado nesta empresa`);
     assertCallerCanAssignProfile(newProfile, currentUser);
+    // Concessão limitada: o login precisa estar dentro do poder do chamador, e o perfil novo também.
+    await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
+    await this.assertProfileGrantableByCaller(companyId, profileId, currentUser);
 
     await runInsideExplicitTenantTransaction(() =>
       this.prisma.$transaction(async (tx) => {
@@ -407,9 +446,10 @@ export class UsersService {
   // engano, ou remover o acesso de alguém que não deveria nem deixar rastro. `RefreshToken` tem
   // `onDelete: Cascade` a partir de `User`, então as sessões daquele login somem junto sem precisar
   // de limpeza manual. `employeeId` (se houver) fica livre pra um login novo no futuro.
-  async remove(companyId: string, userId: string) {
+  async remove(companyId: string, userId: string, currentUser: AuthenticatedUser) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
+    await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
     await runInsideExplicitTenantTransaction(() =>
       this.prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_company_id', ${companyId}, true)`;
@@ -436,10 +476,13 @@ export class UsersService {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
 
+    // Mesma trava de resendInvite() (Task 6, fix round 1): o ramo INVITED também devolve o `inviteUrl`.
+    // O ramo de login ACTIVE não precisa dela — o link de redefinição só vai pro e-mail do alvo.
+    if (user.status === 'INVITED') assertCallerCanReissueInvite(user, currentUser);
+    // Concessão limitada: vale pros dois ramos, antes de emitir qualquer token/e-mail.
+    await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
+
     if (user.status === 'INVITED') {
-      // Mesma trava de resendInvite() (Task 6, fix round 1): este ramo também devolve o `inviteUrl`.
-      // O ramo de login ACTIVE não precisa dela — o link de redefinição só vai pro e-mail do alvo.
-      assertCallerCanReissueInvite(user, currentUser);
       const { inviteUrl, sent } = await this.sendInvite(companyId, user.id, user.email);
       return { sent, inviteUrl };
     }

@@ -37,7 +37,7 @@ export class ProfilesController {
 
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateProfileDto) {
-    return this.profiles.create(user.companyId, dto);
+    return this.profiles.create(user.companyId, dto, user);
   }
 
   @Patch(':id')
@@ -48,7 +48,7 @@ export class ProfilesController {
   @Delete(':id')
   @HttpCode(204)
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.profiles.remove(user.companyId, id);
+    return this.profiles.remove(user.companyId, id, user);
   }
 
   @Post(':id/reassign-and-delete')

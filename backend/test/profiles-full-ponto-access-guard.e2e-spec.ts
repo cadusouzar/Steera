@@ -10,6 +10,8 @@ import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 import { ProfilesService } from '../src/profiles/profiles.service';
+import { AuthorizationService } from '../src/authorization/authorization.service';
+import { fullPowerAuthorization } from './full-power-authorization.util';
 import { TimeManagementAuthService } from '../src/time-management/time-management-auth.service';
 import { AuthenticatedUser } from '../src/auth/decorators/current-user.decorator';
 
@@ -85,7 +87,11 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
 
     app = await bootApp();
     prisma = app.get(PrismaService);
-    profiles = new ProfilesService(prisma, new TimeManagementAuthService(prisma));
+    profiles = new ProfilesService(
+      prisma,
+      new TimeManagementAuthService(prisma),
+      fullPowerAuthorization(app.get(AuthorizationService)),
+    );
 
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
@@ -104,9 +110,15 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     // contar como "outro perfil que ainda dá acesso total a um ADMIN ativo". O token do fundador
     // continua valendo (claims já emitidas), o que é justamente o que queremos: um chamador de
     // acesso total pra exercitar o invariante.
+    //
+    // Concessão limitada (28/09/2026): o fundador também precisa, no BANCO, do poder de conceder
+    // `ponto.administrar` (a checagem nova lê o perfil atual, não o token). Em vez de apagar a linha,
+    // o alcance vira NULL: sem alcance cobre qualquer alcance na comparação de poder, mas não é
+    // EMPRESA, então o fundador segue sem contar como ADMIN de acesso total nas travas/contagens.
     await sys(() =>
-      prisma.profilePermission.deleteMany({
+      prisma.profilePermission.updateMany({
         where: { companyId, profileId: administradorGeralId, permissionCode: 'ponto.administrar' },
+        data: { scope: null },
       }),
     );
   });
@@ -166,6 +178,10 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
   const USUARIOS = { permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA };
   const RESTRITO_COM_USUARIOS = [...PONTO_DE_EQUIPE, USUARIOS];
   const FULL_PONTO_COM_USUARIOS = [...FULL_PONTO, USUARIOS];
+  // Concessão limitada (28/09/2026): recusa de quem tenta conceder ponto.administrar@EMPRESA tendo
+  // só EQUIPE.
+  const GRANT_OUTSIDE_POWER =
+    'Você só pode dar permissões que o seu próprio perfil também tem: Administrar Controle de Ponto.';
 
   let pontoTotalId: string;
   let extraId: string;
@@ -174,7 +190,7 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
 
   it('rejeita (400) e NÃO aplica nada ao rebaixar o ÚNICO perfil que dá acesso total a 2 ADMINs ativos', async () => {
     const pontoTotal = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Ponto Total', grants: FULL_PONTO }),
+      profiles.create(companyId, { name: 'Ponto Total', grants: FULL_PONTO }, fullAccessCaller()),
     );
     pontoTotalId = pontoTotal.id;
 
@@ -217,7 +233,7 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
 
   it('permite o rebaixamento quando OUTRO perfil ainda dá acesso total a um ADMIN ativo, e recalcula os rebaixados', async () => {
     const extra = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Extra Ponto', grants: FULL_PONTO }),
+      profiles.create(companyId, { name: 'Extra Ponto', grants: FULL_PONTO }, fullAccessCaller()),
     );
     extraId = extra.id;
 
@@ -239,9 +255,9 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     expect(demoted.every((u) => u.hasFullPontoAccess === false)).toBe(true);
   });
 
-  it('BARRA com 404 um ADMIN restrito que tenta se reatribuir a um perfil de acesso total (a escalação demonstrada pelo revisor)', async () => {
+  it('BARRA com 403 um ADMIN restrito que tenta se reatribuir a um perfil de acesso total (a escalação demonstrada pelo revisor)', async () => {
     const restrito = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Admin Restrito no Ponto', grants: RESTRITO_COM_USUARIOS }),
+      profiles.create(companyId, { name: 'Admin Restrito no Ponto', grants: RESTRITO_COM_USUARIOS }, fullAccessCaller()),
     );
     const restrictedAdmin = await createAdmin('restrito-http', restrito.id, 'senha-propria-12345');
 
@@ -262,12 +278,17 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     expect(meRes.body.role).toBe('ADMIN');
     expect(meRes.body.hasFullPontoAccess).toBe(false);
 
-    // O ataque: ele mesmo se promovendo ao perfil de acesso total.
-    await request(app.getHttpServer())
+    // O ataque: ele mesmo se promovendo ao perfil de acesso total. Desde a concessão limitada
+    // (28/09/2026) ele é barrado ANTES do gate de Ponto (404): o perfil de destino concede
+    // `ponto.administrar@EMPRESA`, que o perfil dele (EQUIPE) não tem → 403. O gate em si segue
+    // coberto pelo teste de service acima (chamador sintético com todo o poder) e pelos unitários.
+    const selfPromotion = await request(app.getHttpServer())
       .patch(`/companies/me/users/${restrictedAdmin.id}/profile`)
       .set('Authorization', restrictedToken)
       .send({ profileId: extraId })
-      .expect(404);
+      .expect(403);
+    expect(selfPromotion.body.code).toBe('PERMISSION_REQUIRED');
+    expect(selfPromotion.body.message).toBe(GRANT_OUTSIDE_POWER);
 
     const unchanged = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: restrictedAdmin.id } }));
     expect(unchanged.profileId).toBe(restrito.id);
@@ -333,9 +354,9 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
   // PRÓPRIO perfil adicionando `ponto.administrar@EMPRESA`. A primeira versão do gate só olhava o
   // sentido do REBAIXAMENTO, então nenhuma checagem rodava nesse caminho e o `hasFullPontoAccess`
   // dele virava `true` no token seguinte.
-  it('BARRA com 404 um ADMIN restrito que edita o PRÓPRIO perfil pra CONCEDER acesso total', async () => {
+  it('BARRA com 403 um ADMIN restrito que edita o PRÓPRIO perfil pra CONCEDER acesso total', async () => {
     const autoPromocao = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Auto Promoção', grants: RESTRITO_COM_USUARIOS }),
+      profiles.create(companyId, { name: 'Auto Promoção', grants: RESTRITO_COM_USUARIOS }, fullAccessCaller()),
     );
     expect(autoPromocao.isProtected).toBe(false); // nada protege o próprio perfil dele
 
@@ -354,12 +375,15 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     expect(meRes.body.role).toBe('ADMIN');
     expect(meRes.body.hasFullPontoAccess).toBe(false);
 
-    // O ataque: editar o próprio perfil adicionando ponto.administrar@EMPRESA.
-    await request(app.getHttpServer())
+    // O ataque: editar o próprio perfil adicionando ponto.administrar@EMPRESA. Desde a concessão
+    // limitada (28/09/2026), barrado antes do gate de Ponto: ele não tem esse alcance → 403.
+    const selfEdit = await request(app.getHttpServer())
       .patch(`/profiles/${autoPromocao.id}`)
       .set('Authorization', selfToken)
       .send({ name: 'Auto Promoção', grants: FULL_PONTO_COM_USUARIOS })
-      .expect(404);
+      .expect(403);
+    expect(selfEdit.body.code).toBe('PERMISSION_REQUIRED');
+    expect(selfEdit.body.message).toBe(GRANT_OUTSIDE_POWER);
 
     // Nada foi escrito: o perfil segue concedendo só EQUIPE, e ele segue sem acesso total.
     const grantsAfter = await sys(() => prisma.profilePermission.findMany({ where: { profileId: autoPromocao.id } }));
@@ -368,8 +392,8 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
     const stillRestricted = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: selfPromoter.id } }));
     expect(stillRestricted.hasFullPontoAccess).toBe(false);
 
-    // A MESMA edição, feita por quem já tem acesso total, é permitida — prova que o 404 acima veio
-    // do gate, não de outra checagem qualquer no caminho.
+    // A MESMA edição, feita por quem tem esse poder (o fundador), é permitida — prova que o 403 acima
+    // veio da falta de poder do atacante, não de outra checagem qualquer no caminho.
     await request(app.getHttpServer())
       .patch(`/profiles/${autoPromocao.id}`)
       .set('Authorization', adminToken)
@@ -385,9 +409,9 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
   // nenhum. Sequência do ataque, três chamadas comuns: criar um Perfil com
   // `ponto.administrar@EMPRESA` (inofensivo sozinho), criar um login ADMIN novo apontando pra ele
   // (já nasce com acesso total), e entrar nele aceitando o próprio convite por e-mail.
-  it('BARRA com 404 um ADMIN restrito CRIANDO um login ADMIN novo com acesso total', async () => {
+  it('BARRA com 403 um ADMIN restrito CRIANDO um login ADMIN novo com acesso total', async () => {
     const restrito = await runWithTenant(companyId, () =>
-      profiles.create(companyId, { name: 'Restrito Criador', grants: RESTRITO_COM_USUARIOS }),
+      profiles.create(companyId, { name: 'Restrito Criador', grants: RESTRITO_COM_USUARIOS }, fullAccessCaller()),
     );
     const creator = await createAdmin('criador-restrito', restrito.id, 'senha-propria-98765');
     const loginRes = await request(app.getHttpServer())
@@ -397,28 +421,37 @@ describe('Acesso total ao Ponto — gate + invariante de último ADMIN (e2e)', (
       .expect(201);
     const creatorToken = `Bearer ${loginRes.body.accessToken}`;
 
-    // Passo 1 do ataque: criar o perfil de acesso total. Permitido de propósito — um perfil sem
-    // ninguém atribuído não concede nada a ninguém.
-    const weaponRes = await request(app.getHttpServer())
+    // Passo 1 do ataque: criar o perfil de acesso total. Desde a concessão limitada (28/09/2026) o
+    // próprio atacante já é barrado aqui (403 — ele só tem ponto.administrar@EQUIPE); o perfil é
+    // então criado pelo fundador, pra exercitar o passo 2 com ele já existindo.
+    const weaponDenied = await request(app.getHttpServer())
       .post('/profiles')
       .set('Authorization', creatorToken)
       .send({ name: 'Arma', grants: FULL_PONTO })
+      .expect(403);
+    expect(weaponDenied.body.message).toBe(GRANT_OUTSIDE_POWER);
+    const weaponRes = await request(app.getHttpServer())
+      .post('/profiles')
+      .set('Authorization', adminToken)
+      .send({ name: 'Arma', grants: FULL_PONTO })
       .expect(201);
 
-    // Passo 2: mintar um ADMIN novo já com acesso total — agora barrado.
+    // Passo 2: mintar um ADMIN novo já com acesso total — barrado. Desde a concessão limitada
+    // (28/09/2026), pela checagem de poder (403), que roda antes do gate de Ponto (404).
     const victimEmail = `vitima-${runId}@test.com`;
-    await request(app.getHttpServer())
+    const mintDenied = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', creatorToken)
       .send({ email: victimEmail, role: 'ADMIN', profileId: weaponRes.body.id })
-      .expect(404);
+      .expect(403);
+    expect(mintDenied.body.message).toBe(GRANT_OUTSIDE_POWER);
 
     // Nenhum login foi criado.
     const notCreated = await sys(() => prisma.user.findUnique({ where: { email: victimEmail } }));
     expect(notCreated).toBeNull();
 
-    // A MESMA criação, feita por quem já tem acesso total, é permitida — prova que o 404 veio do
-    // gate, não de outra checagem no caminho.
+    // A MESMA criação, feita por quem tem esse poder (o fundador), é permitida — prova que o 403 veio
+    // da falta de poder do atacante, não de outra checagem no caminho.
     const okRes = await request(app.getHttpServer())
       .post('/companies/me/users')
       .set('Authorization', adminToken)

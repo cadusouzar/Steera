@@ -10,6 +10,8 @@ import { UsersService } from './users.service';
 import { UserTokensService } from '../auth/user-tokens/user-tokens.service';
 import { InviteMailer } from '../auth/user-tokens/invite-mailer';
 import { EmailService } from '../email/email.service';
+import { AuthorizationService } from '../authorization/authorization.service';
+import { PERMISSION_CATALOG } from '../permissions/permission-catalog';
 
 // Chamador padrão dos testes: um ADMIN que JÁ tem acesso total ao Ponto — o caso que passa
 // livremente pelos gates de acesso total ao Ponto. Testes que exercitam um gate em si passam
@@ -33,12 +35,35 @@ function makeTimeAuth() {
   return new TimeManagementAuthService({} as any);
 }
 
+// Concessão limitada (28/09/2026): o poder do chamador vem do banco (getEffectivePermissions) e os
+// grants ATUAIS de um perfil de getProfileGrants. Padrão: chamador com o catálogo inteiro no alcance
+// máximo (como o Administrador Geral), então passa por toda checagem de poder — a intenção dos
+// testes existentes não muda. `profileGrants` mapeia profileId → grants atuais (padrão: nenhum).
+function fullCallerGrants(): Record<string, string | null> {
+  return Object.fromEntries(
+    PERMISSION_CATALOG.map((p) => [p.code, p.validScopes.includes('EMPRESA') ? 'EMPRESA' : null]),
+  );
+}
+
+function makeAuthz(
+  callerGrants: Record<string, string | null> = fullCallerGrants(),
+  profileGrants: Record<string, { permissionCode: string; scope: string | null }[]> = {},
+) {
+  return {
+    getEffectivePermissions: jest.fn().mockResolvedValue(callerGrants),
+    getProfileGrants: jest.fn((_companyId: string, profileId: string | null) =>
+      Promise.resolve(profileId ? (profileGrants[profileId] ?? []) : []),
+    ),
+  } as any;
+}
+
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: any;
   let inviteMailer: { sendInvite: jest.Mock };
   let userTokens: { issue: jest.Mock; consume: jest.Mock };
   let email: { send: jest.Mock };
+  let authz: ReturnType<typeof makeAuthz>;
 
   beforeEach(async () => {
     inviteMailer = {
@@ -46,6 +71,7 @@ describe('UsersService', () => {
     };
     userTokens = { issue: jest.fn().mockResolvedValue('raw-reset-token'), consume: jest.fn() };
     email = { send: jest.fn().mockResolvedValue(true) };
+    authz = makeAuthz();
     prisma = {
       employee: { findFirst: jest.fn(), findMany: jest.fn() },
       user: {
@@ -94,6 +120,7 @@ describe('UsersService', () => {
         { provide: InviteMailer, useValue: inviteMailer },
         { provide: UserTokensService, useValue: userTokens },
         { provide: EmailService, useValue: email },
+        { provide: AuthorizationService, useValue: authz },
       ],
     }).compile();
     service = module.get(UsersService);
@@ -104,21 +131,21 @@ describe('UsersService', () => {
   describe('linkEmployee (PATCH /companies/me/users/:id/employee)', () => {
     it('404 quando o login alvo é de outra empresa', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
-      await expect(service.linkEmployee('company-1', 'user-other', 'employee-1')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.linkEmployee('company-1', 'user-other', 'employee-1', makeCaller())).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({ id: 'user-other', companyId: 'company-1' });
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('400 quando o login alvo já tem ficha vinculada', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: 'e-old' });
-      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Este login já está vinculado a um funcionário');
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1', makeCaller())).rejects.toThrow('Este login já está vinculado a um funcionário');
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('400 quando o funcionário não existe nesta empresa', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
       prisma.employee.findFirst.mockResolvedValue(null);
-      await expect(service.linkEmployee('company-1', 'u2', 'employee-x')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-x', makeCaller())).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
@@ -126,7 +153,7 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'INACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null);
-      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Funcionário inativo não pode ser vinculado a um login');
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1', makeCaller())).rejects.toThrow('Funcionário inativo não pode ser vinculado a um login');
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
@@ -134,7 +161,7 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue({ id: 'u3' });
-      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Este funcionário já possui um login vinculado');
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1', makeCaller())).rejects.toThrow('Este funcionário já possui um login vinculado');
     });
 
     it('409 amigável quando perde a corrida (P2002)', async () => {
@@ -144,7 +171,7 @@ describe('UsersService', () => {
       prisma.user.updateMany.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: '5.22.0', meta: { target: ['employeeId'] } }),
       );
-      await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.linkEmployee('company-1', 'u2', 'employee-1', makeCaller())).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('vincula, devolve o login no formato da listagem e não encerra sessões', async () => {
@@ -153,7 +180,7 @@ describe('UsersService', () => {
       prisma.user.findUnique.mockResolvedValue(null);
       prisma.user.updateMany.mockResolvedValue({ count: 1 });
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: 'employee-1' });
-      const result = await service.linkEmployee('company-1', 'u2', 'employee-1');
+      const result = await service.linkEmployee('company-1', 'u2', 'employee-1', makeCaller());
       expect(prisma.user.updateMany).toHaveBeenCalledWith({ where: { id: 'u2', employeeId: null }, data: { employeeId: 'employee-1' } });
       const call = prisma.user.findUniqueOrThrow.mock.calls[0][0];
       expect(call.where).toEqual({ id: 'u2' });
@@ -412,7 +439,7 @@ describe('UsersService', () => {
   it('block scopes the lookup to the current company and revokes active refresh tokens', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
     prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', role: 'EMPLOYEE', status: 'ACTIVE' });
-    await service.block('c1', 'u1');
+    await service.block('c1', 'u1', makeCaller());
     expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
       where: { userId: 'u1', revokedAt: null },
       data: { revokedAt: expect.any(Date) },
@@ -421,7 +448,7 @@ describe('UsersService', () => {
 
   it('block 404s for a user from another company', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
-    await expect(service.block('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.block('c1', 'u-outra-empresa', makeCaller())).rejects.toBeInstanceOf(NotFoundException);
   });
 
   // Achado durante a auditoria de segurança (17/09/2026) — mesmo invariante que updatePontoAccess já
@@ -431,7 +458,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
     prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
     prisma.user.count.mockResolvedValue(1);
-    await expect(service.block('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.block('c1', 'admin1', makeCaller())).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
@@ -439,7 +466,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
     prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
     prisma.user.count.mockResolvedValue(2);
-    await service.block('c1', 'admin1');
+    await service.block('c1', 'admin1', makeCaller());
     expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'admin1' }, data: { status: 'BLOCKED' } });
   });
 
@@ -454,7 +481,7 @@ describe('UsersService', () => {
     prisma.$queryRawUnsafe
       .mockResolvedValueOnce([{ exists: true }])
       .mockResolvedValueOnce([{ count: 0n }]);
-    await expect(service.block('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.block('c1', 'admin1', makeCaller())).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
@@ -470,14 +497,14 @@ describe('UsersService', () => {
       .mockResolvedValueOnce([{ count: 1n }])
       .mockResolvedValueOnce([{ exists: true }])
       .mockResolvedValueOnce([{ count: 0n }]);
-    await expect(service.block('c1', 'admin1')).rejects.toThrow(/gerenciar a assinatura/);
+    await expect(service.block('c1', 'admin1', makeCaller())).rejects.toThrow(/gerenciar a assinatura/);
     expect(prisma.user.update).not.toHaveBeenCalled();
     expect(prisma.$queryRawUnsafe.mock.calls[3].slice(1)).toEqual(['c1', 'admin1', 'assinatura.gerenciar']);
   });
 
   it('unblock 404s for a user from another company', async () => {
     prisma.user.findFirst.mockResolvedValue(null);
-    await expect(service.unblock('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.unblock('c1', 'u-outra-empresa', makeCaller())).rejects.toBeInstanceOf(NotFoundException);
   });
 
   // Planos grátis e pagos (26/09/2026): reativar um login EMPLOYEE (block→unblock ou
@@ -487,20 +514,20 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'LOCKED' });
     prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
     prisma.user.count.mockResolvedValue(2);
-    await expect(service.unblock('c1', 'u1')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.unblock('c1', 'u1', makeCaller())).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('unblock never checks the plan limit for an ADMIN login', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED' });
-    await service.unblock('c1', 'admin1');
+    await service.unblock('c1', 'admin1', makeCaller());
     expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
     expect(prisma.user.update).toHaveBeenCalled();
   });
 
   it('unblock resets status to ACTIVE, zeroes the failed-login-attempts counter and clears lockedUntil', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', status: 'BLOCKED' });
-    await service.unblock('c1', 'u1');
+    await service.unblock('c1', 'u1', makeCaller());
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
       data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
@@ -511,7 +538,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'BLOCKED' });
     prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'GRATIS' });
     prisma.user.count.mockResolvedValue(0);
-    await service.unblock('c1', 'u1');
+    await service.unblock('c1', 'u1', makeCaller());
     expect(prisma.user.count).toHaveBeenCalledWith({
       where: { companyId: 'c1', role: 'EMPLOYEE', status: { in: ['ACTIVE', 'INVITED'] } },
     });
@@ -526,7 +553,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({
       id: 'a2', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: false,
     });
-    await service.unblock('c1', 'a2');
+    await service.unblock('c1', 'a2', makeCaller());
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'a2' },
       data: { status: 'INVITED', failedLoginAttempts: 0, lockedUntil: null },
@@ -537,7 +564,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({
       id: 'a1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: true,
     });
-    await service.unblock('c1', 'a1');
+    await service.unblock('c1', 'a1', makeCaller());
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'a1' },
       data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
@@ -550,7 +577,7 @@ describe('UsersService', () => {
     });
     prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
     prisma.user.count.mockResolvedValue(0);
-    await service.unblock('c1', 'u1');
+    await service.unblock('c1', 'u1', makeCaller());
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
       data: { status: 'INVITED', failedLoginAttempts: 0, lockedUntil: null },
@@ -567,7 +594,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', status: 'BLOCKED', ...fields });
     prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'BASICO' });
     prisma.user.count.mockResolvedValue(0);
-    await service.unblock('c1', 'u1');
+    await service.unblock('c1', 'u1', makeCaller());
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
       data: { status: 'ACTIVE', failedLoginAttempts: 0, lockedUntil: null },
@@ -578,7 +605,7 @@ describe('UsersService', () => {
   // nunca promove um convite pendente a ACTIVE (com um hash inutilizável e sem e-mail confirmado).
   it('unblock keeps an INVITED login INVITED (only clears the temporary lock) and skips the plan check', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1', role: 'EMPLOYEE', status: 'INVITED' });
-    await service.unblock('c1', 'u1');
+    await service.unblock('c1', 'u1', makeCaller());
     expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
@@ -589,21 +616,21 @@ describe('UsersService', () => {
   describe('remove', () => {
     it('404s for a login from another company', async () => {
       prisma.user.findFirst.mockResolvedValue(null);
-      await expect(service.remove('c1', 'u-outra-empresa')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.remove('c1', 'u-outra-empresa', makeCaller())).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('rejects deleting the last ACTIVE ADMIN of the company', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'admin1', companyId: 'c1' });
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'admin1', role: 'ADMIN', status: 'ACTIVE' });
       prisma.user.count.mockResolvedValue(1);
-      await expect(service.remove('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.remove('c1', 'admin1', makeCaller())).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.user.delete).not.toHaveBeenCalled();
     });
 
     it('deletes a login for real (not a status change) when it is not the last active admin', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u1', companyId: 'c1' });
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', role: 'EMPLOYEE', status: 'ACTIVE' });
-      await service.remove('c1', 'u1');
+      await service.remove('c1', 'u1', makeCaller());
       expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
     });
 
@@ -616,7 +643,7 @@ describe('UsersService', () => {
       prisma.$queryRawUnsafe
         .mockResolvedValueOnce([{ exists: true }])
         .mockResolvedValueOnce([{ count: 0n }]);
-      await expect(service.remove('c1', 'admin1')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.remove('c1', 'admin1', makeCaller())).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.user.delete).not.toHaveBeenCalled();
     });
 
@@ -628,7 +655,7 @@ describe('UsersService', () => {
         .mockResolvedValueOnce([{ exists: false }])
         .mockResolvedValueOnce([{ exists: true }])
         .mockResolvedValueOnce([{ count: 0n }]);
-      await expect(service.remove('c1', 'admin1')).rejects.toThrow(/gerenciar a assinatura/);
+      await expect(service.remove('c1', 'admin1', makeCaller())).rejects.toThrow(/gerenciar a assinatura/);
       expect(prisma.user.delete).not.toHaveBeenCalled();
     });
 
@@ -638,7 +665,7 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'emp1', companyId: 'c1' });
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'emp1', role: 'EMPLOYEE', status: 'ACTIVE' });
       prisma.$queryRawUnsafe.mockResolvedValueOnce([{ exists: false }]);
-      await service.remove('c1', 'emp1');
+      await service.remove('c1', 'emp1', makeCaller());
       expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'emp1' } });
     });
   });
@@ -806,7 +833,7 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({
         id: 'a1', companyId: 'c1', role: 'ADMIN', status: 'BLOCKED', emailVerifiedAt: null, emailVerificationRequired: false,
       });
-      const result = await service.unblock('c1', 'a1');
+      const result = await service.unblock('c1', 'a1', makeCaller());
       expect(result).toBeUndefined();
       expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
       expect(userTokens.issue).not.toHaveBeenCalled();
@@ -829,7 +856,7 @@ describe('UsersService', () => {
     const FULL_PONTO_GRANTS = [{ permissionCode: 'ponto.administrar', scope: 'EMPRESA' }];
 
     function makeService() {
-      return new UsersService(prisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      return new UsersService(prisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
     }
 
     it('BARRA (404) um ADMIN restrito criando um login ADMIN novo com acesso total', async () => {
@@ -1031,7 +1058,7 @@ describe('UsersService', () => {
 
     it('lança NotFoundException se o login não existir na empresa', async () => {
       const localPrisma = { user: { findFirst: jest.fn().mockResolvedValue(null) }, profile: { findFirst: jest.fn() } };
-      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
       await expect(localService.assignProfile('company-1', 'missing', 'p2', makeCaller())).rejects.toThrow(
         NotFoundException,
@@ -1043,7 +1070,7 @@ describe('UsersService', () => {
         user: { findFirst: jest.fn().mockResolvedValue({ id: 'u1', companyId: 'company-1', profileId: 'p1' }) },
         profile: { findFirst: jest.fn().mockResolvedValue(null) },
       };
-      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
       await expect(localService.assignProfile('company-1', 'u1', 'missing', makeCaller())).rejects.toThrow(
         BadRequestException,
@@ -1058,7 +1085,7 @@ describe('UsersService', () => {
         .spyOn(profileAssignmentUtil, 'reassignUserProfile')
         .mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma(null);
-      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1070,7 +1097,7 @@ describe('UsersService', () => {
       jest.spyOn(lastPermissionHolderUtil, 'assertNotLastHolderOfPermission').mockResolvedValue(undefined);
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
-      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1084,7 +1111,7 @@ describe('UsersService', () => {
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
       mockGrants(tx, [], [{ permissionCode: 'usuarios.gerenciar' }]);
-      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1098,7 +1125,7 @@ describe('UsersService', () => {
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
       mockGrants(tx, [{ permissionCode: 'usuarios.gerenciar' }], [{ permissionCode: 'usuarios.gerenciar' }]);
-      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1115,7 +1142,7 @@ describe('UsersService', () => {
       jest.spyOn(profileAssignmentUtil, 'reassignUserProfile').mockResolvedValue(undefined);
       const { prisma: localPrisma, tx } = makeTxPrisma('current-profile');
       mockGrants(tx, [{ permissionCode: 'usuarios.gerenciar' }], [{ permissionCode: 'usuarios.gerenciar' }, { permissionCode: 'assinatura.gerenciar' }]);
-      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+      const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
       await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1140,7 +1167,7 @@ describe('UsersService', () => {
       it('BARRA (404) um ADMIN restrito tentando GANHAR acesso total — a escalação demonstrada pelo revisor', async () => {
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, RESTRITO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await expect(
           localService.assignProfile(
@@ -1155,7 +1182,7 @@ describe('UsersService', () => {
       it('BARRA (404) um chamador EMPLOYEE mexendo no acesso total de um ADMIN', async () => {
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, RESTRITO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await expect(
           localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller({ role: 'EMPLOYEE' })),
@@ -1168,7 +1195,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, RESTRITO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1182,7 +1209,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, RESTRITO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1195,7 +1222,7 @@ describe('UsersService', () => {
           .mockRejectedValue(new BadRequestException('sem outro admin de acesso total'));
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, RESTRITO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await expect(
           localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller()),
@@ -1208,7 +1235,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'EMPLOYEE');
         mockGrants(tx, RESTRITO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         // Chamador sem acesso total: passaria batido só porque o alvo é EMPLOYEE.
         await localService.assignProfile(
@@ -1228,7 +1255,7 @@ describe('UsersService', () => {
       it('BARRA (404) promover um login SEM perfil (profileId null) a um perfil de acesso total', async () => {
         const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
         mockGrants(tx, FULL_PONTO, []);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await expect(
           localService.assignProfile(
@@ -1246,7 +1273,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
         mockGrants(tx, FULL_PONTO, []);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1259,7 +1286,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma(null, 'ADMIN');
         mockGrants(tx, FULL_PONTO, []);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await localService.assignProfile('company-1', 'u1', 'new-profile', makeCaller());
 
@@ -1272,7 +1299,7 @@ describe('UsersService', () => {
           .mockResolvedValue(undefined);
         const { prisma: localPrisma, tx } = makeTxPrisma('current-profile', 'ADMIN');
         mockGrants(tx, FULL_PONTO, FULL_PONTO);
-        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any);
+        const localService = new UsersService(localPrisma as any, makeTimeAuth(), inviteMailer as any, userTokens as any, email as any, makeAuthz());
 
         await localService.assignProfile(
           'company-1',
@@ -1283,6 +1310,168 @@ describe('UsersService', () => {
 
         expect(assertOtherAdminSpy).not.toHaveBeenCalled();
       });
+    });
+  });
+  // Concessão limitada (28/09/2026): quem gerencia acessos só concede o que o próprio perfil também
+  // tem, e só age sobre logins cujo perfil atual está dentro do seu poder (lido do BANCO).
+  describe('concessão limitada (no-escalation)', () => {
+    const GRANT_MSG = (labels: string) => `Você só pode dar permissões que o seu próprio perfil também tem: ${labels}.`;
+    const LOGIN_MSG = 'Este login tem permissões que o seu perfil não tem. Só quem tem todas elas pode alterá-lo.';
+
+    // Chamador "gerente de RH": gerencia usuários e vê funcionários do time, nada mais.
+    const LIMITED_CALLER = { 'usuarios.gerenciar': 'EMPRESA', 'funcionarios.ver': 'EQUIPE' };
+    const ABOVE = [{ permissionCode: 'pagamentos.gerenciar', scope: 'EMPRESA' }];
+    const WITHIN = [{ permissionCode: 'funcionarios.ver', scope: 'EQUIPE' }];
+
+    function useLimitedCaller(profileGrants: Record<string, { permissionCode: string; scope: string | null }[]>) {
+      authz.getEffectivePermissions.mockResolvedValue(LIMITED_CALLER);
+      authz.getProfileGrants.mockImplementation((_c: string, profileId: string | null) =>
+        Promise.resolve(profileId ? (profileGrants[profileId] ?? []) : []),
+      );
+    }
+
+    async function expectPermissionRequired(promise: Promise<unknown>, message: string) {
+      const err: any = await promise.catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toEqual({ statusCode: 403, code: 'PERMISSION_REQUIRED', message });
+    }
+
+    function expectNothingWrittenOrSent() {
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+      expect(userTokens.issue).not.toHaveBeenCalled();
+      expect(inviteMailer.sendInvite).not.toHaveBeenCalled();
+      expect(email.send).not.toHaveBeenCalled();
+    }
+
+    const TARGET_ABOVE = { id: 'u2', companyId: 'c1', email: 'b@b.com', role: 'EMPLOYEE', status: 'ACTIVE', profileId: 'p-above', employeeId: null, hasFullPontoAccess: false };
+
+    it('create: perfil acima do chamador → 403 listando os rótulos, nada gravado nem enviado', async () => {
+      useLimitedCaller({ 'p-above': [...ABOVE, ...WITHIN] });
+      prisma.employee.findFirst.mockResolvedValue({ id: 'e1' });
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.count.mockResolvedValue(0);
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ planTier: 'EMPRESARIAL', name: 'X' });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p-above', name: 'Financeiro', isProtected: false });
+
+      await expectPermissionRequired(
+        service.create('c1', { email: 'n@n.com', role: 'EMPLOYEE', employeeId: 'e1', profileId: 'p-above' } as any, makeCaller({ role: 'EMPLOYEE', userId: 'me' })),
+        GRANT_MSG('Gerenciar pagamentos de Funcionários'),
+      );
+      expect(authz.getEffectivePermissions).toHaveBeenCalledWith('me');
+      expect(authz.getProfileGrants).toHaveBeenCalledWith('c1', 'p-above');
+      expectNothingWrittenOrSent();
+    });
+
+    it('create: vale também pra chamador de papel ADMIN (sem exceção por papel)', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p-above', name: 'Financeiro', isProtected: false });
+
+      await expectPermissionRequired(
+        service.create('c1', { email: 'n@n.com', role: 'ADMIN', profileId: 'p-above' } as any, makeCaller({ role: 'ADMIN' })),
+        GRANT_MSG('Gerenciar pagamentos de Funcionários'),
+      );
+      expectNothingWrittenOrSent();
+    });
+
+    it('assignProfile: login alvo acima do chamador → 403 do login, sem transação', async () => {
+      useLimitedCaller({ 'p-above': ABOVE, 'p-within': WITHIN });
+      prisma.user.findFirst.mockResolvedValue(TARGET_ABOVE);
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p-within', name: 'Time', isProtected: false });
+
+      await expectPermissionRequired(service.assignProfile('c1', 'u2', 'p-within', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+    });
+
+    it('assignProfile: perfil novo acima do chamador → 403 listando os rótulos, sem transação', async () => {
+      useLimitedCaller({ 'p-within': WITHIN, 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, profileId: 'p-within' });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'p-above', name: 'Financeiro', isProtected: false });
+
+      await expectPermissionRequired(
+        service.assignProfile('c1', 'u2', 'p-above', makeCaller()),
+        GRANT_MSG('Gerenciar pagamentos de Funcionários'),
+      );
+      expectNothingWrittenOrSent();
+    });
+
+    it('block: login acima do chamador → 403, sem transação', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue(TARGET_ABOVE);
+      await expectPermissionRequired(service.block('c1', 'u2', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('unblock: login acima do chamador → 403, nada gravado', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, status: 'BLOCKED' });
+      await expectPermissionRequired(service.unblock('c1', 'u2', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+    });
+
+    it('remove: login acima do chamador → 403, nada excluído', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue(TARGET_ABOVE);
+      await expectPermissionRequired(service.remove('c1', 'u2', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+    });
+
+    it('resetPassword (ACTIVE): login acima do chamador → 403, sem token nem e-mail', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue(TARGET_ABOVE);
+      await expectPermissionRequired(service.resetPassword('c1', 'u2', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+    });
+
+    it('resetPassword (INVITED): login acima do chamador → 403, sem convite', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, status: 'INVITED' });
+      await expectPermissionRequired(service.resetPassword('c1', 'u2', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+    });
+
+    it('resendInvite: login acima do chamador → 403, sem convite', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, status: 'INVITED' });
+      await expectPermissionRequired(service.resendInvite('c1', 'u2', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+    });
+
+    it('linkEmployee: login acima do chamador → 403, nada vinculado', async () => {
+      useLimitedCaller({ 'p-above': ABOVE });
+      prisma.user.findFirst.mockResolvedValue(TARGET_ABOVE);
+      await expectPermissionRequired(service.linkEmployee('c1', 'u2', 'e1', makeCaller()), LOGIN_MSG);
+      expectNothingWrittenOrSent();
+    });
+
+    it('404 de login inexistente continua vindo antes da checagem de poder', async () => {
+      useLimitedCaller({});
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.block('c1', 'nope', makeCaller())).rejects.toBeInstanceOf(NotFoundException);
+      expect(authz.getEffectivePermissions).not.toHaveBeenCalled();
+    });
+
+    it('login alvo dentro do poder do chamador (ou sem perfil) segue normalmente', async () => {
+      useLimitedCaller({ 'p-within': WITHIN });
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, profileId: 'p-within' });
+      await service.resetPassword('c1', 'u2', makeCaller({ role: 'EMPLOYEE' }));
+      expect(userTokens.issue).toHaveBeenCalledWith('u2', 'PASSWORD_RESET');
+
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, profileId: null });
+      await service.resetPassword('c1', 'u2', makeCaller({ role: 'EMPLOYEE' }));
+      expect(userTokens.issue).toHaveBeenCalledTimes(2);
+    });
+
+    it('um chamador tipo Administrador Geral (padrão dos testes) passa por toda checagem de poder', async () => {
+      const everything = PERMISSION_CATALOG.map((p) => ({ permissionCode: p.code, scope: p.validScopes.includes('EMPRESA') ? 'EMPRESA' : null }));
+      authz.getProfileGrants.mockResolvedValue(everything);
+      prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, profileId: 'p-all' });
+      await service.resetPassword('c1', 'u2', makeCaller());
+      expect(userTokens.issue).toHaveBeenCalledWith('u2', 'PASSWORD_RESET');
     });
   });
 });

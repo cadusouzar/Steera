@@ -10,6 +10,8 @@ import { acceptInvite, markEmailVerified } from './access.util';
 import { buildRegisterBody } from './register-body.util';
 import { getTenantSchemaName } from './tenant-schema-name.util';
 import { ProfilesService } from '../src/profiles/profiles.service';
+import { AuthorizationService } from '../src/authorization/authorization.service';
+import { fullPowerAuthorization } from './full-power-authorization.util';
 import { TimeManagementAuthService } from '../src/time-management/time-management-auth.service';
 import { AuthenticatedUser } from '../src/auth/decorators/current-user.decorator';
 
@@ -83,7 +85,11 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
 
     app = await bootApp();
     prisma = app.get(PrismaService);
-    profiles = new ProfilesService(prisma, new TimeManagementAuthService(prisma));
+    profiles = new ProfilesService(
+      prisma,
+      new TimeManagementAuthService(prisma),
+      fullPowerAuthorization(app.get(AuthorizationService)),
+    );
 
     const registerRes = await request(app.getHttpServer())
       .post('/auth/register')
@@ -157,13 +163,13 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
       profiles.create(companyId, {
         name: 'Único',
         grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }],
-      }),
+      }, fullAccessCaller(companyId)),
     );
     const semGerenciar = await runWithTenant(companyId, () =>
       profiles.create(companyId, {
         name: 'Sem Gerenciar',
         grants: [{ permissionCode: 'dashboard.ver', scope: null }],
-      }),
+      }, fullAccessCaller(companyId)),
     );
 
     const adminAId = await createAdmin('disaster-a');
@@ -201,7 +207,7 @@ describe('ProfilesService.reassignAndDelete() — trava de último detentor entr
       profiles.create(companyId, {
         name: 'Com Gerenciar',
         grants: [{ permissionCode: 'usuarios.gerenciar', scope: Scope.EMPRESA }],
-      }),
+      }, fullAccessCaller(companyId)),
     );
 
     await runWithTenant(companyId, () =>
