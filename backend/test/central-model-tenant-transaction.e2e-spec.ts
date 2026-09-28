@@ -203,11 +203,15 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
 
     const now = new Date();
     const past = new Date(now.getTime() - 60_000).toISOString();
+    // Dia civil no fuso da empresa (padrão America/Sao_Paulo), não em UTC: entre 21h e 0h de Brasília
+    // o dia UTC já é o seguinte e o teste procuraria o dia errado.
+    const companyToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(now);
+    const [companyYear, companyMonth] = companyToday.split('-').map(Number);
     await request(app.getHttpServer())
       .post(`/employees/${employeeId}/time-events/correct`)
       .set('Authorization', adminToken)
       .send({
-        targetDate: now.toISOString().slice(0, 10),
+        targetDate: companyToday,
         type: 'ADD_MISSING_PUNCH',
         requestedEventType: 'CLOCK_IN',
         requestedTime: past,
@@ -216,13 +220,13 @@ describe('Transações multi-operação em tabelas CENTRAIS funcionam para empre
       .expect(201);
 
     const summaryRes = await request(app.getHttpServer())
-      .get(`/employees/${employeeId}/time-summary?year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`)
+      .get(`/employees/${employeeId}/time-summary?year=${companyYear}&month=${companyMonth}`)
       .set('Authorization', adminToken)
       .expect(200);
 
     expect(Array.isArray(summaryRes.body.days)).toBe(true);
     expect(summaryRes.body.days.length).toBeGreaterThan(0);
-    const today = summaryRes.body.days.find((d: { date: string }) => d.date === now.toISOString().slice(0, 10));
+    const today = summaryRes.body.days.find((d: { date: string }) => d.date === companyToday);
     expect(today).toBeDefined();
     expect(today.hasOpenJourney).toBe(true); // CLOCK_IN sem CLOCK_OUT ainda
   });
