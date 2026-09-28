@@ -108,7 +108,8 @@ const TimeTracking = () => {
     let cancelled = false;
     setLoadingLinkable(true);
     listEmployees()
-      .then((items) => { if (!cancelled) setLinkableEmployees(items); })
+      // Só fichas ativas: o backend recusa vincular a uma ficha inativa.
+      .then((items) => { if (!cancelled) setLinkableEmployees(items.filter((e) => e.status === 'active')); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoadingLinkable(false); });
     return () => { cancelled = true; };
