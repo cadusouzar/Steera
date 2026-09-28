@@ -106,14 +106,15 @@ export class UsersService {
   // PATCH /companies/me/users/:id/employee (achado 1 da revisão final, 27/09/2026): quem gerencia
   // usuários vincula o login de OUTRA pessoa a uma ficha de funcionário — o caminho pra logins de
   // alcance restrito, que não podem mais se auto-vincular. Não troca um vínculo existente e não
-  // encerra sessões (o alcance novo vale no próximo token).
+  // encerra sessões (o alcance é resolvido pelo vínculo lido do banco, então vale na hora).
   async linkEmployee(companyId: string, userId: string, employeeId: string) {
     const target = await this.prisma.user.findFirst({ where: { id: userId, companyId }, select: SAFE_USER_SELECT });
     if (!target) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     if (target.employeeId) throw new BadRequestException('Este login já está vinculado a um funcionário');
 
     await assertEmployeeLinkable(this.prisma, companyId, employeeId, { requireActive: true });
-    const updated = await saveEmployeeLink(this.prisma, userId, employeeId, SAFE_USER_SELECT);
+    await saveEmployeeLink(this.prisma, userId, employeeId);
+    const updated = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: SAFE_USER_SELECT });
     return this.toPublicUser(updated);
   }
 

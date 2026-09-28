@@ -50,7 +50,7 @@ describe('UsersService', () => {
       employee: { findFirst: jest.fn(), findMany: jest.fn() },
       user: {
         findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(),
-        create: jest.fn(), update: jest.fn(), findUniqueOrThrow: jest.fn(), delete: jest.fn(),
+        create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn(), delete: jest.fn(),
       },
       company: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },
@@ -106,20 +106,20 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue(null);
       await expect(service.linkEmployee('company-1', 'user-other', 'employee-1')).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({ id: 'user-other', companyId: 'company-1' });
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('400 quando o login alvo já tem ficha vinculada', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: 'e-old' });
       await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Este login já está vinculado a um funcionário');
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('400 quando o funcionário não existe nesta empresa', async () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
       prisma.employee.findFirst.mockResolvedValue(null);
       await expect(service.linkEmployee('company-1', 'u2', 'employee-x')).rejects.toBeInstanceOf(BadRequestException);
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('400 quando o funcionário está inativo', async () => {
@@ -127,7 +127,7 @@ describe('UsersService', () => {
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'INACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null);
       await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toThrow('Funcionário inativo não pode ser vinculado a um login');
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('400 quando o funcionário já tem outro login', async () => {
@@ -141,7 +141,7 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'ADMIN', hasFullPontoAccess: true, employeeId: null });
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null);
-      prisma.user.update.mockRejectedValue(
+      prisma.user.updateMany.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: '5.22.0', meta: { target: ['employeeId'] } }),
       );
       await expect(service.linkEmployee('company-1', 'u2', 'employee-1')).rejects.toBeInstanceOf(ConflictException);
@@ -151,11 +151,12 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: null });
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null);
-      prisma.user.update.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: 'employee-1' });
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: true, employeeId: 'employee-1' });
       const result = await service.linkEmployee('company-1', 'u2', 'employee-1');
-      const call = prisma.user.update.mock.calls[0][0];
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({ where: { id: 'u2', employeeId: null }, data: { employeeId: 'employee-1' } });
+      const call = prisma.user.findUniqueOrThrow.mock.calls[0][0];
       expect(call.where).toEqual({ id: 'u2' });
-      expect(call.data).toEqual({ employeeId: 'employee-1' });
       expect(call.select.passwordHash).toBeUndefined();
       expect(call.select.employeeId).toBe(true);
       expect(result).toEqual({ id: 'u2', role: 'EMPLOYEE', hasFullPontoAccess: false, employeeId: 'employee-1' });

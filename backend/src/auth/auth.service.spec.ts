@@ -1048,13 +1048,14 @@ describe('AuthService', () => {
           'Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário. Peça a quem administra os acessos para vincular.',
       });
       expect(prisma.employee.findFirst).not.toHaveBeenCalled();
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('permite alcance restrito quando o login também tem usuarios.gerenciar', async () => {
       authorization.getEffectivePermissions.mockResolvedValue({ 'funcionarios.ver': 'EQUIPE', 'usuarios.gerenciar': null });
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
       prisma.user.findUniqueOrThrow
         .mockResolvedValueOnce({ id: 'user-1', employeeId: null })
         .mockResolvedValueOnce({ id: 'user-1', email: 'a@b.com', role: 'ADMIN', modules: [], mustChangePassword: false, employeeId: 'employee-2' });
@@ -1094,7 +1095,7 @@ describe('AuthService', () => {
       await expect(
         service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2'),
       ).rejects.toThrow('Funcionário inativo não pode ser vinculado a um login');
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     // Um User que JÁ tem employeeId vinculado não pode trocar de vínculo por esta rota.
@@ -1106,12 +1107,13 @@ describe('AuthService', () => {
       await expect(
         service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2'),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('links the calling login to the target employee and returns the updated profile', async () => {
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null); // no existing login for employee-2
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
       prisma.user.findUniqueOrThrow
         .mockResolvedValueOnce({ id: 'user-1', employeeId: null }) // caller, not yet linked
         .mockResolvedValueOnce({
@@ -1121,7 +1123,7 @@ describe('AuthService', () => {
 
       const profile = await service.linkCurrentUserToEmployee('user-1', 'company-1', 'employee-2');
 
-      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'user-1' }, data: { employeeId: 'employee-2' } });
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({ where: { id: 'user-1', employeeId: null }, data: { employeeId: 'employee-2' } });
       expect(profile.employeeId).toBe('employee-2');
     });
 
@@ -1129,7 +1131,7 @@ describe('AuthService', () => {
       prisma.employee.findFirst.mockResolvedValue({ id: 'employee-2', companyId: 'company-1', status: 'ACTIVE' });
       prisma.user.findUnique.mockResolvedValue(null); // pre-check passes, then loses the real race
       prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'user-1', employeeId: null });
-      prisma.user.update.mockRejectedValue(
+      prisma.user.updateMany.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`employeeId`)', {
           code: 'P2002',
           clientVersion: '5.22.0',

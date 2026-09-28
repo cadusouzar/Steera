@@ -73,21 +73,27 @@ describe('saveEmployeeLink', () => {
   it('mapeia P2002 pra 409 amigável', async () => {
     const prisma = {
       user: {
-        update: jest.fn().mockRejectedValue(
+        updateMany: jest.fn().mockRejectedValue(
           new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
             code: 'P2002',
             clientVersion: '5.22.0',
             meta: { target: ['employeeId'] },
           }),
         ),
+        findUniqueOrThrow: jest.fn(),
       },
     } as any;
     await expect(saveEmployeeLink(prisma, 'u1', 'e1')).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('repassa o select pedido', async () => {
-    const prisma = { user: { update: jest.fn().mockResolvedValue({ id: 'u1' }) } } as any;
-    await saveEmployeeLink(prisma, 'u1', 'e1', { id: true });
-    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { employeeId: 'e1' }, select: { id: true } });
+  it('só grava se o login ainda não tem vínculo (filtro atômico employeeId: null)', async () => {
+    const prisma = { user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) } } as any;
+    await expect(saveEmployeeLink(prisma, 'u1', 'e1')).resolves.toBeUndefined();
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({ where: { id: 'u1', employeeId: null }, data: { employeeId: 'e1' } });
+  });
+
+  it('corrida perdida (outro vínculo gravado antes) vira 400, sem sobrescrever', async () => {
+    const prisma = { user: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) } } as any;
+    await expect(saveEmployeeLink(prisma, 'u1', 'e1')).rejects.toThrow('Este login já está vinculado a um funcionário');
   });
 });

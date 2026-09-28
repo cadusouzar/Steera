@@ -41,24 +41,23 @@ export async function assertEmployeeLinkable(
   if (existingLogin) throw new BadRequestException('Este funcionário já possui um login vinculado');
 }
 
-// Grava o vínculo. P2002 = corrida real perdida contra a checagem prévia (dois logins tentando o
-// mesmo funcionário ao mesmo tempo) — sem o catch, vazava como 500 cru.
-export async function saveEmployeeLink<S extends Prisma.UserSelect>(
+// Grava o vínculo. `updateMany` com `employeeId: null` no filtro torna a checagem "login ainda sem
+// vínculo" atômica: duas requisições simultâneas vinculando o MESMO login a fichas diferentes não
+// passam as duas (a segunda encontra count 0 e recebe 400, nunca sobrescreve em silêncio). P2002 =
+// corrida perdida no outro sentido (dois logins tentando a mesma ficha) — sem o catch, vazava 500 cru.
+export async function saveEmployeeLink(
   prisma: Pick<PrismaService, 'user'>,
   userId: string,
   employeeId: string,
-  select?: S,
-) {
+): Promise<void> {
+  let count: number;
   try {
-    return await prisma.user.update({
-      where: { id: userId },
-      data: { employeeId },
-      ...(select ? { select } : {}),
-    });
+    ({ count } = await prisma.user.updateMany({ where: { id: userId, employeeId: null }, data: { employeeId } }));
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       throw new ConflictException('Este funcionário já está vinculado a outro login');
     }
     throw err;
   }
+  if (count === 0) throw new BadRequestException('Este login já está vinculado a um funcionário');
 }
