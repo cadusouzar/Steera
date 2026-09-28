@@ -99,8 +99,9 @@ const TimeTracking = () => {
   const [selectedLinkId, setSelectedLinkId] = useState('');
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState('');
-  // Login com alcance restrito não escolhe a própria ficha (o vínculo definiria o próprio alcance):
-  // só quem administra os acessos vincula, em Usuários.
+  // Login com alcance restrito (qualquer alcance fora de EMPRESA, mesmo com `usuarios.gerenciar`) não
+  // escolhe a própria ficha (o vínculo definiria o próprio alcance): só quem tem acesso a todos os
+  // funcionários da empresa vincula, em Usuários.
   const canSelfLink = currentUser?.canSelfLinkEmployee !== false;
 
   useEffect(() => {
@@ -460,8 +461,8 @@ const TimeTracking = () => {
           </div>
           <h2 className="text-xl font-heading font-bold text-foreground mb-2">Cadastro de funcionário necessário</h2>
           <p className="text-muted text-sm">
-            Seu acesso está ligado aos seus próprios dados, mas seu login ainda não tem uma ficha de funcionário.
-            Peça a quem administra os acessos para vincular.
+            Seu login ainda não tem uma ficha de funcionário. Peça a alguém com acesso a todos os
+            funcionários da empresa para vincular seu login a uma ficha.
           </p>
         </div>
       </div>

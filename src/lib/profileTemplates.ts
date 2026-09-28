@@ -74,6 +74,8 @@ export const PROFILE_TEMPLATES: ProfileTemplate[] = [
     title: 'Administrador',
     description: 'Pode tudo, inclusive pessoas, perfis e assinatura.',
     icon: Crown,
+    // Único modelo de administração completa: por ser o catálogo inteiro, também responde "Sim" a
+    // "Pode alterar os próprios dados?" (funcionarios.proprios.gerenciar). Os demais ficam em "Não".
     grants: 'all',
   },
   {

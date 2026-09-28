@@ -150,10 +150,27 @@ export const FUNCIONARIOS_EXTRAS: { code: string; label: string; summary: string
   { code: 'pagamentos.gerenciar', label: 'Marcar pagamentos como feitos', summary: 'Pode marcar pagamentos como feitos' },
 ];
 
+/**
+ * "Pode alterar os próprios dados?" (funcionarios.proprios.gerenciar, sem alcance): sem ela, quem pode
+ * alterar funcionários, pagamentos ou férias não mexe na PRÓPRIA ficha. A pergunta só aparece quando
+ * o perfil pode alterar uma dessas coisas; fora disso a permissão é retirada ao mexer na área.
+ */
+export const OWN_DATA_CODE = 'funcionarios.proprios.gerenciar';
+export const OWN_DATA_TRIGGERS = ['funcionarios.gerenciar', 'pagamentos.gerenciar', 'ferias.gerenciar'];
+export const OWN_DATA_SUMMARY = 'Pode alterar os próprios dados';
+export const OWN_DATA_DENIED_SUMMARY = 'Não pode alterar os próprios dados';
+
+/** A pergunta "Pode alterar os próprios dados?" faz sentido para este conjunto de grants? */
+export function ownDataQuestionVisible(map: GrantMap): boolean {
+  return OWN_DATA_TRIGGERS.some((code) => code in map);
+}
+
 export interface FuncionariosView {
   level: Level;
   scope: Scope;
   extras: string[];
+  /** Resposta de "Pode alterar os próprios dados?". */
+  ownData: boolean;
 }
 
 export function readFuncionarios(map: GrantMap): FuncionariosView {
@@ -164,7 +181,7 @@ export function readFuncionarios(map: GrantMap): FuncionariosView {
     map[FUNCIONARIOS_PAIR.verCode] ??
     extras.map((code) => map[code]).find((s): s is Scope => !!s) ??
     'EMPRESA';
-  return { level, scope, extras };
+  return { level, scope, extras, ownData: OWN_DATA_CODE in map };
 }
 
 /** Escopos que a pergunta "De quais funcionários?" oferece para o nível escolhido. */
@@ -195,6 +212,8 @@ export function writeFuncionarios(map: GrantMap, catalog: CatalogIndex, view: Fu
     delete next[extra.code];
     if (view.extras.includes(extra.code)) setCode(next, catalog, extra.code, view.scope);
   }
+  delete next[OWN_DATA_CODE];
+  if (view.ownData && ownDataQuestionVisible(next)) setCode(next, catalog, OWN_DATA_CODE, null);
   return next;
 }
 
@@ -306,7 +325,11 @@ export function buildAreas(catalog: CatalogIndex): AreaDef[] {
     areas.push({
       key: 'funcionarios',
       title: 'Funcionários',
-      codes: [FUNCIONARIOS_PAIR.verCode, FUNCIONARIOS_PAIR.manageCode, ...present(catalog, FUNCIONARIOS_EXTRAS.map((e) => e.code))],
+      codes: [
+        FUNCIONARIOS_PAIR.verCode,
+        FUNCIONARIOS_PAIR.manageCode,
+        ...present(catalog, [...FUNCIONARIOS_EXTRAS.map((e) => e.code), OWN_DATA_CODE]),
+      ],
     });
   }
   const ponto = present(catalog, [PONTO_REGISTRAR, PONTO_ADMINISTRAR, PONTO_FERIADOS]);
@@ -380,6 +403,8 @@ export function summarizeArea(map: GrantMap, catalog: CatalogIndex, area: AreaDe
         const suffix = s && s !== mainScope ? `, ${SCOPE_SUMMARY[s]}` : '';
         lines.push({ ok: true, text: `${extra.summary}${suffix}` });
       }
+      if (OWN_DATA_CODE in map) lines.push({ ok: true, text: OWN_DATA_SUMMARY });
+      else if (catalog.has(OWN_DATA_CODE) && ownDataQuestionVisible(map)) lines.push({ ok: false, text: OWN_DATA_DENIED_SUMMARY });
       return lines.length ? lines : [NO_ACCESS];
     }
     case 'ponto': {

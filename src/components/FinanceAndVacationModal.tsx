@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, DollarSign, Calendar, Umbrella, AlertCircle, CheckCircle2, Clock, History, Repeat, Zap, Loader2, Briefcase, Undo2, Trash2, Ban, RotateCcw } from 'lucide-react';
 import * as api from '../lib/api';
-import { useCan } from '../lib/auth';
+import { useCan, useCurrentUser } from '../lib/auth';
+import { isOwnDataLocked } from '../lib/grantCoverage';
+import OwnDataNote from './OwnDataNote';
 import { ApiError } from '../lib/apiError';
 import type { EmployeeDetail, EmployeePaymentRecord, EmployeeRecurringPaymentRecord } from '../lib/api';
 
@@ -37,6 +39,12 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
   const can = useCan();
   const canManagePayments = can('pagamentos.gerenciar');
   const canManageVacations = can('ferias.gerenciar');
+  // Na própria ficha, escrever (pagamentos, recorrências, férias, afastamentos) também exige
+  // "Pode alterar os próprios dados?" no perfil; sem ela o backend recusa com 403. Ler continua livre.
+  const currentUser = useCurrentUser();
+  const isOwnLocked = isOwnDataLocked(currentUser, employeeId);
+  const canWritePayments = canManagePayments && !isOwnLocked;
+  const canWriteVacations = canManageVacations && !isOwnLocked;
   const [activeTab, setActiveTab] = useState<'finance' | 'vacation' | 'leave'>(canManagePayments ? 'finance' : 'vacation');
   const [employee, setEmployee] = useState<EmployeeDetail | null>(null);
   const [payments, setPayments] = useState<EmployeePaymentRecord[]>([]);
@@ -431,6 +439,8 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                       </div>
                     )}
 
+                    {isOwnLocked && <OwnDataNote />}
+
                     <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 bg-secondary/20 p-5 rounded-2xl border border-border/40">
                       <div>
                         <p className="text-xs text-muted uppercase font-bold tracking-wider mb-1">Salário Base</p>
@@ -467,6 +477,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                   </div>
                                 </div>
 
+                                {canWritePayments && (
                                 <div className="flex flex-col items-end gap-2">
                                   {confirmingDeleteId === r.id ? (
                                     <div className="flex items-center gap-2">
@@ -506,6 +517,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                     </div>
                                   )}
                                 </div>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -535,7 +547,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                   {getPaymentStatusIcon(payment.status)}
                                   {getPaymentStatusText(payment.status)}
                                 </span>
-                                {payment.status !== 'paid' ? (
+                                {!canWritePayments ? null : payment.status !== 'paid' ? (
                                   <button
                                     onClick={() => handleMarkAsPaid(payment.id)}
                                     disabled={busyId === payment.id}
@@ -574,6 +586,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                         <AlertCircle size={16} className="shrink-0" /> {actionError}
                       </div>
                     )}
+                    {canManageVacations && isOwnLocked && <OwnDataNote />}
 
                     {isSchedulingOpen && vacationCapExceeded && resumeCapErrorId === null && (
                       <label className="flex items-center gap-2.5 px-4 py-3 bg-secondary/20 border border-border/40 rounded-xl text-sm text-foreground cursor-pointer">
@@ -637,7 +650,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                             <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2">
                               <History size={18} className="text-primary/70" /> Histórico de Férias
                             </h3>
-                            {canManageVacations && (
+                            {canWriteVacations && (
                             <button
                               onClick={() => { setIsSchedulingOpen(true); setExceptionAuthorized(false); setActionError(null); setResumeCapErrorId(null); setResumeExceptionAuthorized(false); }}
                               disabled={isSchedulingOpen}
@@ -668,7 +681,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                       <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
                                         {getScheduleStatusText(sched.status)}
                                       </span>
-                                      {canManageVacations && (sched.status === 'scheduled' || sched.status === 'approved') && (
+                                      {canWriteVacations && (sched.status === 'scheduled' || sched.status === 'approved') && (
                                         <button
                                           onClick={() => handleCancelVacation(sched.id)}
                                           disabled={busyId === sched.id}
@@ -677,7 +690,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                           {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
                                         </button>
                                       )}
-                                      {canManageVacations && sched.status === 'cancelled' && (
+                                      {canWriteVacations && sched.status === 'cancelled' && (
                                         <button
                                           onClick={() => handleResumeVacation(sched.id)}
                                           disabled={busyId === sched.id}
@@ -722,6 +735,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                         <AlertCircle size={16} className="shrink-0" /> {actionError}
                       </div>
                     )}
+                    {canManageVacations && isOwnLocked && <OwnDataNote />}
 
                     {isLeaveSchedulingOpen && (
                       <div className="bg-secondary/10 border border-border/40 rounded-2xl p-5 space-y-4">
@@ -764,7 +778,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                         <h3 className="text-lg font-heading font-bold text-foreground flex items-center gap-2">
                           <History size={18} className="text-primary/70" /> Histórico de Afastamentos
                         </h3>
-                        {canManageVacations && (
+                        {canWriteVacations && (
                         <button
                           onClick={() => setIsLeaveSchedulingOpen(true)}
                           disabled={isLeaveSchedulingOpen}
@@ -797,7 +811,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                 <span className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getScheduleStatusStyle(sched.status)}`}>
                                   {getScheduleStatusText(sched.status)}
                                 </span>
-                                {canManageVacations && (sched.status === 'scheduled' || sched.status === 'approved') && (
+                                {canWriteVacations && (sched.status === 'scheduled' || sched.status === 'approved') && (
                                   <button
                                     onClick={() => handleCancelLeave(sched.id)}
                                     disabled={busyId === sched.id}
@@ -806,7 +820,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                     {busyId === sched.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Cancelar
                                   </button>
                                 )}
-                                {canManageVacations && sched.status === 'cancelled' && (
+                                {canWriteVacations && sched.status === 'cancelled' && (
                                   <button
                                     onClick={() => handleResumeLeave(sched.id)}
                                     disabled={busyId === sched.id}

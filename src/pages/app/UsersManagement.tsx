@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, Search, X, UserPlus, FileQuestion, LayoutDashboard, HeartHandshake, Users,
   TrendingUp, Package, BarChart3, Loader2, KeyRound, Copy, Check, ShieldOff, ShieldCheck,
-  Pencil, Trash2, AlertTriangle, Clock, ChevronDown, Send, Mail, Link2,
+  Pencil, Trash2, AlertTriangle, Clock, ChevronDown, Send, Mail, Link2, Lock,
 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import CustomSelect from '../../components/CustomSelect';
@@ -12,6 +12,12 @@ import { can, useCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { SystemUser, EmployeeListItem } from '../../lib/api';
 import { inputBorderClass, isValidEmail } from '../../lib/validation';
+import {
+  LINK_REQUIRES_FULL_SCOPE_HINT,
+  LOGIN_ABOVE_CALLER_MESSAGE,
+  callerGrantsOf,
+  isWithinCaller,
+} from '../../lib/grantCoverage';
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Administrador' },
@@ -85,8 +91,17 @@ const UsersManagement = () => {
   const currentUser = useCurrentUser();
   const canManageUsers = can('usuarios.gerenciar', currentUser);
   const callerIsAdmin = currentUser?.role === 'admin';
-  const roleOptions = callerIsAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((o) => o.value === 'employee');
+  // Vincular logins a fichas (e criar login de funcionário, que nasce vinculado) exige que todo
+  // alcance do perfil de quem está na tela seja EMPRESA: o backend recusa com 403 caso contrário.
+  const canLinkEmployees = currentUser?.canSelfLinkEmployee !== false;
+  const roleOptions = ROLE_OPTIONS.filter(
+    (o) => (o.value === 'admin' ? callerIsAdmin : canLinkEmployees),
+  );
+  const canCreateLogins = roleOptions.length > 0;
   const newUserForm: UserFormState = { ...emptyForm, role: callerIsAdmin ? 'admin' : 'employee' };
+  // Concessão limitada (28/09/2026): só perfis que cabem no perfil de quem está na tela são
+  // oferecidos, e logins com um perfil acima dele ficam sem ações (o backend recusaria com 403).
+  const callerGrants = useMemo(() => callerGrantsOf(currentUser), [currentUser]);
 
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
@@ -117,7 +132,8 @@ const UsersManagement = () => {
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Vincular um login ainda sem ficha de funcionário (27/09/2026). Quem tem alcance restrito não se
-  // vincula sozinho no Ponto, então quem administra os acessos faz isso por aqui.
+  // vincula sozinho no Ponto, então alguém com todos os alcances em EMPRESA faz isso por aqui (desde
+  // 28/09/2026 só essa pessoa: a ação some pra quem tem `canSelfLinkEmployee === false`).
   const [linkingUser, setLinkingUser] = useState<SystemUser | null>(null);
   const [linkEmployeeId, setLinkEmployeeId] = useState('');
   const [isLinking, setIsLinking] = useState(false);
@@ -239,6 +255,18 @@ const UsersManagement = () => {
     employees.forEach(e => map.set(e.id, e.fullName));
     return map;
   }, [employees, linkableEmployees]);
+
+  // Perfis que cabem no perfil de quem está na tela: os únicos oferecidos nos seletores.
+  const coveredProfileIds = useMemo(
+    () => new Set(profiles.filter((p) => isWithinCaller(callerGrants, p.grants)).map((p) => p.id)),
+    [profiles, callerGrants],
+  );
+  // Login sem perfil (ou com um perfil fora da lista) conta como "dentro": o backend decide.
+  const canActOnUser = (user: SystemUser) => {
+    if (!user.profileId) return true;
+    const profile = profiles.find((p) => p.id === user.profileId);
+    return !profile || coveredProfileIds.has(profile.id);
+  };
 
   // Funcionários que ainda não têm login vinculado — cruza a lista de
   // funcionários com os employeeId já presentes em `users`. Filtro
@@ -486,7 +514,10 @@ const UsersManagement = () => {
               Gerencie quem tem acesso ao sistema, crie novos logins e defina os módulos que cada um pode visualizar.
             </p>
           </div>
-          {canManageUsers && (
+          {canManageUsers && !canCreateLogins && (
+            <p className="text-sm text-muted max-w-xs">{LINK_REQUIRES_FULL_SCOPE_HINT}</p>
+          )}
+          {canManageUsers && canCreateLogins && (
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -573,6 +604,7 @@ const UsersManagement = () => {
                   <AnimatePresence>
                     {filteredUsers.map((user, index) => {
                       const linkedEmployeeName = user.employeeId ? employeeNameById.get(user.employeeId) : undefined;
+                      const canAct = canManageUsers && canActOnUser(user);
                       return (
                         <motion.tr
                           key={user.id}
@@ -580,8 +612,8 @@ const UsersManagement = () => {
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, scale: 0.95 }}
                           transition={{ duration: 0.2, delay: index * 0.03 }}
-                          onClick={() => canManageUsers && openEditModal(user)}
-                          className={`hover:bg-secondary/40 transition-colors group ${canManageUsers ? 'cursor-pointer' : ''}`}
+                          onClick={() => canAct && openEditModal(user)}
+                          className={`hover:bg-secondary/40 transition-colors group ${canAct ? 'cursor-pointer' : ''}`}
                         >
                           <td className="px-8 py-5">
                             <div className="flex items-center gap-4">
@@ -668,6 +700,16 @@ const UsersManagement = () => {
                           </td>
                           {canManageUsers && (
                             <td className="px-8 py-5 text-right">
+                              {!canAct ? (
+                                <span
+                                  title={LOGIN_ABOVE_CALLER_MESSAGE}
+                                  className="inline-flex items-center gap-1.5 text-xs text-muted"
+                                >
+                                  <Lock size={13} className="shrink-0" aria-hidden="true" />
+                                  <span className="sr-only">{LOGIN_ABOVE_CALLER_MESSAGE}</span>
+                                  <span aria-hidden="true">Sem ações</span>
+                                </span>
+                              ) : (
                               <button
                                 type="button"
                                 data-actions-trigger
@@ -681,6 +723,7 @@ const UsersManagement = () => {
                                 Ações
                                 <ChevronDown size={14} />
                               </button>
+                              )}
                             </td>
                           )}
                         </motion.tr>
@@ -733,7 +776,7 @@ const UsersManagement = () => {
               <Pencil size={15} className="text-muted shrink-0" />
               Editar Perfil
             </button>
-            {!menuUser.employeeId && (
+            {!menuUser.employeeId && canLinkEmployees && (
               <button
                 type="button"
                 onClick={() => { closeActionsMenu(); openLinkModal(menuUser); }}
@@ -865,6 +908,9 @@ const UsersManagement = () => {
                       onChange={(val) => setFormData({ ...formData, role: val as UserFormState['role'], employeeId: '' })}
                       options={roleOptions}
                     />
+                    {!canLinkEmployees && (
+                      <p className="text-xs text-muted mt-1.5">{LINK_REQUIRES_FULL_SCOPE_HINT}</p>
+                    )}
                   </div>
 
                   {formData.role === 'employee' && (
@@ -900,7 +946,7 @@ const UsersManagement = () => {
                     value={formData.profileId}
                     onChange={(val) => setFormData({ ...formData, profileId: val })}
                     options={profiles
-                      .filter((p) => callerIsAdmin || !p.isProtected)
+                      .filter((p) => (callerIsAdmin || !p.isProtected) && coveredProfileIds.has(p.id))
                       .map((p) => ({ value: p.id, label: p.name }))}
                     placeholder="Selecione um perfil..."
                   />
@@ -992,7 +1038,11 @@ const UsersManagement = () => {
                     value={editProfileId}
                     onChange={setEditProfileId}
                     options={profiles
-                      .filter((p) => callerIsAdmin || !p.isProtected || p.id === editingUser?.profileId)
+                      .filter(
+                        (p) =>
+                          (callerIsAdmin || !p.isProtected || p.id === editingUser?.profileId) &&
+                          (coveredProfileIds.has(p.id) || p.id === editingUser?.profileId),
+                      )
                       .map((p) => ({ value: p.id, label: p.name }))}
                   />
                 </div>

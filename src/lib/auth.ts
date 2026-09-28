@@ -66,9 +66,11 @@ export interface CurrentUser {
   // fonte do JWT (AuthorizationService.getEffectivePermissions). A tela só usa isso pra esconder o
   // que o backend recusaria; a regra de verdade continua no backend (403 PERMISSION_REQUIRED).
   permissions: Record<string, PermissionScope | null>;
-  // Pode se vincular sozinho a uma ficha de funcionário (PATCH /auth/me/employee-link)? Falso pra
-  // quem tem alcance restrito sem `usuarios.gerenciar`: o vínculo definiria o próprio alcance, então
-  // só quem administra os acessos pode fazê-lo (PATCH /companies/me/users/:id/employee).
+  // Pode vincular logins a fichas de funcionário? Verdadeiro só quando TODA permissão com alcance do
+  // perfil está em EMPRESA (sem exceção por `usuarios.gerenciar`). Vale pro próprio vínculo
+  // (PATCH /auth/me/employee-link) e pra vincular QUALQUER login (PATCH
+  // /companies/me/users/:id/employee, criar login EMPLOYEE): o vínculo define alcances ancorados na
+  // ficha, então quem tem alcance restrito não pode fazê-lo.
   canSelfLinkEmployee?: boolean;
 }
 

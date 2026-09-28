@@ -9,6 +9,8 @@ import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import * as api from '../../lib/api';
 import { can, permissionScope, useCurrentUser } from '../../lib/auth';
+import { isOwnDataLocked } from '../../lib/grantCoverage';
+import OwnDataNote from '../../components/OwnDataNote';
 import type { EmployeeDetail, EmployeeListItem, EmployeeWarning, Role } from '../../lib/api';
 import { formatCpfInput, formatPhoneInput, inputBorderClass, isValidCpf, isValidEmail, isValidPhone } from '../../lib/validation';
 
@@ -53,6 +55,11 @@ const EmployeesList = () => {
   // Drawer state
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [isDrawerLoading, setIsDrawerLoading] = useState(false);
+  // A própria ficha só pode ser alterada (editar, inativar, reativar, advertências) com
+  // "Pode alterar os próprios dados?" no perfil; sem ela o backend recusa com 403.
+  const isOwnLocked = isOwnDataLocked(currentUser, selectedEmployee?.id);
+  const canEditSelected = canManageEmployees && !isOwnLocked;
+  const canWarnSelected = canManageWarnings && !isOwnLocked;
 
   // Finance Modal state
   const [financeEmployeeId, setFinanceEmployeeId] = useState<string | null>(null);
@@ -526,7 +533,7 @@ const EmployeesList = () => {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      {!isEditing && canManageEmployees && (
+                      {!isEditing && canEditSelected && (
                         <button
                           onClick={handleEditClick}
                           className="p-2 text-primary hover:text-primary bg-primary/10 hover:bg-primary/20 rounded-full transition-colors flex items-center justify-center"
@@ -573,7 +580,9 @@ const EmployeesList = () => {
                               INATIVO
                             </span>
                           )}
-                          {!canManageEmployees ? null : selectedEmployee.status === 'active' ? (
+                          {!canManageEmployees ? null : isOwnLocked ? (
+                            <OwnDataNote className="ml-3" />
+                          ) : selectedEmployee.status === 'active' ? (
                             <button onClick={handleDeactivateEmployee} disabled={isSaving} className="ml-3 text-xs font-bold text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 disabled:opacity-60">
                               <Ban size={12} /> Inativar
                             </button>
@@ -679,7 +688,8 @@ const EmployeesList = () => {
                               <AlertCircle size={16} className="text-orange-500" />
                               Histórico de Advertências
                             </h4>
-                            {canManageWarnings && (
+                            {canManageWarnings && isOwnLocked && !canManageEmployees && <OwnDataNote />}
+                            {canWarnSelected && (
                             <button
                               onClick={openWarning}
                               className="text-xs font-bold text-red-500 hover:text-red-600 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg transition-colors"
