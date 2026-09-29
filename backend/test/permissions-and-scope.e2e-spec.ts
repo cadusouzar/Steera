@@ -509,6 +509,68 @@ describe('Permissões por ação e alcance (e2e)', () => {
     });
   });
 
+  // Ruling R-final (29/09/2026): o link cru do convite deixaria um gerente de acessos de alcance
+  // restrito aceitar o convite pendente de um login já vinculado à ficha de outro gestor e alcançar
+  // a equipe dele sem passar por rota de vínculo nenhuma. Pra quem não vincula fichas, o e-mail sai
+  // igual e a resposta vem com `inviteUrl: null`; `linkable-employees` recusa com a mensagem do F1b.
+  describe('convite pendente por gerente de acessos de alcance restrito (ruling R-final)', () => {
+    const LINK_MSG = 'Só quem tem acesso a todos os funcionários da empresa pode vincular um login a uma ficha.';
+    let equipeUsersMgrToken: string;
+    let pendingUserId: string;
+
+    beforeAll(async () => {
+      const equipeUsersMgrProfileId = await createProfile('Gerente de acessos de equipe', [
+        { permissionCode: 'usuarios.gerenciar', scope: 'EMPRESA' },
+        { permissionCode: 'funcionarios.ver', scope: 'EQUIPE' },
+      ]);
+      equipeUsersMgrToken = await createLogin({ role: 'ADMIN', profileId: equipeUsersMgrProfileId });
+
+      // Login EMPLOYEE pendente, vinculado à ficha de outro gestor (com equipe), com perfil dentro do
+      // poder do gerente restrito (funcionarios.ver@EQUIPE).
+      const teamProfileId = await createProfile('Ver a equipe', [{ permissionCode: 'funcionarios.ver', scope: 'EQUIPE' }]);
+      const managerBId = await createEmployee('Gestor B Convite Pendente');
+      await createEmployee('Equipe do Gestor B', managerBId);
+      const email = `perm-scope-pending-${runId}@test.com`;
+      const res = await http()
+        .post('/companies/me/users')
+        .set('Authorization', auth(founderToken))
+        .send({ email, role: 'EMPLOYEE', employeeId: managerBId, profileId: teamProfileId })
+        .expect(201);
+      pendingUserId = res.body.user.id;
+      expect(res.body.inviteUrl).toEqual(expect.any(String));
+    });
+
+    it('reenviar convite (e redefinir senha de login pendente) → 200 sem link; o fundador recebe o link', async () => {
+      const resend = await http()
+        .patch(`/companies/me/users/${pendingUserId}/resend-invite`)
+        .set('Authorization', auth(equipeUsersMgrToken));
+      expect(resend.status).toBe(200);
+      expect(resend.body.inviteUrl).toBeNull();
+      expect(typeof resend.body.sent).toBe('boolean');
+
+      const reset = await http()
+        .patch(`/companies/me/users/${pendingUserId}/reset-password`)
+        .set('Authorization', auth(equipeUsersMgrToken));
+      expect(reset.status).toBe(200);
+      expect(reset.body.inviteUrl).toBeNull();
+
+      const founderResend = await http()
+        .patch(`/companies/me/users/${pendingUserId}/resend-invite`)
+        .set('Authorization', auth(founderToken))
+        .expect(200);
+      expect(founderResend.body.inviteUrl).toEqual(expect.stringContaining('/aceitar-convite?token='));
+
+      const row = await sys(() => prisma.user.findUniqueOrThrow({ where: { id: pendingUserId } }));
+      expect(row.status).toBe('INVITED');
+    });
+
+    it('GET linkable-employees → 403 com a mensagem do F1b', async () => {
+      const res = await http().get('/companies/me/users/linkable-employees').set('Authorization', auth(equipeUsersMgrToken));
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({ statusCode: 403, code: 'PERMISSION_REQUIRED', message: LINK_MSG });
+    });
+  });
+
   describe('gestão de logins por permissão, não por papel', () => {
     it('EMPLOYEE com usuarios.gerenciar cria um login (convite)', async () => {
       const email = `perm-scope-invited-${runId}@test.com`;
@@ -603,6 +665,29 @@ describe('Permissões por ação e alcance (e2e)', () => {
 
     it('fora do alcance continua 404 (não 403), mesmo sem a permissão', async () => {
       await http().patch(`/employees/${outsiderId}`).set('Authorization', auth(editorToken)).send({ baseValue: 1 }).expect(404);
+    });
+
+    // Achado 3 da revisão final: a recusa também vale nas rotas endereçadas pelo id do registro
+    // (o dono é descoberto a partir do pagamento), não só em PATCH /employees/:id.
+    it('sem a permissão: PATCH /employee-payments/:id/pay no pagamento da própria ficha → 403 exato e a linha fica intacta', async () => {
+      const paymentId = await createPayment(gestorId);
+      const before = await readPaymentRow(paymentId);
+      expect(before.status).toBe('PENDING');
+
+      const res = await http().patch(`/employee-payments/${paymentId}/pay`).set('Authorization', auth(gestorToken));
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject(OWN_DENIED);
+
+      const after = await readPaymentRow(paymentId);
+      expect(after.status).toBe('PENDING');
+      expect(after.paidAt).toBeNull();
+      expect(new Date(after.updatedAt).getTime()).toBe(new Date(before.updatedAt).getTime());
+    });
+
+    it('sem a permissão: PATCH /employee-payments/:id/pay no pagamento do subordinado → 200', async () => {
+      const paymentId = await createPayment(subordinadoId);
+      await http().patch(`/employee-payments/${paymentId}/pay`).set('Authorization', auth(gestorToken)).expect(200);
+      expect((await readPaymentRow(paymentId)).status).toBe('PAID');
     });
 
     it('com funcionarios.proprios.gerenciar no perfil (novo login): PATCH na própria ficha → 200', async () => {
