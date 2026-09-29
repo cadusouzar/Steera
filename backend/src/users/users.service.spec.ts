@@ -195,7 +195,7 @@ describe('UsersService', () => {
     it('lista funcionários ativos sem login, por nome, lendo User (central) e Employee (tenant) em consultas separadas', async () => {
       prisma.user.findMany.mockResolvedValue([{ employeeId: 'e1' }, { employeeId: 'e2' }]);
       prisma.employee.findMany.mockResolvedValue([{ id: 'e3', fullName: 'Ana' }]);
-      const result = await service.listLinkableEmployees('company-1');
+      const result = await service.listLinkableEmployees('company-1', makeCaller());
       expect(prisma.user.findMany).toHaveBeenCalledWith({
         where: { companyId: 'company-1', employeeId: { not: null } },
         select: { employeeId: true },
@@ -1548,6 +1548,73 @@ describe('UsersService', () => {
       prisma.user.findFirst.mockResolvedValue({ ...TARGET_ABOVE, profileId: null });
       await service.resetPassword('c1', 'u2', makeCaller({ role: 'EMPLOYEE' }));
       expect(userTokens.issue).toHaveBeenCalledTimes(2);
+    });
+
+    // Ruling R-final (29/09/2026): quem não passa em canSelfLinkEmployee (grants do banco) nunca
+    // recebe o link cru do convite — aceitá-lo o faria entrar num login já ancorado em outra ficha
+    // (alcance que ele não tem). O e-mail continua saindo igual; só a resposta perde o link.
+    describe('link do convite só pra quem vincula fichas (R-final)', () => {
+      const RAW_URL = 'http://localhost:5173/aceitar-convite?token=raw-invite';
+      const INVITED_WITHIN = { ...TARGET_ABOVE, status: 'INVITED', profileId: 'p-within', employeeId: 'e-outro' };
+
+      it('resendInvite: chamador restrito → inviteUrl null, e-mail enviado', async () => {
+        useLimitedCaller({ 'p-within': WITHIN });
+        prisma.user.findFirst.mockResolvedValue(INVITED_WITHIN);
+        prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+        const result = await service.resendInvite('c1', 'u2', makeCaller({ role: 'EMPLOYEE', userId: 'me' }));
+        expect(inviteMailer.sendInvite).toHaveBeenCalledWith('u2', 'b@b.com', 'X');
+        expect(result).toEqual({ inviteUrl: null, sent: true });
+        expect(authz.getEffectivePermissions).toHaveBeenCalledWith('me');
+      });
+
+      it('resendInvite: chamador de alcance total → link devolvido', async () => {
+        prisma.user.findFirst.mockResolvedValue(INVITED_WITHIN);
+        prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+        const result = await service.resendInvite('c1', 'u2', makeCaller());
+        expect(result).toEqual({ inviteUrl: RAW_URL, sent: true });
+      });
+
+      it('resetPassword (INVITED): chamador restrito → inviteUrl null, e-mail enviado', async () => {
+        useLimitedCaller({ 'p-within': WITHIN });
+        prisma.user.findFirst.mockResolvedValue(INVITED_WITHIN);
+        prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+        const result = await service.resetPassword('c1', 'u2', makeCaller({ role: 'EMPLOYEE', userId: 'me' }));
+        expect(inviteMailer.sendInvite).toHaveBeenCalledWith('u2', 'b@b.com', 'X');
+        expect(result).toEqual({ sent: true, inviteUrl: null });
+      });
+
+      it('resetPassword (INVITED): chamador de alcance total → link devolvido', async () => {
+        prisma.user.findFirst.mockResolvedValue(INVITED_WITHIN);
+        prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+        const result = await service.resetPassword('c1', 'u2', makeCaller());
+        expect(result).toEqual({ sent: true, inviteUrl: RAW_URL });
+      });
+
+      it('create (login ADMIN) por chamador restrito → inviteUrl null, e-mail enviado', async () => {
+        useLimitedCaller({ 'p-within': WITHIN });
+        prisma.profile.findFirst.mockResolvedValue({ id: 'p-within', name: 'Time', isProtected: false });
+        prisma.profilePermission.findMany.mockResolvedValue([{ permissionCode: 'funcionarios.ver', scope: 'EQUIPE' }]);
+        prisma.user.create.mockResolvedValue({ id: 'new', email: 'n@n.com', role: 'ADMIN', hasFullPontoAccess: false, employeeId: null });
+        prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+        const result: any = await service.create('c1', { email: 'n@n.com', role: 'ADMIN', profileId: 'p-within' } as any, makeCaller({ role: 'ADMIN' }));
+        expect(inviteMailer.sendInvite).toHaveBeenCalledWith('new', 'n@n.com', 'X');
+        expect(result).toMatchObject({ inviteUrl: null, sent: true });
+      });
+
+      it('create por chamador de alcance total → link devolvido', async () => {
+        prisma.user.create.mockResolvedValue({ id: 'new', email: 'n@n.com', role: 'ADMIN', hasFullPontoAccess: false, employeeId: null });
+        prisma.company.findUniqueOrThrow.mockResolvedValue({ name: 'X' });
+        const result: any = await service.create('c1', { email: 'n@n.com', role: 'ADMIN', profileId: 'profile-1' } as any, makeCaller());
+        expect(result).toMatchObject({ inviteUrl: RAW_URL, sent: true });
+      });
+
+      it('listLinkableEmployees: chamador restrito → 403 com a mensagem do F1b, sem consultar nada', async () => {
+        useLimitedCaller({});
+        await expectPermissionRequired(service.listLinkableEmployees('c1', makeCaller({ role: 'EMPLOYEE', userId: 'me' })), LINK_MSG);
+        expect(authz.getEffectivePermissions).toHaveBeenCalledWith('me');
+        expect(prisma.user.findMany).not.toHaveBeenCalled();
+        expect(prisma.employee.findMany).not.toHaveBeenCalled();
+      });
     });
 
     it('um chamador tipo Administrador Geral (padrão dos testes) passa por toda checagem de poder', async () => {

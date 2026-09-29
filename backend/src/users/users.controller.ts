@@ -30,7 +30,7 @@ export class UsersController {
   @RequirePermission('usuarios.gerenciar')
   @Get('linkable-employees')
   linkableEmployees(@CurrentUser() user: AuthenticatedUser) {
-    return this.users.listLinkableEmployees(user.companyId);
+    return this.users.listLinkableEmployees(user.companyId, user);
   }
 
   @RequirePermission('usuarios.gerenciar')

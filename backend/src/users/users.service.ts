@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { runInsideExplicitTenantTransaction } from '../prisma/tenant-context';
 import { hashPassword } from '../auth/password.util';
 import { effectiveHasFullPontoAccess } from '../auth/ponto-access.util';
-import { assertEmployeeLinkable, saveEmployeeLink } from '../auth/employee-link.util';
+import { assertEmployeeLinkable, canSelfLinkEmployee, saveEmployeeLink } from '../auth/employee-link.util';
 import { deriveHasFullPontoAccessFromGrants, deriveModulesFromGrants } from '../permissions/profile-signature.util';
 import { reassignUserProfile } from '../permissions/profile-assignment.util';
 import { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
@@ -101,6 +101,20 @@ export class UsersService {
     return this.inviteMailer.sendInvite(userId, email, company.name);
   }
 
+  // Ruling R-final (29/09/2026): o link cru do convite só volta na resposta pra quem pode vincular
+  // fichas (canSelfLinkEmployee, grants lidos do BANCO). Sem isso, um gerente de alcance restrito
+  // reenviava o convite pendente de um login já vinculado à ficha de outro gerente, aceitava com
+  // uma senha dele e alcançava o time desse gerente sem passar por rota de vínculo nenhuma. O
+  // e-mail sai igual; só a resposta perde o link (`inviteUrl: null`).
+  private async withheldInviteUrlUnlessCallerCanLink(
+    invite: { inviteUrl: string | null; sent: boolean },
+    currentUser: AuthenticatedUser,
+  ): Promise<{ inviteUrl: string | null; sent: boolean }> {
+    if (invite.inviteUrl === null) return invite;
+    const canLink = canSelfLinkEmployee(await this.authorization.getEffectivePermissions(currentUser.userId));
+    return canLink ? invite : { ...invite, inviteUrl: null };
+  }
+
   // hasFullPontoAccess sempre normalizado antes de sair daqui (ver ponto-access.util.ts) — a
   // coluna crua nasce `true` pra TODA linha, inclusive logins EMPLOYEE, que nunca têm acesso total
   // de fato. Sem isso, a tela de Usuários e Acessos exibiria "Acesso total ao Ponto" pra um login
@@ -122,7 +136,10 @@ export class UsersService {
   // ATIVOS ainda sem login, pra quem gerencia usuários escolher sem depender do próprio alcance em
   // `funcionarios.ver`. User é CENTRAL e Employee é de TENANT — duas consultas separadas, nunca na
   // mesma transação de tenant.
-  async listLinkableEmployees(companyId: string): Promise<{ id: string; fullName: string }[]> {
+  // Ruling R-final (29/09/2026): só quem pode vincular (canSelfLinkEmployee, grants do banco) vê a
+  // lista — pra quem não pode, ela só vazaria nomes de funcionários da empresa inteira.
+  async listLinkableEmployees(companyId: string, currentUser: AuthenticatedUser): Promise<{ id: string; fullName: string }[]> {
+    assertCallerCanLinkEmployee(await this.authorization.getEffectivePermissions(currentUser.userId));
     const linked = await this.prisma.user.findMany({
       where: { companyId, employeeId: { not: null } },
       select: { employeeId: true },
@@ -265,6 +282,7 @@ export class UsersService {
     } catch (err) {
       this.logger.error(`Falha ao preparar o convite do login ${user.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
+    invite = await this.withheldInviteUrlUnlessCallerCanLink(invite, currentUser);
 
     return { user: this.toPublicUser(user), inviteUrl: invite.inviteUrl, sent: invite.sent };
   }
@@ -275,7 +293,7 @@ export class UsersService {
     companyId: string,
     userId: string,
     currentUser: AuthenticatedUser,
-  ): Promise<{ inviteUrl: string; sent: boolean }> {
+  ): Promise<{ inviteUrl: string | null; sent: boolean }> {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
     if (user.status !== 'INVITED') throw new BadRequestException('Este login já aceitou o convite.');
@@ -283,7 +301,7 @@ export class UsersService {
     // ADMIN com `usuarios.gerenciar` tomaria o convite pendente de um ADMIN.
     assertCallerCanReissueInvite(user, currentUser);
     await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
-    return this.sendInvite(companyId, user.id, user.email);
+    return this.withheldInviteUrlUnlessCallerCanLink(await this.sendInvite(companyId, user.id, user.email), currentUser);
   }
 
   async block(companyId: string, userId: string, currentUser: AuthenticatedUser) {
@@ -478,7 +496,7 @@ export class UsersService {
     companyId: string,
     userId: string,
     currentUser: AuthenticatedUser,
-  ): Promise<{ sent: boolean; inviteUrl?: string }> {
+  ): Promise<{ sent: boolean; inviteUrl?: string | null }> {
     const user = await this.prisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException(`Login ${userId} não encontrado nesta empresa`);
 
@@ -489,7 +507,10 @@ export class UsersService {
     await this.assertTargetLoginWithinCaller(companyId, user, currentUser);
 
     if (user.status === 'INVITED') {
-      const { inviteUrl, sent } = await this.sendInvite(companyId, user.id, user.email);
+      const { inviteUrl, sent } = await this.withheldInviteUrlUnlessCallerCanLink(
+        await this.sendInvite(companyId, user.id, user.email),
+        currentUser,
+      );
       return { sent, inviteUrl };
     }
 

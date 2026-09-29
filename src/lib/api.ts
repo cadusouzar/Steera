@@ -915,15 +915,17 @@ export async function deleteSystemUser(id: string): Promise<void> {
 // temporária, envia um link de redefinição pro e-mail do login (`{ sent }`); nada muda no login até
 // a pessoa de fato usar o link. Um login ainda `INVITED` não tem senha pra redefinir — o backend
 // reenvia o convite em vez disso (`{ sent, inviteUrl }`), mesmo efeito de resendSystemUserInvite().
-export async function resetSystemUserPassword(id: string): Promise<{ sent: boolean; inviteUrl?: string }> {
-  return request<{ sent: boolean; inviteUrl?: string }>(`/companies/me/users/${id}/reset-password`, { method: 'PATCH' });
+// `inviteUrl` vem `null` (em vez do link) quando quem chama não pode vincular fichas (ruling R-final).
+export async function resetSystemUserPassword(id: string): Promise<{ sent: boolean; inviteUrl?: string | null }> {
+  return request<{ sent: boolean; inviteUrl?: string | null }>(`/companies/me/users/${id}/reset-password`, { method: 'PATCH' });
 }
 
 // Só pra login ainda INVITED (400 "Este login já aceitou o convite." caso contrário) — reemite o
 // token de convite (o link anterior deixa de valer) e reenvia o e-mail; `inviteUrl` deixa o admin
-// copiar o link se o e-mail não chegar.
-export async function resendSystemUserInvite(id: string): Promise<{ inviteUrl: string; sent: boolean }> {
-  return request<{ inviteUrl: string; sent: boolean }>(`/companies/me/users/${id}/resend-invite`, { method: 'PATCH' });
+// copiar o link se o e-mail não chegar. `null` quando quem chama não pode vincular fichas (ruling
+// R-final, 29/09/2026): o e-mail sai igual, só a resposta não traz o link.
+export async function resendSystemUserInvite(id: string): Promise<{ inviteUrl: string | null; sent: boolean }> {
+  return request<{ inviteUrl: string | null; sent: boolean }>(`/companies/me/users/${id}/resend-invite`, { method: 'PATCH' });
 }
 
 // Funcionários ativos da empresa que ainda não têm login (id + nome), pro seletor de "Novo Login" e

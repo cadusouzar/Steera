@@ -207,7 +207,8 @@ const UsersManagement = () => {
         api.listSystemUsers(),
         api.listEmployees().catch(() => [] as EmployeeListItem[]),
         canManageUsers ? api.listProfiles() : Promise.resolve([] as api.Profile[]),
-        canManageUsers
+        // Ruling R-final (29/09/2026): `linkable-employees` recusa (403) quem não pode vincular.
+        canManageUsers && canLinkEmployees
           ? api.listLinkableEmployees().catch(() => [] as api.LinkableEmployee[])
           : Promise.resolve([] as api.LinkableEmployee[]),
       ]);
@@ -220,7 +221,7 @@ const UsersManagement = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [canManageUsers]);
+  }, [canManageUsers, canLinkEmployees]);
 
   useEffect(() => {
     loadData();
@@ -479,7 +480,9 @@ const UsersManagement = () => {
       // Um login ainda `invited` não tem senha pra redefinir — o backend reenvia o convite em vez
       // disso (`inviteUrl` presente); esta ação não fica visível pra esse status na UI (ver
       // "Reenviar Convite"), mas o fallback continua correto se algo mudar do lado do backend.
-      if (result.inviteUrl) {
+      // `inviteUrl` vem `null` (presente, mas sem link) quando quem chama não pode vincular fichas
+      // (ruling R-final, 29/09/2026) — ainda é um reenvio de convite, só sem link pra copiar.
+      if (result.inviteUrl !== undefined) {
         setUserNotice({ kind: 'invite', email, inviteUrl: result.inviteUrl, sent: result.sent });
       } else {
         setUserNotice({ kind: 'reset', email, sent: result.sent });
@@ -1380,7 +1383,15 @@ const UsersManagement = () => {
 
               {userNotice.kind === 'invite' ? (
                 <>
-                  {userNotice.sent ? (
+                  {userNotice.sent && !userNotice.inviteUrl ? (
+                    // Ruling R-final (29/09/2026): quem não pode vincular fichas nunca recebe o link
+                    // cru do convite, só a confirmação de que o e-mail saiu.
+                    <p className="text-sm text-muted mb-4">
+                      Convite enviado por e-mail. Destinatário:{' '}
+                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. A pessoa cria a
+                      própria senha pelo link recebido (válido por 72 horas).
+                    </p>
+                  ) : userNotice.sent ? (
                     <p className="text-sm text-muted mb-4">
                       Convite enviado para <span className="font-medium text-foreground break-all">{userNotice.email}</span>.
                       A pessoa cria a própria senha pelo link (válido por 72 horas).
@@ -1390,6 +1401,12 @@ const UsersManagement = () => {
                       Não conseguimos confirmar o envio do e-mail para{' '}
                       <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Copie o link
                       abaixo e envie manualmente — ele é válido por 72 horas.
+                    </p>
+                  ) : !canLinkEmployees ? (
+                    <p className="text-sm text-muted mb-4">
+                      Não conseguimos confirmar o envio do e-mail de convite para{' '}
+                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Tente
+                      "Reenviar Convite" na lista em instantes.
                     </p>
                   ) : (
                     <p className="text-sm text-muted mb-4">
