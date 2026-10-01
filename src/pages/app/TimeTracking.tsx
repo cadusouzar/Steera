@@ -1,12 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
-import {
-  Clock, CheckCircle2, X, AlertCircle, Calendar, ChevronDown, Activity, UserCheck, AlertTriangle,
-  Camera, MapPin, Smartphone, Monitor, Loader2, Image as ImageIcon, Paperclip, UserPlus, RotateCcw,
-} from 'lucide-react';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Camera, ChevronLeft, ChevronRight, Image as ImageIcon, MapPin, Monitor, Paperclip, RotateCcw, Smartphone, Undo2, Wrench } from 'lucide-react';
 import { getCurrentUser, refreshCurrentUser } from '../../lib/auth';
 import {
   getTimeClockStatus, createTimePunch, getOwnTimeSummary, createAdjustmentRequest,
@@ -14,20 +7,30 @@ import {
   type TimeClockStatus, type TimePunch, type MonthlySummary, type DailySummary,
   type AdjustmentRequestRecord, type TimePunchType, type EmployeeListItem,
 } from '../../lib/api';
+import RollingText from '../../components/motion/RollingText';
+import {
+  Button, ButtonLink, ConfirmDialog, Drawer, Field, Input, Modal, Notice, PageHeader, Panel, Select,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, type StatusTone,
+} from '../../components/ui';
+
+// Controle de Ponto do funcionário (redesenho no kit, etapa 3 do polimento — 01/10/2026). Mudanças
+// aprovadas: navegação de mês por setas (no lugar de dois selects), "Cancelar ajuste" pede
+// confirmação e "hoje" passa a ser o dia LOCAL (antes era o dia UTC: entre 21h e meia-noite no
+// horário de Brasília a tela já achava que era amanhã e "Marcações de hoje" aparecia vazia).
 
 const PUNCH_TYPE_LABELS: Record<TimePunchType, string> = {
   clock_in: 'Entrada',
-  break_start: 'Saída Almoço',
-  break_end: 'Volta Almoço',
+  break_start: 'Saída almoço',
+  break_end: 'Volta almoço',
   clock_out: 'Saída',
-  extra_in: 'Entrada Extra',
-  extra_out: 'Saída Extra',
+  extra_in: 'Entrada extra',
+  extra_out: 'Saída extra',
 };
 
 const ADJUSTMENT_TYPE_LABELS: Record<AdjustmentRequestRecord['type'], string> = {
-  add_missing_punch: 'Adicionar marcação faltante',
-  correct_time: 'Corrigir horário de uma marcação',
-  remove_punch: 'Remover marcação incorreta',
+  add_missing_punch: 'Adicionar marcação esquecida',
+  correct_time: 'Corrigir o horário de uma marcação',
+  remove_punch: 'Remover uma marcação errada',
 };
 
 const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
@@ -39,23 +42,17 @@ function formatDateLabel(dateStr: string) {
   const d = new Date(`${dateStr}T12:00:00`); // meio-dia local pra nunca cair no dia anterior por causa de fuso
   return d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
 }
-function formatMinutesSigned(mins: number) {
-  const sign = mins < 0 ? '-' : '';
+function formatMinutes(mins: number) {
   const abs = Math.abs(mins);
-  const hrs = Math.floor(abs / 60);
-  const rem = abs % 60;
-  return `${sign}${hrs.toString().padStart(2, '0')}h${rem.toString().padStart(2, '0')}m`;
+  return `${mins < 0 ? '-' : ''}${Math.floor(abs / 60)}h${String(abs % 60).padStart(2, '0')}`;
 }
-function formatMinutesHHmm(mins: number) {
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  return `${hrs.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+// Data local (não UTC) no formato YYYY-MM-DD.
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// Deriva um "status do dia" só pra manter o vocabulário visual que a tela já tinha
-// (Completo/Incompleto/Falta/Folga/Feriado) — é uma conveniência de exibição do frontend, não um
-// conceito do backend (que devolve isHoliday/isOnVacationOrLeave/hasOpenJourney/workedMinutes/
-// expectedMinutes/events crus, sem nenhum "status" pronto).
+// "Status do dia" é uma conveniência de exibição do frontend — o backend devolve os dados crus
+// (isHoliday/isOnVacationOrLeave/hasOpenJourney/workedMinutes/expectedMinutes/events).
 type DisplayStatus = 'Completo' | 'Incompleto' | 'Falta' | 'Folga' | 'Feriado';
 function deriveDisplayStatus(day: DailySummary, todayStr: string): DisplayStatus {
   if (day.isHoliday) return 'Feriado';
@@ -65,16 +62,9 @@ function deriveDisplayStatus(day: DailySummary, todayStr: string): DisplayStatus
   if (day.hasOpenJourney) return 'Incompleto';
   return day.workedMinutes >= day.expectedMinutes ? 'Completo' : 'Incompleto';
 }
-function getStatusColor(status: DisplayStatus) {
-  switch (status) {
-    case 'Completo': return 'bg-green-500/10 text-green-600 border-green-500/20';
-    case 'Incompleto': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20';
-    case 'Falta': return 'bg-red-500/10 text-red-600 border-red-500/20';
-    case 'Folga': return 'bg-foreground/10 text-foreground border-foreground/20';
-    case 'Feriado': return 'bg-foreground/10 text-foreground border-foreground/20';
-    default: return 'bg-secondary text-muted border-border';
-  }
-}
+const STATUS_TONE: Record<DisplayStatus, StatusTone> = {
+  Completo: 'success', Incompleto: 'warning', Falta: 'danger', Folga: 'neutral', Feriado: 'neutral',
+};
 
 const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
@@ -88,20 +78,14 @@ const TimeTracking = () => {
     return () => clearInterval(timer);
   }, []);
 
-  useEscapeKey(() => {
-    setMaintenanceModalOpen(false);
-    setIsConfirmModalOpen(false);
-  });
-
   // ---- Estado vazio: login sem employeeId vinculado ----
   const [linkableEmployees, setLinkableEmployees] = useState<EmployeeListItem[]>([]);
   const [loadingLinkable, setLoadingLinkable] = useState(false);
   const [selectedLinkId, setSelectedLinkId] = useState('');
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState('');
-  // Login com alcance restrito (qualquer alcance fora de EMPRESA, mesmo com `usuarios.gerenciar`) não
-  // escolhe a própria ficha (o vínculo definiria o próprio alcance): só quem tem acesso a todos os
-  // funcionários da empresa vincula, em Usuários.
+  // Login com alcance restrito não escolhe a própria ficha (o vínculo definiria o próprio alcance):
+  // só quem tem acesso a todos os funcionários da empresa vincula, em Usuários.
   const canSelfLink = currentUser?.canSelfLinkEmployee !== false;
 
   useEffect(() => {
@@ -134,11 +118,18 @@ const TimeTracking = () => {
   // ---- Dados reais (só carregados quando há employeeId vinculado) ----
   const now = new Date();
   const realYear = now.getFullYear();
-  const realMonth = now.getMonth() + 1; // API usa mês 1-indexado
-  const todayStr = now.toISOString().slice(0, 10);
+  const realMonth = now.getMonth(); // 0-indexado
+  const todayStr = localDateStr(now);
 
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth()); // 0-indexado, como o <select> original
-  const [selectedYear, setSelectedYear] = useState(realYear);
+  const [viewYear, setViewYear] = useState(realYear);
+  const [viewMonth, setViewMonth] = useState(realMonth);
+  const isCurrentMonth = viewYear === realYear && viewMonth === realMonth;
+  const goMonth = (delta: number) => {
+    const d = new Date(viewYear, viewMonth + delta, 1);
+    if (d.getFullYear() > realYear || (d.getFullYear() === realYear && d.getMonth() > realMonth)) return;
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+  };
 
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = () => setRefreshKey((k) => k + 1);
@@ -172,13 +163,9 @@ const TimeTracking = () => {
     if (!linkedEmployeeId) return;
     let cancelled = false;
     setTodayLoading(true);
-    // Busca sempre o próprio mês/ano REAIS (não reaproveita monthSummary mesmo quando o espelho
-    // está no mês atual) — reaproveitar arriscaria mostrar dado desatualizado bem no momento mais
-    // importante: logo depois de bater um ponto (refreshKey muda os dois efeitos juntos, mas o
-    // valor de monthSummary só é atualizado quando O OUTRO efeito termina, então ler o closure
-    // dele aqui poderia pegar a versão antiga). Uma chamada a mais é um custo pequeno e aceitável
-    // pela garantia de dado sempre fresco.
-    getOwnTimeSummary(realYear, realMonth)
+    // Busca sempre o próprio mês/ano REAIS (não reaproveita monthSummary mesmo quando o espelho está
+    // no mês atual) — garante dado fresco logo depois de bater um ponto.
+    getOwnTimeSummary(realYear, realMonth + 1)
       .then((m) => { if (!cancelled) setTodaySummary(m.days.find((d) => d.date === todayStr) ?? null); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setTodayLoading(false); });
@@ -191,12 +178,12 @@ const TimeTracking = () => {
     let cancelled = false;
     setMonthLoading(true);
     setMonthError('');
-    getOwnTimeSummary(selectedYear, selectedMonth + 1)
+    getOwnTimeSummary(viewYear, viewMonth + 1)
       .then((m) => { if (!cancelled) setMonthSummary(m); })
       .catch((err) => { if (!cancelled) setMonthError(err instanceof Error ? err.message : 'Não foi possível carregar o espelho de ponto.'); })
       .finally(() => { if (!cancelled) setMonthLoading(false); });
     return () => { cancelled = true; };
-  }, [linkedEmployeeId, selectedYear, selectedMonth, refreshKey]);
+  }, [linkedEmployeeId, viewYear, viewMonth, refreshKey]);
 
   useEffect(() => {
     if (!linkedEmployeeId) return;
@@ -208,9 +195,8 @@ const TimeTracking = () => {
   }, [linkedEmployeeId, refreshKey]);
 
   const pendingRequestForDate = (date: string) => ownRequests.find((r) => r.targetDate === date && r.status === 'pending');
-  // Mais recente solicitação já resolvida (aprovada/rejeitada) pra esta data — só usada quando não
-  // há mais nenhuma pendente, pra mostrar pro funcionário o resultado (e o motivo, se rejeitada) da
-  // própria solicitação em vez de ela simplesmente sumir depois de analisada.
+  // Mais recente solicitação já resolvida pra esta data — mostra o resultado (e o motivo) em vez de
+  // a solicitação simplesmente sumir depois de analisada.
   const lastResolvedRequestForDate = (date: string) =>
     ownRequests
       .filter((r) => r.targetDate === date && (r.status === 'approved' || r.status === 'rejected'))
@@ -234,10 +220,9 @@ const TimeTracking = () => {
   const [punchPhotoObjectUrl, setPunchPhotoObjectUrl] = useState<string | null>(null);
   const [punchPhotoLoading, setPunchPhotoLoading] = useState(false);
 
-  // `photoDownloadUrl` nunca pode virar `<img src>` direto — a rota exige o JWT de acesso normal
-  // além do token de download (ver fetchProtectedFileObjectUrl em src/lib/api.ts), então busca a
-  // imagem via fetch autenticado e usa um Object URL local. Revoga o Object URL anterior ao trocar
-  // de marcação/fechar o modal, pra não vazar memória.
+  // `photoDownloadUrl` nunca pode virar `<img src>` direto — a rota exige o JWT de acesso além do
+  // token de download (ver fetchProtectedFileObjectUrl), então busca via fetch autenticado e usa um
+  // Object URL local, revogado ao trocar de marcação/fechar.
   useEffect(() => {
     if (!selectedPunchDetail?.photoDownloadUrl) {
       setPunchPhotoObjectUrl(null);
@@ -260,18 +245,17 @@ const TimeTracking = () => {
     };
   }, [selectedPunchDetail]);
 
-  // Garante que a câmera é desligada se o usuário sair da página com o modal de confirmação
-  // ainda aberto (ex.: navegou pra outra rota) — sem isso o stream ficaria vivo indefinidamente,
-  // já que stopCamera() só é chamado pelos handlers normais de fechar o modal.
+  // Desliga a câmera se a pessoa sair da página com a confirmação aberta.
   const mediaStreamRef = useRef<MediaStream | null>(null);
   useEffect(() => { mediaStreamRef.current = mediaStream; }, [mediaStream]);
   useEffect(() => () => { mediaStreamRef.current?.getTracks().forEach((track) => track.stop()); }, []);
+  // O <video> fica dentro do Modal (portal) e é remontado ao "tirar outra" — religa o stream nele.
+  useEffect(() => {
+    if (videoRef.current && mediaStream) videoRef.current.srcObject = mediaStream;
+  }, [mediaStream, capturedPhotoPreview, isConfirmModalOpen]);
 
-  // Reflete se o modal de confirmação está aberto NO MOMENTO em que a promise de
-  // getUserMedia resolve — não pode ler o state `isConfirmModalOpen` direto ali dentro
-  // porque o closure captura o valor de quando startCamera() foi chamada, não o atual.
-  // Sem isso, abrir e fechar o modal rápido antes da permissão de câmera resolver deixaria
-  // o stream vivo (luz da câmera acesa) mesmo com o modal já fechado.
+  // Reflete se a confirmação está aberta NO MOMENTO em que getUserMedia resolve (o closure veria o
+  // valor antigo) — abrir e fechar rápido não deixa a câmera acesa.
   const punchModalOpenRef = useRef(false);
 
   const startCamera = () => {
@@ -283,7 +267,6 @@ const TimeTracking = () => {
           return;
         }
         setMediaStream(stream);
-        if (videoRef.current) videoRef.current.srcObject = stream;
       })
       .catch(() => setCameraError('Não foi possível acessar a câmera.'));
   };
@@ -348,12 +331,8 @@ const TimeTracking = () => {
     startCamera();
   };
 
-  // A localização é sempre buscada de forma otimista, mesmo quando não é exigida (o backend
-  // aproveita lat/lng pra classificar geofencing mesmo sem exigir — ver createPunch no backend),
-  // mas só bloqueia o envio quando `requireLocation` for true — antes disso, `isGettingLocation`
-  // sozinho travava "Registrar" até o GPS responder (ou até os 10s de timeout do
-  // getCurrentPosition esgotarem) mesmo com a exigência desligada, fazendo a marcação parecer
-  // travada/exigindo localização quando na verdade não exigia nada.
+  // A localização é buscada sempre (o backend usa lat/lng pra geofencing mesmo sem exigir), mas só
+  // bloqueia o envio quando `requireLocation` for true.
   const canSubmitPunch =
     !submittingPunch &&
     (!status?.requirePhoto || !!capturedPhotoBlob) &&
@@ -375,7 +354,7 @@ const TimeTracking = () => {
       closeConfirmModal();
       bump();
     } catch (err) {
-      // erro visível no próprio modal — nunca alert(), e o modal continua aberto pro usuário tentar de novo
+      // erro visível no próprio modal, que continua aberto pra tentar de novo
       setSubmitPunchError(err instanceof Error ? err.message : 'Não foi possível registrar a marcação.');
     } finally {
       setSubmittingPunch(false);
@@ -394,10 +373,11 @@ const TimeTracking = () => {
   const [submittingAdjustment, setSubmittingAdjustment] = useState(false);
   const [adjustmentError, setAdjustmentError] = useState('');
   const [cancellingRequestId, setCancellingRequestId] = useState<string | null>(null);
+  const [confirmCancelRequest, setConfirmCancelRequest] = useState<AdjustmentRequestRecord | null>(null);
 
   const openMaintenance = (day: DailySummary) => {
     setAdjustmentDay(day);
-    setAdjustmentType('correct_time');
+    setAdjustmentType(day.events.length > 0 ? 'correct_time' : 'add_missing_punch');
     setAdjustmentRelatedEventId(day.events[0]?.id ?? '');
     setAdjustmentRequestedEventType(day.events[0]?.type ?? 'clock_in');
     setAdjustmentRequestedTime('');
@@ -409,7 +389,7 @@ const TimeTracking = () => {
 
   const submitMaintenance = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adjustmentDay || !maintenanceReason) return;
+    if (!adjustmentDay || !maintenanceReason.trim()) return;
     setSubmittingAdjustment(true);
     setAdjustmentError('');
     try {
@@ -438,825 +418,473 @@ const TimeTracking = () => {
     setCancellingRequestId(id);
     try {
       await cancelAdjustmentRequest(id);
+      setConfirmCancelRequest(null);
       bump();
     } catch (err) {
+      setConfirmCancelRequest(null);
       setMonthError(err instanceof Error ? err.message : 'Não foi possível cancelar a solicitação.');
     } finally {
       setCancellingRequestId(null);
     }
   };
 
-  // ---- Resumo do mês (cards de baixo) — direto dos totals já calculados pelo backend ----
+  // ---- Resumo do mês — direto dos totals já calculados pelo backend ----
   const totals = monthSummary?.totals ?? { workedMinutes: 0, expectedMinutes: 0, extraMinutes: 0, balanceMinutes: 0 };
   const missingMinutes = totals.balanceMinutes < 0 ? Math.abs(totals.balanceMinutes) : 0;
   const extraFromBalance = totals.balanceMinutes > 0 ? totals.balanceMinutes : totals.extraMinutes;
 
-  // ==== Estado vazio: login sem employeeId vinculado ====
-  if (!linkedEmployeeId && !canSelfLink) {
-    return (
-      <div className="p-8 h-full flex flex-col items-center justify-center">
-        <div className="max-w-md w-full bg-panel border border-border rounded-2xl shadow-sm p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-            <UserPlus size={28} className="text-primary" />
-          </div>
-          <h2 className="text-xl font-heading font-bold text-foreground mb-2">Cadastro de funcionário necessário</h2>
-          <p className="text-muted text-sm">
-            Seu login ainda não tem uma ficha de funcionário. Peça a alguém com acesso a todos os
-            funcionários da empresa para vincular seu login a uma ficha.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const days = useMemo(() => [...(monthSummary?.days ?? [])].reverse(), [monthSummary]);
 
+  // ==== Estado vazio: login sem ficha vinculada ====
   if (!linkedEmployeeId) {
     return (
-      <div className="p-8 h-full flex flex-col items-center justify-center">
-        <div className="max-w-md w-full bg-panel border border-border rounded-2xl shadow-sm p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-            <UserPlus size={28} className="text-primary" />
-          </div>
-          <h2 className="text-xl font-heading font-bold text-foreground mb-2">Cadastro de funcionário necessário</h2>
-          <p className="text-muted text-sm mb-6">
-            Seu login ainda não está vinculado a um cadastro de funcionário — isso é necessário para bater
-            ponto. Crie seu cadastro em Funcionários (se ainda não existir) e depois vincule seu login a ele
-            abaixo.
-          </p>
-          <Link to="/app/funcionarios" className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 mb-6">
-            Ir para Funcionários →
-          </Link>
-
-          <div className="border-t border-border pt-6 text-left">
-            <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">
-              Vincular meu login a um funcionário existente
-            </label>
-            {loadingLinkable ? (
-              <p className="text-xs text-muted italic flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Carregando funcionários...</p>
-            ) : linkableEmployees.length === 0 ? (
-              <p className="text-xs text-muted italic">Nenhum funcionário cadastrado ainda.</p>
-            ) : (
-              <div className="flex gap-2">
-                <select
-                  value={selectedLinkId}
-                  onChange={(e) => setSelectedLinkId(e.target.value)}
-                  className="flex-1 bg-background border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-primary text-foreground"
-                >
-                  <option value="">Selecione...</option>
-                  {linkableEmployees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>{emp.fullName}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleLinkEmployee}
-                  disabled={!selectedLinkId || linking}
-                  className="px-4 py-2.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors flex items-center gap-2"
-                >
-                  {linking && <Loader2 size={16} className="animate-spin" />}
-                  Vincular
-                </button>
-              </div>
-            )}
-            {linkError && (
-              <div className="mt-3 bg-red-500/10 border border-red-500/20 text-red-600 text-xs p-3 rounded-xl flex items-start gap-2">
-                <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                {linkError}
-              </div>
-            )}
-          </div>
+      <div className="px-4 py-6 md:px-8 md:py-8">
+        <div className="max-w-lg mx-auto">
+          <Panel>
+            <div className="py-4">
+              <h1 className="text-[20px] font-semibold text-foreground">Vincule seu login a uma ficha</h1>
+              {!canSelfLink ? (
+                <p className="mt-2 text-[14px] text-muted">
+                  Seu login ainda não tem uma ficha de funcionário, e isso é necessário para bater ponto. Peça a alguém com acesso a todos os funcionários da empresa para vincular seu login a uma ficha.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-2 text-[14px] text-muted">
+                    Para bater ponto, seu login precisa estar ligado a uma ficha de funcionário. Se a sua ficha ainda não existe, crie em Funcionários e volte aqui.
+                  </p>
+                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <Field label="Minha ficha" htmlFor="link-employee" className="flex-1">
+                      {loadingLinkable ? (
+                        <span className="skeleton block h-10" role="status" aria-label="Carregando fichas" />
+                      ) : linkableEmployees.length === 0 ? (
+                        <p className="text-[14px] text-muted">Nenhum funcionário ativo cadastrado ainda.</p>
+                      ) : (
+                        <Select id="link-employee" value={selectedLinkId} onChange={(e) => setSelectedLinkId(e.target.value)}>
+                          <option value="" disabled>Selecione</option>
+                          {linkableEmployees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}</option>)}
+                        </Select>
+                      )}
+                    </Field>
+                    <Button onClick={handleLinkEmployee} loading={linking} disabled={!selectedLinkId}>Vincular</Button>
+                  </div>
+                  {linkError && <Notice tone="danger" className="mt-3">{linkError}</Notice>}
+                  <ButtonLink to="/app/funcionarios" variant="ghost" size="sm" className="mt-4 -ml-3">Ir para Funcionários</ButtonLink>
+                </>
+              )}
+            </div>
+          </Panel>
         </div>
       </div>
     );
   }
 
+  const timeText = currentTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const todayEvents = [...(todaySummary?.events ?? [])].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
+
   return (
-    <div className="p-8 h-full flex flex-col">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 shrink-0">
-        <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Clock size={28} className="text-primary" />
-            Controle de Ponto
-          </h1>
-          <p className="text-muted mt-1">Registre sua jornada de trabalho e gerencie marcações.</p>
-        </div>
-      </div>
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-6xl mx-auto">
+        <PageHeader title="Controle de ponto" description="Registre sua jornada e acompanhe o espelho do mês." />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 overflow-hidden">
-
-        {/* Left Side: Clock Puncher */}
-        <div className="lg:col-span-1 bg-panel border border-border rounded-2xl shadow-sm flex flex-col p-8 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-full blur-3xl pointer-events-none"></div>
-          <div className="absolute bottom-0 left-0 w-24 h-24 bg-primary/5 rounded-tr-full blur-2xl pointer-events-none"></div>
-
-          <div className="flex flex-col items-center justify-center mb-8 relative z-10 text-center">
-            <h2 className="text-xs font-semibold text-muted uppercase tracking-[0.2em] mb-3">Horário Atual</h2>
-            <div className="text-5xl md:text-6xl font-heading font-bold text-foreground mb-2 tabular-nums tracking-tight">
-              {currentTime.toLocaleTimeString('pt-BR')}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* ---- Bater ponto ---- */}
+          <Panel className="lg:col-span-1">
+            <div className="text-center">
+              <RollingText text={timeText} label={`Agora são ${timeText}`} className="text-[44px] leading-none font-semibold tracking-tight text-foreground" />
+              <p className="mt-2 text-[14px] text-muted first-letter:uppercase">
+                {currentTime.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </p>
             </div>
-            <div className="text-sm font-medium text-foreground/70">
-              {currentTime.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-            </div>
-          </div>
 
-          <div className="w-full mb-8 relative z-10">
-            {statusLoading ? (
-              <div className="w-full py-5 rounded-2xl bg-secondary/10 border border-border/50 flex items-center justify-center gap-2 text-muted text-sm font-medium">
-                <Loader2 size={20} className="animate-spin" /> Carregando status...
-              </div>
-            ) : statusError ? (
-              <div className="w-full rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 text-sm p-4 flex items-start gap-2">
-                <AlertCircle size={16} className="shrink-0 mt-0.5" /> {statusError}
-              </div>
-            ) : status?.nextAllowedType ? (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={openPunchModal}
-                className="w-full py-5 rounded-2xl text-primary-foreground font-bold text-lg shadow-lg shadow-primary/25 bg-primary hover:bg-primary/90 transition-all flex flex-col items-center justify-center gap-1"
-              >
-                <span>Registrar {PUNCH_TYPE_LABELS[status.nextAllowedType]}</span>
-                <span className="text-xs font-medium text-primary-foreground/70">Clique para capturar o horário</span>
-              </motion.button>
-            ) : null}
-          </div>
-
-          <div className="w-full bg-secondary/10 border border-border/50 rounded-2xl p-5 flex-1 flex flex-col relative z-10 min-h-[250px]">
-            <h3 className="text-sm font-bold text-foreground mb-4 text-left flex items-center justify-between">
-              Marcações de Hoje
-              <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full text-xs font-bold">{todaySummary?.events.length ?? 0}</span>
-            </h3>
-            {todayLoading ? (
-              <div className="flex-1 flex items-center justify-center text-muted">
-                <Loader2 size={24} className="animate-spin opacity-50" />
-              </div>
-            ) : !todaySummary || todaySummary.events.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-sm text-muted italic opacity-70">
-                <Clock size={24} className="mb-2 opacity-20" />
-                Nenhuma marcação ainda.
-              </div>
-            ) : (
-              <div className="space-y-3 overflow-y-auto custom-scrollbar pr-2 flex-1">
-                {todaySummary.events.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex justify-between items-center text-sm group bg-background/50 p-2.5 rounded-xl border border-border/40 hover:border-border hover:shadow-sm cursor-pointer transition-all"
-                    onClick={() => setSelectedPunchDetail(p)}
-                  >
-                    <span className="text-foreground/80 font-medium flex items-center gap-2.5">
-                      <div className="w-2 h-2 rounded-full bg-primary/40 group-hover:bg-primary transition-colors"></div>
-                      {PUNCH_TYPE_LABELS[p.type]}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <div className="flex gap-1.5 opacity-40 group-hover:opacity-100 transition-opacity">
-                        {p.photoDownloadUrl && <Camera size={14} className="text-muted group-hover:text-primary transition-colors" />}
-                        {p.latitude != null && <MapPin size={14} className="text-muted group-hover:text-primary transition-colors" />}
-                      </div>
-                      <span className="font-mono font-bold text-foreground bg-background px-3 py-1.5 rounded-lg border border-border shadow-sm text-xs">
-                        {formatTimeOnly(p.recordedAt)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Side: History */}
-        <div className="lg:col-span-2 bg-panel border border-border rounded-2xl shadow-sm flex flex-col overflow-hidden">
-          <div className="p-5 border-b border-border flex flex-col md:flex-row justify-between items-center bg-secondary/30 gap-4">
-            <h2 className="font-bold text-foreground flex items-center gap-2">
-              <Calendar size={18} className="text-primary" />
-              Espelho de Ponto
-            </h2>
-
-            <div className="flex gap-2 w-full md:w-auto">
-              <div className="relative flex-1 md:flex-none">
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                  className="w-full md:w-40 appearance-none bg-background border border-border rounded-xl px-4 py-2 pr-10 text-sm font-medium focus:outline-none focus:border-primary transition-colors cursor-pointer text-foreground"
-                >
-                  {MONTH_NAMES.map((m, i) => (
-                    <option key={m} value={i}>{m}</option>
-                  ))}
-                </select>
-                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
-              </div>
-              <div className="relative flex-1 md:flex-none">
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(Number(e.target.value))}
-                  className="w-full md:w-28 appearance-none bg-background border border-border rounded-xl px-4 py-2 pr-10 text-sm font-medium focus:outline-none focus:border-primary transition-colors cursor-pointer text-foreground"
-                >
-                  {[realYear - 2, realYear - 1, realYear].map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-auto custom-scrollbar p-5">
-            {monthError && (
-              <div className="mb-4 bg-red-500/10 border border-red-500/20 text-red-600 text-sm p-4 rounded-xl flex items-start gap-2">
-                <AlertCircle size={16} className="shrink-0 mt-0.5" /> {monthError}
-              </div>
-            )}
-            {monthLoading ? (
-              <div className="flex items-center justify-center py-16 text-muted">
-                <Loader2 size={28} className="animate-spin opacity-50" />
-              </div>
-            ) : (
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b-2 border-border/60">
-                    <th className="pb-3 text-xs font-semibold text-muted uppercase tracking-wider">Data</th>
-                    <th className="pb-3 text-xs font-semibold text-muted uppercase tracking-wider text-center">Registros (Horários)</th>
-                    <th className="pb-3 text-xs font-semibold text-muted uppercase tracking-wider text-center">Horas Trabalhadas</th>
-                    <th className="pb-3 text-xs font-semibold text-muted uppercase tracking-wider text-center">Status</th>
-                    <th className="pb-3 text-xs font-semibold text-muted uppercase tracking-wider text-right">Ação</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {[...(monthSummary?.days ?? [])].reverse().map((day) => {
-                    const displayStatus = deriveDisplayStatus(day, todayStr);
-                    const pending = pendingRequestForDate(day.date);
-                    const resolved = pending ? undefined : lastResolvedRequestForDate(day.date);
-                    return (
-                      <tr key={day.date} className="hover:bg-secondary/5 transition-colors">
-                        <td className="py-4">
-                          <div className="font-medium text-sm text-foreground capitalize">{formatDateLabel(day.date)}</div>
-                        </td>
-                        <td className="py-4 text-center">
-                          {day.events.length > 0 ? (
-                            <div className="flex items-center justify-center flex-wrap gap-1">
-                              {day.events.map((p) => (
-                                <span key={p.id} className="text-xs font-mono bg-secondary/50 text-foreground px-1.5 py-0.5 rounded border border-border" title={PUNCH_TYPE_LABELS[p.type]}>
-                                  {formatTimeOnly(p.recordedAt)}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted">-</span>
-                          )}
-                        </td>
-                        <td className="py-4 text-center">
-                          <span className="font-bold text-foreground">{formatMinutesHHmm(day.workedMinutes)}</span>
-                        </td>
-                        <td className="py-4 text-center">
-                          <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${getStatusColor(displayStatus)}`}>
-                            {displayStatus}
-                          </span>
-                          {pending && (
-                            <div className="text-[10px] mt-1 text-orange-500 font-medium">Ajuste Pendente</div>
-                          )}
-                          {resolved && (
-                            <div className={`text-[10px] mt-1 font-medium ${resolved.status === 'approved' ? 'text-green-600' : 'text-red-500'}`}>
-                              Ajuste {resolved.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
-                              {resolved.reviewNote && (
-                                <button
-                                  type="button"
-                                  onClick={() => setViewingResolvedRequest(resolved)}
-                                  className="block mx-auto mt-0.5 text-muted font-normal normal-case underline decoration-dotted hover:text-foreground transition-colors"
-                                >
-                                  Ver motivo
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-4 text-right">
-                          {pending ? (
-                            <button
-                              onClick={() => handleCancelRequest(pending.id)}
-                              disabled={cancellingRequestId === pending.id}
-                              className="text-xs font-medium text-red-500 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {cancellingRequestId === pending.id ? 'Cancelando...' : 'Cancelar Ajuste'}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => openMaintenance(day)}
-                              className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-                            >
-                              Solicitar Ajuste
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Section: Journey Summary */}
-      <div className="mt-6 shrink-0">
-        <h2 className="text-lg font-heading font-bold text-foreground mb-4 flex items-center gap-2">
-          <Activity size={20} className="text-primary" />
-          Jornada do Mês ({MONTH_NAMES[selectedMonth]})
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-panel border border-border rounded-2xl p-5 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-              <Clock size={24} className="text-primary" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1">Total Trabalhado</p>
-              <p className="text-2xl font-heading font-bold text-foreground">{formatMinutesSigned(totals.workedMinutes)}</p>
-            </div>
-          </div>
-
-          <div className="bg-panel border border-border rounded-2xl p-5 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-secondary/50 flex items-center justify-center shrink-0">
-              <Calendar size={24} className="text-foreground/70" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1">Horas Esperadas</p>
-              <p className="text-2xl font-heading font-bold text-foreground">{formatMinutesSigned(totals.expectedMinutes)}</p>
-            </div>
-          </div>
-
-          <div className="bg-panel border border-border rounded-2xl p-5 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
-              <UserCheck size={24} className="text-green-600" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1">Horas Extras</p>
-              <p className="text-2xl font-heading font-bold text-green-600">{formatMinutesSigned(extraFromBalance)}</p>
-            </div>
-          </div>
-
-          <div className="bg-panel border border-border rounded-2xl p-5 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
-              <AlertTriangle size={24} className="text-red-600" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1">Horas Faltantes</p>
-              <p className="text-2xl font-heading font-bold text-red-600">{formatMinutesSigned(missingMinutes)}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Maintenance Drawer */}
-      {maintenanceModalOpen && adjustmentDay && createPortal(
-        <AnimatePresence>
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setMaintenanceModalOpen(false)}
-              className="fixed inset-0 z-[100] bg-background/60 backdrop-blur-sm"
-            />
-            <div className="fixed inset-0 z-[101] flex justify-end pointer-events-none">
-              <motion.div
-                initial={{ x: '100%', opacity: 0.5 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: '100%', opacity: 0.5 }}
-                transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-                className="w-full max-w-md bg-background border-l border-border shadow-2xl h-full flex flex-col pointer-events-auto"
-              >
-                <div className="p-6 md:p-8 border-b border-border flex items-center justify-between bg-secondary/10 shrink-0">
-                  <div>
-                    <h2 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-                      <AlertCircle size={20} className="text-orange-500" />
-                      Solicitar Manutenção
-                    </h2>
-                    <p className="text-muted text-sm mt-1">Informe ao RH o motivo do ajuste de ponto.</p>
-                  </div>
-                  <button
-                    onClick={() => setMaintenanceModalOpen(false)}
-                    className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <form id="maintenanceForm" onSubmit={submitMaintenance} className="p-6 md:p-8 flex-1 overflow-y-auto custom-scrollbar space-y-6">
-                  <div className="bg-orange-500/10 border border-orange-500/20 text-orange-600 text-sm p-4 rounded-xl">
-                    <p>Você está solicitando ajuste para o dia <strong>{adjustmentDay.date.split('-').reverse().join('/')}</strong>.</p>
-                    <p className="mt-1 text-xs opacity-80">Sua solicitação será analisada pelo seu superior.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Tipo de solicitação *</label>
-                    <select
-                      value={adjustmentType}
-                      onChange={(e) => setAdjustmentType(e.target.value as AdjustmentRequestRecord['type'])}
-                      className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary text-foreground transition-colors"
-                    >
-                      {(Object.keys(ADJUSTMENT_TYPE_LABELS) as AdjustmentRequestRecord['type'][]).map((t) => (
-                        <option key={t} value={t}>{ADJUSTMENT_TYPE_LABELS[t]}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {adjustmentType !== 'add_missing_punch' && (
-                    <div>
-                      <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">
-                        {adjustmentType === 'remove_punch' ? 'Marcação a remover *' : 'Marcação a corrigir *'}
-                      </label>
-                      {adjustmentDay.events.length === 0 ? (
-                        <p className="text-xs text-muted italic">Este dia não tem marcações para selecionar.</p>
-                      ) : (
-                        <select
-                          required
-                          value={adjustmentRelatedEventId}
-                          onChange={(e) => setAdjustmentRelatedEventId(e.target.value)}
-                          className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary text-foreground transition-colors"
-                        >
-                          {adjustmentDay.events.map((ev) => (
-                            <option key={ev.id} value={ev.id}>{PUNCH_TYPE_LABELS[ev.type]} — {formatTimeOnly(ev.recordedAt)}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  )}
-
-                  {adjustmentType !== 'remove_punch' && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">
-                          {adjustmentType === 'add_missing_punch' ? 'Tipo a adicionar *' : 'Tipo correto *'}
-                        </label>
-                        <select
-                          value={adjustmentRequestedEventType}
-                          onChange={(e) => setAdjustmentRequestedEventType(e.target.value as TimePunchType)}
-                          className="w-full bg-background border border-border rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-primary text-foreground transition-colors"
-                        >
-                          {(Object.keys(PUNCH_TYPE_LABELS) as TimePunchType[]).map((t) => (
-                            <option key={t} value={t}>{PUNCH_TYPE_LABELS[t]}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Horário *</label>
-                        <input
-                          type="time"
-                          required
-                          value={adjustmentRequestedTime}
-                          onChange={(e) => setAdjustmentRequestedTime(e.target.value)}
-                          className="w-full bg-background border border-border rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-primary text-foreground transition-colors"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Descreva a solicitação *</label>
-                    <textarea
-                      required
-                      value={maintenanceReason}
-                      onChange={(e) => setMaintenanceReason(e.target.value)}
-                      placeholder="Ex: Esqueci de bater o ponto na saída, saí às 18:00..."
-                      className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary text-foreground transition-colors min-h-[100px] resize-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Anexo (opcional)</label>
-                    <label className="flex items-center gap-2 w-full bg-background border border-dashed border-border rounded-xl px-4 py-3 text-sm text-muted cursor-pointer hover:border-primary transition-colors">
-                      <Paperclip size={16} />
-                      {maintenanceAttachment ? maintenanceAttachment.name : 'Anexar comprovante (PDF, JPG ou PNG)'}
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        className="hidden"
-                        onChange={(e) => setMaintenanceAttachment(e.target.files?.[0] ?? null)}
-                      />
-                    </label>
-                  </div>
-
-                  {adjustmentError && (
-                    <div className="bg-red-500/10 border border-red-500/20 text-red-600 text-sm p-4 rounded-xl flex items-start gap-2">
-                      <AlertCircle size={16} className="shrink-0 mt-0.5" /> {adjustmentError}
-                    </div>
-                  )}
-                </form>
-
-                <div className="p-6 border-t border-border bg-background flex gap-3 sticky bottom-0">
-                  <button
-                    type="button"
-                    onClick={() => setMaintenanceModalOpen(false)}
-                    className="flex-1 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    form="maintenanceForm"
-                    disabled={submittingAdjustment}
-                    className="flex-1 py-3.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
-                  >
-                    {submittingAdjustment && <Loader2 size={16} className="animate-spin" />}
-                    Enviar Solicitação
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          </>
-        </AnimatePresence>,
-        document.body,
-      )}
-
-      {/* Confirmation Modal */}
-      {isConfirmModalOpen && status?.nextAllowedType && createPortal(
-        <AnimatePresence>
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={closeConfirmModal}
-              className="fixed inset-0 z-[100] bg-background/60 backdrop-blur-sm"
-            />
-            <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="w-full max-w-md bg-background border border-border shadow-2xl rounded-2xl flex flex-col pointer-events-auto overflow-hidden"
-              >
-                <div className="p-5 border-b border-border flex items-center justify-between bg-secondary/10 shrink-0">
-                  <h2 className="text-lg font-heading font-bold text-foreground">Confirmar Marcação</h2>
-                  <button
-                    onClick={closeConfirmModal}
-                    className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div className="p-6 text-center flex flex-col items-center">
-                  <div className="text-4xl font-heading font-bold text-primary tabular-nums mb-1">
-                    {new Date().toLocaleTimeString('pt-BR')}
-                  </div>
-                  <p className="text-foreground/80 mb-6 text-sm font-medium">
-                    Marcando: <strong>{PUNCH_TYPE_LABELS[status.nextAllowedType]}</strong>
+            <div className="mt-6">
+              {statusLoading ? (
+                <span className="skeleton block h-12" role="status" aria-label="Carregando status" />
+              ) : statusError ? (
+                <Notice tone="danger">{statusError}</Notice>
+              ) : status?.nextAllowedType ? (
+                <>
+                  <Button onClick={openPunchModal} className="w-full h-12 text-[15px]">
+                    Registrar {PUNCH_TYPE_LABELS[status.nextAllowedType].toLowerCase()}
+                  </Button>
+                  <p className="mt-2 text-center text-[12px] text-muted">
+                    {status.requirePhoto && status.requireLocation ? 'Pede foto e localização'
+                      : status.requirePhoto ? 'Pede foto'
+                      : status.requireLocation ? 'Pede localização'
+                      : 'Registra o horário na hora do clique'}
                   </p>
+                </>
+              ) : null}
+            </div>
 
-                  {status.requirePhoto && (
-                    <div className="w-full max-w-[240px] aspect-[3/4] bg-secondary/20 rounded-2xl border-2 border-border overflow-hidden relative shadow-inner mb-4 flex items-center justify-center">
-                      {capturedPhotoPreview ? (
-                        <img src={capturedPhotoPreview} alt="Foto capturada" className="w-full h-full object-cover" />
-                      ) : (
-                        <>
-                          <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            muted
-                            className={`w-full h-full object-cover ${cameraError ? 'hidden' : 'block'}`}
-                          />
-                          {cameraError && (
-                            <div className="flex flex-col items-center text-red-500 p-4 text-center">
-                              <Camera size={32} className="mb-2 opacity-50" />
-                              <span className="text-xs font-bold uppercase tracking-wider">{cameraError}</span>
-                            </div>
-                          )}
-                          {!cameraError && !mediaStream && (
-                            <div className="flex flex-col items-center text-muted">
-                              <Loader2 size={32} className="mb-2 animate-spin" />
-                              <span className="text-xs font-medium">Acessando câmera...</span>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {status.requirePhoto && mediaStream && !capturedPhotoPreview && (
-                    <button
-                      type="button"
-                      onClick={capturePhoto}
-                      className="mb-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-secondary hover:bg-secondary/80 text-foreground text-sm font-medium transition-colors"
-                    >
-                      <Camera size={16} /> Capturar Foto
-                    </button>
-                  )}
-                  {status.requirePhoto && capturedPhotoPreview && (
-                    <button
-                      type="button"
-                      onClick={retakePhoto}
-                      className="mb-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-secondary hover:bg-secondary/80 text-foreground text-sm font-medium transition-colors"
-                    >
-                      <RotateCcw size={14} /> Tirar Outra
-                    </button>
-                  )}
-
-                  <div className="w-full flex flex-col gap-2 bg-secondary/10 rounded-xl p-3 border border-border/50">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="flex items-center gap-2 text-muted font-medium">
-                        <MapPin size={16} /> Localização:
-                      </span>
-                      {isGettingLocation ? (
-                        <span className="flex items-center gap-2 text-primary font-bold animate-pulse text-xs">
-                          <Loader2 size={12} className="animate-spin" /> Buscando...
+            <div className="mt-6 border-t border-border pt-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-[14px] font-semibold text-foreground">Marcações de hoje</h2>
+                <span className="text-[12px] text-muted tabular">{todayEvents.length}</span>
+              </div>
+              {todayLoading ? (
+                <div className="space-y-2" role="status" aria-label="Carregando marcações">
+                  <span className="skeleton block h-9" />
+                  <span className="skeleton block h-9" />
+                </div>
+              ) : todayEvents.length === 0 ? (
+                <p className="text-[14px] text-muted">Nenhuma marcação ainda.</p>
+              ) : (
+                <ol className="relative">
+                  {todayEvents.map((p, i) => (
+                    <li key={p.id} className="relative pl-6">
+                      {/* trilho da linha do tempo */}
+                      {i < todayEvents.length - 1 && <span className="absolute left-[5px] top-5 bottom-0 w-px bg-border" aria-hidden="true" />}
+                      <span className="absolute left-0 top-[13px] h-[11px] w-[11px] rounded-full border-2 border-foreground bg-panel" aria-hidden="true" />
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPunchDetail(p)}
+                        className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left hover:bg-secondary outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+                      >
+                        <span className="text-[14px] text-foreground">{PUNCH_TYPE_LABELS[p.type]}</span>
+                        <span className="flex items-center gap-2 text-muted">
+                          {p.photoDownloadUrl && <Camera size={13} strokeWidth={1.7} aria-label="com foto" />}
+                          {p.latitude != null && <MapPin size={13} strokeWidth={1.7} aria-label="com localização" />}
+                          <span className="text-[14px] font-medium text-foreground tabular">{formatTimeOnly(p.recordedAt)}</span>
                         </span>
-                      ) : locationError ? (
-                        <span className="text-red-500 font-bold text-xs">{locationError}</span>
-                      ) : (
-                        <span className="text-green-600 font-bold text-xs flex items-center gap-1">
-                          <CheckCircle2 size={14} /> Capturada
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {submitPunchError && (
-                    <div className="w-full mt-3 bg-red-500/10 border border-red-500/20 text-red-600 text-sm p-3 rounded-xl flex items-start gap-2 text-left">
-                      <AlertCircle size={14} className="shrink-0 mt-0.5" /> {submitPunchError}
-                    </div>
-                  )}
-
-                  {/* Canvas oculto usado só pra desenhar/capturar o frame do vídeo */}
-                  <canvas ref={canvasRef} className="hidden" />
-                </div>
-
-                <div className="p-5 border-t border-border bg-secondary/10 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={closeConfirmModal}
-                    disabled={submittingPunch}
-                    className="flex-1 py-3 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm disabled:opacity-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={submitPunch}
-                    disabled={!canSubmitPunch}
-                    className="flex-1 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
-                  >
-                    {submittingPunch ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
-                    {submittingPunch ? 'Enviando...' : 'Registrar'}
-                  </button>
-                </div>
-              </motion.div>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
-          </>
-        </AnimatePresence>,
-        document.body,
-      )}
+          </Panel>
 
-      {/* Punch Detail Modal */}
-      {selectedPunchDetail && createPortal(
-        <AnimatePresence>
+          {/* ---- Espelho ---- */}
+          <div className="lg:col-span-2 flex flex-col gap-4">
+            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-px overflow-hidden rounded-lg border border-border bg-border shadow-sm">
+              {[
+                ['Trabalhado', formatMinutes(totals.workedMinutes), 'text-foreground'],
+                ['Esperado', formatMinutes(totals.expectedMinutes), 'text-foreground'],
+                ['Horas extras', formatMinutes(extraFromBalance), extraFromBalance > 0 ? 'text-success' : 'text-foreground'],
+                ['Faltantes', formatMinutes(missingMinutes), missingMinutes > 0 ? 'text-danger' : 'text-foreground'],
+              ].map(([label, value, tone]) => (
+                <div key={label} className="bg-panel px-4 py-4">
+                  <dt className="text-[12px] text-muted">{label}</dt>
+                  <dd className={`mt-1 text-[22px] font-semibold tracking-tight tabular ${tone}`}>
+                    {monthLoading ? <span className="skeleton block h-7 w-20" /> : value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+
+            <Panel
+              padded={false}
+              title="Espelho de ponto"
+              action={
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" icon={ChevronLeft} onClick={() => goMonth(-1)} aria-label="Mês anterior" />
+                  <span className="min-w-[108px] text-center text-[14px] font-medium text-foreground tabular whitespace-nowrap" aria-live="polite">
+                    {MONTH_NAMES[viewMonth]} {viewYear}
+                  </span>
+                  <Button variant="ghost" size="sm" icon={ChevronRight} onClick={() => goMonth(1)} disabled={isCurrentMonth} aria-label="Próximo mês" />
+                </div>
+              }
+            >
+              <div className="pt-3">
+                {monthError && <Notice tone="danger" className="mx-5 mb-3">{monthError}</Notice>}
+                {monthLoading ? (
+                  <div className="divide-y divide-border" role="status" aria-label="Carregando espelho">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <div key={i} className="flex items-center gap-6 px-5 h-12">
+                        <span className="skeleton h-4 w-20" />
+                        <span className="skeleton h-4 w-40" />
+                        <span className="skeleton h-4 w-16 ml-auto" />
+                      </div>
+                    ))}
+                  </div>
+                ) : days.length === 0 ? (
+                  <p className="px-5 pb-6 text-[14px] text-muted">Nenhum dia para mostrar neste mês.</p>
+                ) : (
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>Dia</TH>
+                        <TH>Marcações</TH>
+                        <TH align="right" className="hidden sm:table-cell">Trabalhado</TH>
+                        <TH>Situação</TH>
+                        <TH align="right"><span className="sr-only">Ajuste</span></TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {days.map((day) => {
+                        const displayStatus = deriveDisplayStatus(day, todayStr);
+                        const pending = pendingRequestForDate(day.date);
+                        const resolved = pending ? undefined : lastResolvedRequestForDate(day.date);
+                        return (
+                          <TR key={day.date}>
+                            <TD className="whitespace-nowrap capitalize">{formatDateLabel(day.date)}</TD>
+                            <TD>
+                              {day.events.length > 0 ? (
+                                <span className="flex flex-wrap gap-x-2.5 gap-y-1 text-[13px] text-foreground tabular">
+                                  {day.events.map((p) => (
+                                    <span key={p.id} title={PUNCH_TYPE_LABELS[p.type]}>{formatTimeOnly(p.recordedAt)}</span>
+                                  ))}
+                                </span>
+                              ) : (
+                                <span className="text-muted">—</span>
+                              )}
+                            </TD>
+                            <TD align="right" className="tabular hidden sm:table-cell">{formatMinutes(day.workedMinutes)}</TD>
+                            <TD>
+                              <div className="flex flex-col items-start gap-1">
+                                <StatusBadge tone={STATUS_TONE[displayStatus]}>{displayStatus}</StatusBadge>
+                                {pending && <span className="text-[12px] text-warning whitespace-nowrap">Ajuste em análise</span>}
+                                {resolved && (
+                                  <span className={`text-[12px] ${resolved.status === 'approved' ? 'text-success' : 'text-danger'}`}>
+                                    Ajuste {resolved.status === 'approved' ? 'aprovado' : 'rejeitado'}
+                                    {resolved.reviewNote && (
+                                      <>
+                                        {' · '}
+                                        <button type="button" onClick={() => setViewingResolvedRequest(resolved)} className="text-muted underline underline-offset-2 hover:text-foreground">
+                                          ver motivo
+                                        </button>
+                                      </>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </TD>
+                            <TD align="right">
+                              {pending ? (
+                                <Button variant="ghost" size="sm" icon={Undo2} onClick={() => setConfirmCancelRequest(pending)} aria-label={`Cancelar ajuste de ${formatDateLabel(day.date)}`}>
+                                  <span className="hidden xl:inline">Cancelar ajuste</span>
+                                </Button>
+                              ) : (
+                                <Button variant="ghost" size="sm" icon={Wrench} onClick={() => openMaintenance(day)} aria-label={`Solicitar ajuste em ${formatDateLabel(day.date)}`}>
+                                  <span className="hidden xl:inline">Solicitar ajuste</span>
+                                </Button>
+                              )}
+                            </TD>
+                          </TR>
+                        );
+                      })}
+                    </TBody>
+                  </Table>
+                )}
+              </div>
+            </Panel>
+          </div>
+        </div>
+      </div>
+
+      {/* ---- Confirmar marcação ---- */}
+      <Modal
+        open={isConfirmModalOpen && !!status?.nextAllowedType}
+        onClose={closeConfirmModal}
+        size="sm"
+        dismissable={!submittingPunch}
+        title={status?.nextAllowedType ? `Registrar ${PUNCH_TYPE_LABELS[status.nextAllowedType].toLowerCase()}` : 'Registrar'}
+        description="Confira o horário e confirme."
+        footer={
           <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedPunchDetail(null)}
-              className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-            />
-            <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="w-full max-w-sm bg-background border border-border shadow-2xl rounded-2xl flex flex-col pointer-events-auto overflow-hidden"
-              >
-                <div className="p-5 border-b border-border flex items-center justify-between bg-secondary/10 shrink-0">
-                  <h2 className="text-lg font-heading font-bold text-foreground">Detalhes da Marcação</h2>
-                  <button
-                    onClick={() => setSelectedPunchDetail(null)}
-                    className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="font-bold text-lg text-primary">{PUNCH_TYPE_LABELS[selectedPunchDetail.type]}</span>
-                    <span className="font-mono font-bold text-foreground bg-secondary px-3 py-1 rounded-lg border border-border">
-                      {formatTimeOnly(selectedPunchDetail.recordedAt)}
-                    </span>
-                  </div>
-
-                  {selectedPunchDetail.validationStatus !== 'valid' && (
-                    <div className="mb-4 bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 text-xs p-3 rounded-xl flex items-start gap-2">
-                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-                      {selectedPunchDetail.validationStatus === 'pending_review' ? 'Marcação em análise pelo RH.' : 'Marcação corrigida administrativamente.'}
-                    </div>
-                  )}
-
-                  {selectedPunchDetail.photoDownloadUrl ? (
-                    <div className="w-full aspect-square bg-secondary/20 rounded-xl border-2 border-border overflow-hidden mb-4 relative flex items-center justify-center">
-                      {punchPhotoObjectUrl ? (
-                        <img src={punchPhotoObjectUrl} alt="Foto de Ponto" className="w-full h-full object-cover" />
-                      ) : punchPhotoLoading ? (
-                        <Loader2 size={24} className="animate-spin text-muted" />
-                      ) : (
-                        <span className="text-xs text-muted">Não foi possível carregar a foto.</span>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="w-full aspect-square bg-secondary/20 rounded-xl border border-dashed border-border mb-4 flex flex-col items-center justify-center text-muted">
-                      <ImageIcon size={32} className="opacity-50 mb-2" />
-                      <span className="text-xs">Sem foto</span>
-                    </div>
-                  )}
-
-                  <div className="space-y-3 bg-secondary/10 p-4 rounded-xl border border-border/50">
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                        <MapPin size={16} />
-                      </div>
-                      <div className="flex-1 overflow-hidden">
-                        <p className="font-semibold text-foreground text-xs uppercase tracking-wider mb-0.5">Localização</p>
-                        {selectedPunchDetail.latitude != null && selectedPunchDetail.longitude != null ? (
-                          <p className="text-muted font-mono text-[11px] truncate">
-                            {selectedPunchDetail.latitude.toFixed(6)}, {selectedPunchDetail.longitude.toFixed(6)}
-                          </p>
-                        ) : (
-                          <p className="text-muted text-xs italic">Não registrada</p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                        {selectedPunchDetail.source === 'mobile' ? <Smartphone size={16} /> : <Monitor size={16} />}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-foreground text-xs uppercase tracking-wider mb-0.5">Dispositivo</p>
-                        <p className="text-muted text-xs">
-                          {selectedPunchDetail.source === 'mobile' ? 'Mobile' : selectedPunchDetail.source === 'admin_manual' ? 'Correção administrativa' : 'Desktop'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            </div>
+            <Button variant="secondary" onClick={closeConfirmModal} disabled={submittingPunch}>Cancelar</Button>
+            <Button onClick={submitPunch} loading={submittingPunch} disabled={!canSubmitPunch}>Registrar</Button>
           </>
-        </AnimatePresence>,
-        document.body,
-      )}
+        }
+      >
+        <div className="flex flex-col items-center gap-4">
+          <RollingText text={timeText} className="text-[36px] leading-none font-semibold tracking-tight text-foreground" />
 
-      {/* Motivo da Análise Modal — texto do reviewNote pode ser bem longo (até 2000 caracteres),
-          quebrava o layout da tabela quando exibido inline na célula de status. */}
-      {viewingResolvedRequest && createPortal(
-        <AnimatePresence>
+          {status?.requirePhoto && (
+            <div className="w-full max-w-[240px]">
+              <div className="aspect-[3/4] w-full overflow-hidden rounded-md border border-border bg-secondary flex items-center justify-center">
+                {capturedPhotoPreview ? (
+                  <img src={capturedPhotoPreview} alt="Foto capturada" className="h-full w-full object-cover" />
+                ) : cameraError ? (
+                  <p className="px-4 text-center text-[13px] text-danger">{cameraError}</p>
+                ) : (
+                  <>
+                    <video ref={videoRef} autoPlay playsInline muted className={`h-full w-full object-cover ${mediaStream ? 'block' : 'hidden'}`} />
+                    {!mediaStream && <span className="skeleton h-full w-full" role="status" aria-label="Abrindo a câmera" />}
+                  </>
+                )}
+              </div>
+              <div className="mt-2 flex justify-center">
+                {capturedPhotoPreview ? (
+                  <Button variant="secondary" size="sm" icon={RotateCcw} onClick={retakePhoto}>Tirar outra</Button>
+                ) : (
+                  <Button variant="secondary" size="sm" icon={Camera} onClick={capturePhoto} disabled={!mediaStream}>Capturar foto</Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2.5 text-[13px]">
+            <span className="flex items-center gap-2 text-muted"><MapPin size={15} strokeWidth={1.7} aria-hidden="true" /> Localização</span>
+            {isGettingLocation ? (
+              <span className="text-muted">Buscando…</span>
+            ) : locationError ? (
+              <span className={status?.requireLocation ? 'text-danger' : 'text-muted'}>{locationError}</span>
+            ) : (
+              <span className="text-success">Capturada</span>
+            )}
+          </div>
+
+          {submitPunchError && <Notice tone="danger" className="w-full">{submitPunchError}</Notice>}
+          {/* Canvas oculto usado só pra desenhar/capturar o frame do vídeo */}
+          <canvas ref={canvasRef} className="hidden" />
+        </div>
+      </Modal>
+
+      {/* ---- Solicitar ajuste ---- */}
+      <Drawer
+        open={maintenanceModalOpen && !!adjustmentDay}
+        onClose={() => setMaintenanceModalOpen(false)}
+        title="Solicitar ajuste"
+        description={adjustmentDay ? `Dia ${adjustmentDay.date.split('-').reverse().join('/')} · analisado pelo seu superior` : undefined}
+        dismissable={!submittingAdjustment}
+        footer={
           <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setViewingResolvedRequest(null)}
-              className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-            />
-            <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="w-full max-w-sm bg-background border border-border shadow-2xl rounded-2xl flex flex-col pointer-events-auto overflow-hidden"
-              >
-                <div className="p-5 border-b border-border flex items-center justify-between bg-secondary/10 shrink-0">
-                  <h2 className="text-lg font-heading font-bold text-foreground">Motivo da Análise</h2>
-                  <button
-                    onClick={() => setViewingResolvedRequest(null)}
-                    className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="font-bold text-sm text-foreground">{ADJUSTMENT_TYPE_LABELS[viewingResolvedRequest.type]}</span>
-                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${viewingResolvedRequest.status === 'approved' ? 'bg-green-500/10 text-green-600 border-green-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>
-                      {viewingResolvedRequest.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted mb-4">Dia solicitado: {formatDateLabel(viewingResolvedRequest.targetDate)}</p>
-
-                  <div className="bg-secondary/10 p-4 rounded-xl border border-border/50">
-                    <p className="font-semibold text-foreground text-xs uppercase tracking-wider mb-2">Motivo</p>
-                    <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">{viewingResolvedRequest.reviewNote}</p>
-                    {viewingResolvedRequest.reviewedAt && (
-                      <p className="text-[11px] text-muted mt-3">
-                        Analisado em {new Date(viewingResolvedRequest.reviewedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            </div>
+            <Button variant="secondary" onClick={() => setMaintenanceModalOpen(false)} disabled={submittingAdjustment}>Cancelar</Button>
+            <Button type="submit" form="maintenance-form" loading={submittingAdjustment} disabled={!maintenanceReason.trim()}>Enviar solicitação</Button>
           </>
-        </AnimatePresence>,
-        document.body,
-      )}
+        }
+      >
+        {adjustmentDay && (
+          <form id="maintenance-form" onSubmit={submitMaintenance} className="space-y-4">
+            <Field label="O que precisa ser ajustado" htmlFor="adj-type" required>
+              <Select id="adj-type" value={adjustmentType} onChange={(e) => setAdjustmentType(e.target.value as AdjustmentRequestRecord['type'])}>
+                {(Object.keys(ADJUSTMENT_TYPE_LABELS) as AdjustmentRequestRecord['type'][]).map((t) => (
+                  <option key={t} value={t} disabled={t !== 'add_missing_punch' && adjustmentDay.events.length === 0}>{ADJUSTMENT_TYPE_LABELS[t]}</option>
+                ))}
+              </Select>
+            </Field>
+
+            {adjustmentType !== 'add_missing_punch' && (
+              <Field label={adjustmentType === 'remove_punch' ? 'Marcação a remover' : 'Marcação a corrigir'} htmlFor="adj-event" required>
+                <Select id="adj-event" required value={adjustmentRelatedEventId} onChange={(e) => setAdjustmentRelatedEventId(e.target.value)}>
+                  {adjustmentDay.events.map((ev) => (
+                    <option key={ev.id} value={ev.id}>{PUNCH_TYPE_LABELS[ev.type]} às {formatTimeOnly(ev.recordedAt)}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+
+            {adjustmentType !== 'remove_punch' && (
+              <div className="grid grid-cols-2 gap-4">
+                <Field label={adjustmentType === 'add_missing_punch' ? 'Tipo a adicionar' : 'Tipo correto'} htmlFor="adj-kind" required>
+                  <Select id="adj-kind" value={adjustmentRequestedEventType} onChange={(e) => setAdjustmentRequestedEventType(e.target.value as TimePunchType)}>
+                    {(Object.keys(PUNCH_TYPE_LABELS) as TimePunchType[]).map((t) => <option key={t} value={t}>{PUNCH_TYPE_LABELS[t]}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Horário" htmlFor="adj-time" required>
+                  <Input id="adj-time" type="time" required value={adjustmentRequestedTime} onChange={(e) => setAdjustmentRequestedTime(e.target.value)} />
+                </Field>
+              </div>
+            )}
+
+            <Field label="Explique o que aconteceu" htmlFor="adj-reason" required>
+              <Textarea id="adj-reason" required value={maintenanceReason} onChange={(e) => setMaintenanceReason(e.target.value)} placeholder="Ex.: esqueci de bater a saída, saí às 18h." />
+            </Field>
+
+            <Field label="Comprovante" htmlFor="adj-file" hint="Opcional. PDF, JPG ou PNG.">
+              <label htmlFor="adj-file" className="flex h-10 cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 text-[14px] text-muted hover:border-foreground/30 hover:text-foreground">
+                <Paperclip size={15} strokeWidth={1.7} aria-hidden="true" />
+                <span className="truncate">{maintenanceAttachment ? maintenanceAttachment.name : 'Escolher arquivo'}</span>
+              </label>
+              <input id="adj-file" type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only" onChange={(e) => setMaintenanceAttachment(e.target.files?.[0] ?? null)} />
+            </Field>
+
+            {adjustmentError && <Notice tone="danger">{adjustmentError}</Notice>}
+          </form>
+        )}
+      </Drawer>
+
+      {/* ---- Cancelar ajuste ---- */}
+      <ConfirmDialog
+        open={!!confirmCancelRequest}
+        onClose={() => setConfirmCancelRequest(null)}
+        onConfirm={() => confirmCancelRequest && handleCancelRequest(confirmCancelRequest.id)}
+        busy={!!cancellingRequestId}
+        title="Cancelar a solicitação de ajuste?"
+        description={confirmCancelRequest
+          ? `A solicitação do dia ${confirmCancelRequest.targetDate.split('-').reverse().join('/')} sai da análise do seu superior. Você pode pedir de novo depois.`
+          : undefined}
+        confirmLabel="Cancelar solicitação"
+        cancelLabel="Manter"
+        tone="danger"
+      />
+
+      {/* ---- Detalhe da marcação ---- */}
+      <Modal
+        open={!!selectedPunchDetail}
+        onClose={() => setSelectedPunchDetail(null)}
+        size="sm"
+        title={selectedPunchDetail ? `${PUNCH_TYPE_LABELS[selectedPunchDetail.type]} às ${formatTimeOnly(selectedPunchDetail.recordedAt)}` : 'Marcação'}
+      >
+        {selectedPunchDetail && (
+          <div className="space-y-4">
+            {selectedPunchDetail.validationStatus !== 'valid' && (
+              <Notice tone="warning">
+                {selectedPunchDetail.validationStatus === 'pending_review' ? 'Marcação em análise pelo RH.' : 'Marcação corrigida administrativamente.'}
+              </Notice>
+            )}
+            <div className="aspect-square w-full overflow-hidden rounded-md border border-border bg-secondary flex items-center justify-center">
+              {!selectedPunchDetail.photoDownloadUrl ? (
+                <span className="flex flex-col items-center gap-2 text-[13px] text-muted"><ImageIcon size={22} strokeWidth={1.5} aria-hidden="true" /> Sem foto</span>
+              ) : punchPhotoObjectUrl ? (
+                <img src={punchPhotoObjectUrl} alt="Foto da marcação" className="h-full w-full object-cover" />
+              ) : punchPhotoLoading ? (
+                <span className="skeleton h-full w-full" role="status" aria-label="Carregando foto" />
+              ) : (
+                <span className="text-[13px] text-muted">Não foi possível carregar a foto.</span>
+              )}
+            </div>
+            <dl className="grid grid-cols-1 gap-3 text-[14px]">
+              <div className="flex items-start gap-3">
+                <MapPin size={16} strokeWidth={1.7} className="mt-0.5 text-muted" aria-hidden="true" />
+                <div>
+                  <dt className="text-[12px] text-muted">Localização</dt>
+                  <dd className="text-foreground tabular">
+                    {selectedPunchDetail.latitude != null && selectedPunchDetail.longitude != null
+                      ? `${selectedPunchDetail.latitude.toFixed(6)}, ${selectedPunchDetail.longitude.toFixed(6)}`
+                      : 'Não registrada'}
+                  </dd>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                {selectedPunchDetail.source === 'mobile'
+                  ? <Smartphone size={16} strokeWidth={1.7} className="mt-0.5 text-muted" aria-hidden="true" />
+                  : <Monitor size={16} strokeWidth={1.7} className="mt-0.5 text-muted" aria-hidden="true" />}
+                <div>
+                  <dt className="text-[12px] text-muted">Origem</dt>
+                  <dd className="text-foreground">
+                    {selectedPunchDetail.source === 'mobile' ? 'Celular' : selectedPunchDetail.source === 'admin_manual' ? 'Correção administrativa' : 'Computador'}
+                  </dd>
+                </div>
+              </div>
+            </dl>
+          </div>
+        )}
+      </Modal>
+
+      {/* ---- Motivo da análise (reviewNote pode ter até 2000 caracteres) ---- */}
+      <Modal
+        open={!!viewingResolvedRequest}
+        onClose={() => setViewingResolvedRequest(null)}
+        size="sm"
+        title="Motivo da análise"
+        description={viewingResolvedRequest ? `${ADJUSTMENT_TYPE_LABELS[viewingResolvedRequest.type]} · ${formatDateLabel(viewingResolvedRequest.targetDate)}` : undefined}
+      >
+        {viewingResolvedRequest && (
+          <div className="space-y-3">
+            <StatusBadge tone={viewingResolvedRequest.status === 'approved' ? 'success' : 'danger'}>
+              {viewingResolvedRequest.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
+            </StatusBadge>
+            <p className="text-[14px] text-foreground whitespace-pre-wrap break-words">{viewingResolvedRequest.reviewNote}</p>
+            {viewingResolvedRequest.reviewedAt && (
+              <p className="text-[12px] text-muted">
+                Analisado em {new Date(viewingResolvedRequest.reviewedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

@@ -4,7 +4,7 @@ import type { HTMLAttributes, ReactNode, TdHTMLAttributes, ThHTMLAttributes } fr
 // finos, hover suave, rolagem horizontal no celular. Composição simples, cada tela monta as colunas.
 
 export const Table = ({ children, className = '', minWidth }: { children: ReactNode; className?: string; minWidth?: number }) => (
-  <div className={`w-full overflow-x-auto ${className}`}>
+  <div className={`relative w-full overflow-x-auto ${className}`}>
     <table className="w-full text-left border-collapse text-[14px]" style={minWidth ? { minWidth } : undefined}>
       {children}
     </table>
@@ -19,7 +19,7 @@ type Align = 'left' | 'right' | 'center';
 const alignClass = (align: Align = 'left') => (align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left');
 
 export const TH = ({ children, align, className = '', ...rest }: ThHTMLAttributes<HTMLTableCellElement> & { align?: Align }) => (
-  <th scope="col" className={`h-11 px-5 font-medium text-[13px] text-muted whitespace-nowrap ${alignClass(align)} ${className}`} {...rest}>
+  <th scope="col" className={`relative h-11 px-3 sm:px-5 font-medium text-[13px] text-muted whitespace-nowrap ${alignClass(align)} ${className}`} {...rest}>
     {children}
   </th>
 );
@@ -35,7 +35,7 @@ export const TR = ({ children, className = '', interactive = false, ...rest }: H
 );
 
 export const TD = ({ children, align, className = '', ...rest }: TdHTMLAttributes<HTMLTableCellElement> & { align?: Align }) => (
-  <td className={`px-5 py-3.5 text-foreground align-middle ${alignClass(align)} ${className}`} {...rest}>
+  <td className={`px-3 sm:px-5 py-3.5 text-foreground align-middle ${alignClass(align)} ${className}`} {...rest}>
     {children}
   </td>
 );
