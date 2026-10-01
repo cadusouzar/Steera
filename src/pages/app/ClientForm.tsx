@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Save, Loader2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
-import FormField from '../../components/FormField';
 import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
+import { Button, ButtonLink, Field, Input, Notice } from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
-import { inputBorderClass, isValidEmail, NAME_MAX_LENGTH } from '../../lib/validation';
+import { isValidEmail, NAME_MAX_LENGTH } from '../../lib/validation';
+
+// Novo cliente (kit, etapa 5 do polimento — 01/10/2026). Mesmo cabeçalho do cadastro de funcionário.
 
 const ClientForm = () => {
   const navigate = useNavigate();
@@ -21,26 +22,19 @@ const ClientForm = () => {
   const [email, setEmail] = useState('');
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
-  const [nameError, setNameError] = useState<string>();
-  const [emailError, setEmailError] = useState<string>();
+  const [errors, setErrors] = useState<{ name?: string; contact?: string; email?: string }>({});
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (isSaving) return;
 
-    const missingFields: string[] = [];
-    if (!name.trim()) missingFields.push('Nome Completo');
-    if (!contact.trim()) missingFields.push('Telefone/Contato');
-    if (missingFields.length > 0) {
-      setSaveError(`Preencha os campos obrigatórios: ${missingFields.join(', ')}.`);
-      return;
-    }
-
-    const nameErr = name.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined;
-    const emailErr = email && !isValidEmail(email) ? 'E-mail inválido' : undefined;
-    setNameError(nameErr);
-    setEmailError(emailErr);
-    if (nameErr || emailErr) {
+    const nextErrors: typeof errors = {};
+    if (!name.trim()) nextErrors.name = 'Informe o nome';
+    else if (name.length > NAME_MAX_LENGTH) nextErrors.name = `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres`;
+    if (!contact.trim()) nextErrors.contact = 'Informe um telefone ou contato';
+    if (email && !isValidEmail(email)) nextErrors.email = 'E-mail inválido';
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
       setSaveError('Corrija os campos destacados antes de salvar.');
       return;
     }
@@ -68,101 +62,58 @@ const ClientForm = () => {
   }
 
   return (
-    <div className="p-6 md:p-8">
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="max-w-4xl mx-auto"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <Link
-              to="/app/clientes"
-              className="w-10 h-10 rounded-full bg-secondary/50 flex items-center justify-center text-muted hover:text-foreground transition-colors"
-            >
-              <ArrowLeft size={18} />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-heading font-bold text-foreground">Novo Cliente</h1>
-              <p className="text-muted text-sm mt-1">Preencha os dados do cliente.</p>
-            </div>
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-3xl mx-auto">
+        <Link to="/app/clientes" className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-muted hover:text-foreground transition-colors">
+          <ArrowLeft size={15} strokeWidth={1.8} aria-hidden="true" /> Clientes
+        </Link>
+        <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-[26px] md:text-[28px] font-semibold tracking-tight text-foreground leading-tight">Novo cliente</h1>
+            <p className="mt-1 text-[14px] text-muted">Os campos com * são obrigatórios. Cobranças e assinaturas ficam na ficha, depois do cadastro.</p>
+          </div>
+          <div className="flex gap-2">
+            <ButtonLink to="/app/clientes" variant="secondary">Cancelar</ButtonLink>
+            <Button onClick={() => handleSave()} loading={isSaving}>Salvar cliente</Button>
+          </div>
+        </header>
+
+        {saveError && <Notice tone="danger" className="mb-4">{saveError}</Notice>}
+
+        <form onSubmit={handleSave} className="bg-panel border border-border rounded-lg shadow-sm p-5 md:p-6" noValidate>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Nome" htmlFor="c-name" required error={errors.name} className="md:col-span-2">
+              <Input
+                id="c-name" value={name} maxLength={NAME_MAX_LENGTH} invalid={!!errors.name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Nome da pessoa ou empresa"
+              />
+            </Field>
+            <Field label="Categoria ou observação" htmlFor="c-category" hint="Ex.: turma, plano, segmento.">
+              <Input id="c-category" value={category} onChange={(e) => setCategory(e.target.value)} />
+            </Field>
+            <Field label="Telefone ou contato" htmlFor="c-contact" required error={errors.contact}>
+              <Input
+                id="c-contact" value={contact} invalid={!!errors.contact}
+                onChange={(e) => setContact(e.target.value)}
+                placeholder="(00) 00000-0000"
+              />
+            </Field>
+            <Field label="E-mail" htmlFor="c-email" error={errors.email} className="md:col-span-2">
+              <Input
+                id="c-email" type="email" value={email} invalid={!!errors.email}
+                onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setErrors((prev) => ({ ...prev, email: email && !isValidEmail(email) ? 'E-mail inválido' : undefined }))}
+                placeholder="email@exemplo.com"
+              />
+            </Field>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/app/clientes')}
-              className="px-5 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary/50 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-              {isSaving ? 'Salvando...' : 'Cadastrar Cliente'}
-            </button>
-          </div>
-        </div>
-
-        {/* Error Banner */}
-        {saveError && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-            {saveError}
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="glass-panel rounded-[2rem] border border-border/50">
-          <form className="p-6 md:p-8 space-y-6" onSubmit={handleSave}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="md:col-span-2">
-                <FormField label="Nome Completo" required error={nameError}>
-                  <input
-                    type="text" value={name} maxLength={NAME_MAX_LENGTH}
-                    onChange={(e) => setName(e.target.value)}
-                    onBlur={() => setNameError(name.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
-                    className={`w-full bg-background border ${inputBorderClass(!!nameError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
-                    placeholder="Ex: Ana Laura / Rex"
-                  />
-                </FormField>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground/80 mb-2">Categoria / Observação</label>
-                <input
-                  type="text" value={category} onChange={(e) => setCategory(e.target.value)}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50"
-                  placeholder="Ex: Turma A / Pastor Alemão"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground/80 mb-2">Telefone/Contato</label>
-                <input
-                  type="text" value={contact} onChange={(e) => setContact(e.target.value)}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50"
-                  placeholder="(00) 00000-0000"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <FormField label="E-mail (Opcional)" error={emailError}>
-                  <input
-                    type="email" value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    onBlur={() => setEmailError(email && !isValidEmail(email) ? 'E-mail inválido' : undefined)}
-                    className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
-                    placeholder="email@exemplo.com"
-                  />
-                </FormField>
-              </div>
-            </div>
-
-            <CustomFieldsFormSection entity="client" values={customFields} onChange={setCustomFields} />
-          </form>
-        </div>
-      </motion.div>
+          <CustomFieldsFormSection entity="client" values={customFields} onChange={setCustomFields} />
+          {/* Enter dentro do formulário envia (o botão visível fica no cabeçalho). */}
+          <button type="submit" className="sr-only" tabIndex={-1} aria-hidden="true">Salvar</button>
+        </form>
+      </div>
     </div>
   );
 };

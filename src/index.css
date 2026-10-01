@@ -18,7 +18,7 @@
     --sidebar: 248 248 248;          /* #F8F8F8 — segunda camada neutra (sidebar) */
     --elevated: 255 255 255;         /* realce elevado sobre a sidebar */
     --success: 23 122 67;            /* #177A43 */
-    --warning: 180 83 9;             /* #B45309 */
+    --warning: 163 75 6;             /* #A34B06 — 5,1:1 sobre o fundo do selo (o #B45309 dava 4,4:1) */
     --danger: 192 38 45;             /* #C0262D */
     --danger-foreground: 255 255 255;
     color-scheme: light;
@@ -129,7 +129,7 @@
   }
   
   /* Remove height limits */
-  .max-h-\[90vh\] {
+  .max-h-\[90vh\], .max-h-\[92vh\] {
     max-height: none !important;
     height: auto !important;
     border: none !important;

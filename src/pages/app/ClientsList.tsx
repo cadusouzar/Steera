@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Filter, X, HeartHandshake, FileText, CheckCircle2, AlertCircle, Clock, Loader2, ChevronRight, Trash2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { ChevronRight, FileText, Plus, Search, Trash2, X } from 'lucide-react';
 import ClientFinanceDrawer from '../../components/ClientFinanceDrawer';
 import ClientReportModal from '../../components/ClientReportModal';
 import ClientTrashDrawer from '../../components/ClientTrashDrawer';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
+import {
+  Button, ButtonLink, EmptyState, Input, Notice, PageHeader, SegmentedControl, StatCard, StatValue,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, type LoadStatus, type StatusTone,
+} from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import type { ClientRecord, ClientTotals } from '../../lib/api';
@@ -14,18 +14,33 @@ import type { ClientRecord, ClientTotals } from '../../lib/api';
 export type { Receivable, Subscription } from '../../lib/api';
 import type { Receivable, Subscription } from '../../lib/api';
 
+// Clientes (redesenho monocromático, etapa 5 do polimento — 01/10/2026): tudo no kit de peças.
+// Mudanças aprovadas pelo usuário: totais da carteira no topo (somados dos totais que a tela já
+// carrega, sem rota nova); o "Filtros" sem ação virou o seletor de situação; a tabela caiu de 9
+// colunas (1400px mínimos) para 5 — "Total gerado"/"Total pendente" só repetiam os outros números.
+
 export interface Client extends ClientRecord {
   receivables: Receivable[];
   subscriptions: Subscription[];
 }
 
+export type ClientHealth = 'overdue' | 'open' | 'ok';
+type HealthFilter = 'all' | ClientHealth;
+
 const EMPTY_TOTALS: ClientTotals = { totalPaid: 0, totalPending: 0, totalOverdue: 0 };
 
 const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
+const healthOf = (t: ClientTotals): ClientHealth => (t.totalOverdue > 0 ? 'overdue' : t.totalPending > 0 ? 'open' : 'ok');
+
+const HEALTH: Record<ClientHealth, { label: string; tone: StatusTone }> = {
+  overdue: { label: 'Com atrasos', tone: 'danger' },
+  open: { label: 'Em aberto', tone: 'warning' },
+  ok: { label: 'Em dia', tone: 'success' },
+};
+
 const ClientsList = () => {
-  const navigate = useNavigate();
-  // Permissões por ação: "Novo Cliente" e restaurar da lixeira só com `clientes.gerenciar`;
+  // Permissões por ação: "Novo cliente" e restaurar da lixeira só com `clientes.gerenciar`;
   // lançamentos/assinaturas no drawer só são buscados com `financas.lancamentos.ver`.
   const can = useCan();
   const canManageClients = can('clientes.gerenciar');
@@ -37,28 +52,12 @@ const ClientsList = () => {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [healthFilter, setHealthFilter] = useState<HealthFilter>('all');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isDrawerLoading, setIsDrawerLoading] = useState(false);
 
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
-
-  useEscapeKey(() => {
-    setSelectedClient(null);
-    setIsReportModalOpen(false);
-    setIsTrashOpen(false);
-  });
-
-  useEffect(() => {
-    if (selectedClient || isReportModalOpen || isTrashOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [selectedClient, isReportModalOpen, isTrashOpen]);
 
   const loadClients = useCallback(async () => {
     setIsLoading(true);
@@ -67,6 +66,8 @@ const ClientsList = () => {
       const basics = await api.listClients();
       setClients(basics.map((c) => ({ ...c, receivables: [], subscriptions: [] })));
 
+      // Uma chamada por cliente (pendência registrada no vault: falta uma rota que devolva os
+      // totais da carteira de uma vez).
       const totalsEntries = await Promise.all(
         basics.map(async (c) => [c.id, await api.getClientTotals(c.id).catch(() => EMPTY_TOTALS)] as const),
       );
@@ -82,12 +83,28 @@ const ClientsList = () => {
     loadClients();
   }, [loadClients]);
 
+  const totalsOf = useCallback((id: string) => totalsByClientId[id] ?? EMPTY_TOTALS, [totalsByClientId]);
+
+  const portfolio = useMemo(() => clients.reduce(
+    (acc, c) => {
+      const t = totalsOf(c.id);
+      acc.paid += t.totalPaid;
+      acc.pending += t.totalPending;
+      acc.overdue += t.totalOverdue;
+      acc.byHealth[healthOf(t)] += 1;
+      return acc;
+    },
+    { paid: 0, pending: 0, overdue: 0, byHealth: { overdue: 0, open: 0, ok: 0 } as Record<ClientHealth, number> },
+  ), [clients, totalsOf]);
+
   const filteredClients = clients.filter(c => {
+    if (healthFilter !== 'all' && healthOf(totalsOf(c.id)) !== healthFilter) return false;
     if (!searchQuery) return true;
     const lowerQuery = searchQuery.toLowerCase().trim();
     return c.name.toLowerCase().includes(lowerQuery) ||
            c.category.toLowerCase().includes(lowerQuery) ||
-           c.contact.toLowerCase().includes(lowerQuery);
+           c.contact.toLowerCase().includes(lowerQuery) ||
+           (c.email ?? '').toLowerCase().includes(lowerQuery);
   });
 
   // Re-fetches one client's receivables/subscriptions/totals and syncs them
@@ -123,6 +140,20 @@ const ClientsList = () => {
     }
   };
 
+  // Envolve cada ação do drawer: limpa o erro anterior, executa, recarrega o cliente e devolve se deu certo
+  // (as janelas do drawer só fecham quando a ação passou).
+  const runAction = async (clientId: string, action: () => Promise<unknown>, fallback: string): Promise<boolean> => {
+    setActionError(null);
+    try {
+      await action();
+      await refreshClientDetails(clientId);
+      return true;
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : fallback);
+      return false;
+    }
+  };
+
   const handleUpdateClient = async (
     clientId: string,
     dto: Partial<{ name: string; category: string; contact: string; email: string | null; customFields: Record<string, unknown> }>,
@@ -139,7 +170,7 @@ const ClientsList = () => {
     }
   };
 
-  // "Excluir Cliente" na UI — exclusão lógica (inativa o cliente; não existe
+  // "Excluir cliente" na UI — exclusão lógica (inativa o cliente; não existe
   // hard delete no backend de propósito, pra preservar o histórico financeiro).
   // Só some da tabela local quando vai pra lixeira (includeInRevenueReport=
   // false) — quem é mantido no relatório continua na lista, só com o selo
@@ -166,7 +197,7 @@ const ClientsList = () => {
     }
   };
 
-  // "Reativar Cliente" — desfaz a inativação (só aparece pra cliente
+  // "Reativar cliente" — desfaz a inativação (só aparece pra cliente
   // inativo mantido no relatório; o grupo removido do relatório vai pra
   // lixeira e reativa por lá).
   const handleRestoreClient = async (clientId: string): Promise<boolean> => {
@@ -182,327 +213,211 @@ const ClientsList = () => {
     }
   };
 
-  const handleMarkAsPaid = async (_clientId: string, receivableId: string) => {
-    setActionError(null);
-    try {
-      await api.payReceivable(receivableId);
-      await refreshClientDetails(_clientId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível marcar o lançamento como pago.');
-    }
-  };
+  const statStatus: LoadStatus = isLoading ? 'loading' : loadError ? 'error' : 'ready';
+  const statError = <span className="text-[13px] text-muted">Indisponível</span>;
+  const money = (n: number) => formatCurrency(n);
 
-  const handleUnmarkAsPaid = async (_clientId: string, receivableId: string) => {
-    setActionError(null);
-    try {
-      await api.unpayReceivable(receivableId);
-      await refreshClientDetails(_clientId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível desfazer o pagamento.');
-    }
-  };
-
-  const handleDeleteReceivable = async (_clientId: string, receivableId: string) => {
-    setActionError(null);
-    try {
-      await api.deleteReceivable(receivableId);
-      await refreshClientDetails(_clientId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível excluir o lançamento.');
-    }
-  };
-
-  const handleDeleteSubscription = async (clientId: string, subId: string) => {
-    setActionError(null);
-    try {
-      await api.deleteSubscription(subId);
-      await refreshClientDetails(clientId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível excluir a assinatura.');
-    }
-  };
-
-  const handleAddReceivable = async (clientId: string, newRec: Omit<Receivable, 'id'>) => {
-    setActionError(null);
-    try {
-      await api.createReceivable(clientId, {
-        description: newRec.description,
-        amount: newRec.amount,
-        dueDate: newRec.dueDate,
-      });
-      await refreshClientDetails(clientId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível lançar a cobrança.');
-    }
-  };
-
-  const handleAddSubscription = async (clientId: string, sub: Omit<Subscription, 'id'>) => {
-    setActionError(null);
-    try {
-      await api.createSubscription(clientId, {
-        description: sub.description,
-        amount: sub.amount,
-        dueDay: sub.dueDay,
-      });
-      await refreshClientDetails(clientId);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível criar a assinatura.');
-    }
-  };
-
-  const handleGenerateSubscriptionCharge = async (clientId: string, subId: string): Promise<boolean> => {
-    setActionError(null);
-    try {
-      await api.generateCharge(subId);
-      await refreshClientDetails(clientId);
-      return true;
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Não foi possível gerar a fatura do mês.');
-      return false;
-    }
-  };
-
-  const getHealthBadge = (totals: ClientTotals) => {
-    if (totals.totalOverdue > 0) return { label: 'Com Atrasos', color: 'text-red-500', bg: 'bg-red-500/10' };
-    if (totals.totalPending > 0) return { label: 'Em Aberto', color: 'text-orange-500', bg: 'bg-orange-500/10' };
-    return { label: 'Em Dia', color: 'text-green-500', bg: 'bg-green-500/10' };
-  };
+  const emptyState = clients.length === 0 ? (
+    <EmptyState
+      title="Nenhum cliente ainda"
+      description="Cadastre o primeiro cliente para lançar cobranças e assinaturas."
+      action={canManageClients ? <ButtonLink to="/app/clientes/novo" icon={Plus}>Novo cliente</ButtonLink> : undefined}
+    />
+  ) : (
+    <EmptyState
+      title="Nenhum cliente encontrado"
+      description={searchQuery ? `Nada corresponde a “${searchQuery}” neste filtro.` : 'Nenhum cliente nesta situação.'}
+      action={<Button variant="secondary" onClick={() => { setSearchQuery(''); setHealthFilter('all'); }}>Limpar busca e filtro</Button>}
+    />
+  );
 
   return (
-    <div className="p-8 h-full flex flex-col">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 shrink-0">
-        <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">Clientes & Recebimentos</h1>
-          <p className="text-muted mt-1">Gerencie mensalidades, serviços e recebimentos em aberto.</p>
-        </div>
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-6xl mx-auto">
+        <PageHeader
+          title="Clientes"
+          description="Cadastros, cobranças e assinaturas de cada cliente."
+          actions={
+            <>
+              {canViewFinance && <Button variant="secondary" icon={FileText} onClick={() => setIsReportModalOpen(true)}>Relatórios</Button>}
+              <Button variant="ghost" icon={Trash2} onClick={() => setIsTrashOpen(true)}>Lixeira</Button>
+              {canManageClients && <ButtonLink to="/app/clientes/novo" icon={Plus}>Novo cliente</ButtonLink>}
+            </>
+          }
+        />
 
-        <div className="flex items-center gap-3">
-          {canViewFinance && (
-          <button
-            onClick={() => setIsReportModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 text-foreground font-medium hover:bg-secondary transition-colors shadow-sm text-sm"
-          >
-            <FileText size={16} />
-            Relatórios
-          </button>
-          )}
-          <button
-            onClick={() => setIsTrashOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 text-foreground font-medium hover:bg-secondary transition-colors shadow-sm text-sm"
-          >
-            <Trash2 size={16} />
-            Lixeira
-          </button>
-          {canManageClients && (
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => navigate('/app/clientes/novo')}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 text-sm"
-          >
-            <Plus size={18} />
-            Novo Cliente
-          </motion.button>
-          )}
-        </div>
-      </div>
-
-      {actionError && (
-        <div className="mb-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 text-sm font-medium flex items-center justify-between shrink-0">
-          <span>{actionError}</span>
-          <button onClick={() => setActionError(null)} className="text-red-600 hover:text-red-700">
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
-      <div className="bg-panel border border-border rounded-2xl shadow-sm flex flex-col flex-1 overflow-hidden">
-        {/* Toolbar */}
-        <div className="p-4 border-b border-border flex flex-col sm:flex-row gap-4 justify-between items-center bg-secondary/30 shrink-0">
-          <div className="relative w-full sm:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
-            <input
-              type="text"
-              placeholder="Buscar por nome, contato ou categoria..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-background border border-border rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground shadow-sm transition-all"
+        {canViewFinance && (
+          <div className="mb-6 grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+            <StatCard label="Recebido" status={statStatus} error={statError} value={<StatValue value={portfolio.paid} format={money} compact />} footer="Pagamentos confirmados" />
+            <StatCard label="A receber" status={statStatus} error={statError} value={<StatValue value={portfolio.pending} format={money} compact />} footer="Dentro do prazo" />
+            <StatCard
+              label="Em atraso"
+              status={statStatus}
+              error={statError}
+              value={<StatValue value={portfolio.overdue} format={money} compact />}
+              footer={portfolio.byHealth.overdue === 0 ? 'Nenhum cliente atrasado' : `${portfolio.byHealth.overdue} cliente${portfolio.byHealth.overdue === 1 ? '' : 's'} com atraso`}
+            />
+            <StatCard
+              label="Clientes"
+              status={statStatus}
+              error={statError}
+              value={<StatValue value={clients.length} />}
+              footer={`${portfolio.byHealth.ok} em dia`}
             />
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border/80 text-foreground bg-background hover:bg-secondary transition-colors text-sm font-medium shadow-sm">
-              <Filter size={16} />
-              Filtros
-            </button>
+        )}
+
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="relative flex-1">
+            <Search size={16} strokeWidth={1.8} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" aria-hidden="true" />
+            <Input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar por nome, contato, e-mail ou categoria"
+              aria-label="Buscar clientes"
+              className="pl-9 pr-9"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 inline-flex items-center justify-center rounded text-muted hover:text-foreground hover:bg-secondary"
+                aria-label="Limpar busca"
+              >
+                <X size={15} strokeWidth={1.8} />
+              </button>
+            )}
           </div>
+          {canViewFinance && (
+            <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+              <SegmentedControl<HealthFilter>
+                label="Filtrar por situação financeira"
+                value={healthFilter}
+                onChange={setHealthFilter}
+                options={[
+                  { value: 'all', label: 'Todos' },
+                  { value: 'overdue', label: `Com atrasos ${portfolio.byHealth.overdue}` },
+                  { value: 'open', label: `Em aberto ${portfolio.byHealth.open}` },
+                  { value: 'ok', label: `Em dia ${portfolio.byHealth.ok}` },
+                ]}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Table Content */}
-        <div className="flex-1 overflow-hidden relative">
-          <div className="absolute inset-0 overflow-auto custom-scrollbar">
-            <div className="overflow-x-auto min-h-full">
-              <table className="w-full text-left border-collapse min-w-[1400px]">
-                <thead>
-                  <tr className="border-b-2 border-border/60 bg-secondary/10 sticky top-0 z-10 backdrop-blur-md">
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Nome</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Categoria / Obs</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Contato</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Gerado</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Pago</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Pendente</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Total Faltante</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Saúde Financeira</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {isLoading && (
-                    <tr>
-                      <td colSpan={9} className="px-8 py-16 text-center text-muted">
-                        <Loader2 size={28} className="mx-auto animate-spin mb-3 opacity-60" />
-                        <p className="text-sm font-medium">Carregando clientes...</p>
-                      </td>
-                    </tr>
-                  )}
+        {loadError && (
+          <Notice tone="danger" className="mb-4">
+            {loadError}{' '}
+            <button type="button" onClick={() => loadClients()} className="underline underline-offset-4 font-medium">Tentar de novo</button>
+          </Notice>
+        )}
 
-                  {!isLoading && loadError && (
-                    <tr>
-                      <td colSpan={9} className="px-8 py-16 text-center text-red-500">
-                        <AlertCircle size={32} className="mx-auto mb-3" />
-                        <p className="text-sm font-bold">{loadError}</p>
-                        <button
-                          onClick={() => loadClients()}
-                          className="mt-3 text-xs font-bold underline hover:text-red-600"
-                        >
-                          Tentar novamente
-                        </button>
-                      </td>
-                    </tr>
-                  )}
-
-                  {!isLoading && !loadError && (
-                    <AnimatePresence>
-                      {filteredClients.map((client, index) => {
-                        const totals = totalsByClientId[client.id] ?? EMPTY_TOTALS;
-                        const summary = getHealthBadge(totals);
-                        const totalGenerated = totals.totalPaid + totals.totalPending + totals.totalOverdue;
-                        const totalOutstanding = totals.totalPending + totals.totalOverdue;
-                        return (
-                          <motion.tr
-                            key={client.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            transition={{ duration: 0.2, delay: index * 0.03 }}
-                            onClick={() => handleSelectClient(client)}
-                            className="hover:bg-secondary/40 transition-colors group cursor-pointer"
-                          >
-                            <td className="px-8 py-5">
-                              <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-bold text-sm shadow-sm shrink-0 group-hover:scale-105 transition-transform">
-                                  {client.name.charAt(0)}
-                                </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-base font-heading font-bold text-foreground group-hover:text-primary transition-colors">
-                                      {client.name}
-                                    </span>
-                                    {client.status === 'inactive' && (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-secondary text-muted border border-border/60">
-                                        Inativo
-                                      </span>
-                                    )}
-                                  </div>
-                                  {client.email && <span className="text-xs text-muted font-medium">{client.email}</span>}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-8 py-5 text-muted font-medium">{client.category || '-'}</td>
-                            <td className="px-8 py-5 text-muted font-medium">{client.contact}</td>
-                            <td className="px-8 py-5 text-right font-medium text-foreground">{formatCurrency(totalGenerated)}</td>
-                            <td className="px-8 py-5 text-right font-medium text-green-600 dark:text-green-400">{formatCurrency(totals.totalPaid)}</td>
-                            <td className="px-8 py-5 text-right font-medium text-orange-500">{formatCurrency(totals.totalPending)}</td>
-                            <td className="px-8 py-5 text-right font-medium text-red-500">{formatCurrency(totalOutstanding)}</td>
-                            <td className="px-8 py-5 text-right">
-                              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border shadow-sm ${summary.bg} ${summary.color} border-${summary.color.split('-')[1]}-500/20`}>
-                                {summary.label === 'Em Dia' && <CheckCircle2 size={14} />}
-                                {summary.label === 'Com Atrasos' && <AlertCircle size={14} />}
-                                {summary.label === 'Em Aberto' && <Clock size={14} />}
-                                {summary.label}
-                              </span>
-                            </td>
-                            <td className="px-8 py-5 text-right">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleSelectClient(client); }}
-                                className="inline-flex items-center gap-1 text-sm font-medium text-muted group-hover:text-primary transition-colors hover:bg-secondary px-4 py-2 rounded-xl"
-                              >
-                                Detalhes
-                                <ChevronRight size={16} />
-                              </button>
-                            </td>
-                          </motion.tr>
-                        );
-                      })}
-                    </AnimatePresence>
-                  )}
-
-                  {!isLoading && !loadError && filteredClients.length === 0 && (
-                    <tr>
-                      <td colSpan={9} className="px-8 py-16 text-center text-muted">
-                        <div className="flex flex-col items-center justify-center">
-                          <HeartHandshake size={48} className="opacity-20 mb-4" />
-                          <p className="text-lg font-medium">Nenhum cliente encontrado.</p>
-                          <p className="text-sm mt-1">Tente ajustar seus filtros de busca.</p>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+        <div className="bg-panel border border-border rounded-lg shadow-sm overflow-hidden">
+          {isLoading ? (
+            <div className="divide-y divide-border" aria-label="Carregando clientes" role="status">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-center gap-6 px-5 h-14">
+                  <span className="skeleton h-4 w-44" />
+                  <span className="skeleton h-4 w-24 hidden sm:block" />
+                  <span className="skeleton h-4 w-20 ml-auto" />
+                  <span className="skeleton h-4 w-16" />
+                </div>
+              ))}
             </div>
-          </div>
+          ) : loadError ? null : filteredClients.length > 0 ? (
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Cliente</TH>
+                  <TH className="hidden md:table-cell">Contato</TH>
+                  {canViewFinance && <TH align="right" className="hidden sm:table-cell">Pago</TH>}
+                  {canViewFinance && <TH align="right">Em aberto</TH>}
+                  {canViewFinance && <TH className="hidden sm:table-cell">Situação</TH>}
+                  <TH align="right"><span className="sr-only">Abrir</span></TH>
+                </tr>
+              </THead>
+              <TBody>
+                {filteredClients.map((client) => {
+                  const totals = totalsOf(client.id);
+                  const health = HEALTH[healthOf(totals)];
+                  const outstanding = totals.totalPending + totals.totalOverdue;
+                  return (
+                    <TR key={client.id} interactive onClick={() => handleSelectClient(client)}>
+                      <TD>
+                        <div className="max-w-[165px] sm:max-w-none">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {/* Botão real com o nome: dá acesso por teclado à ficha (a linha inteira é só atalho de mouse). */}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleSelectClient(client); }}
+                            className="font-medium text-foreground text-left hover:underline underline-offset-4 outline-none focus-visible:underline truncate"
+                          >
+                            {client.name}
+                          </button>
+                          {client.status === 'inactive' && <StatusBadge tone="neutral">Inativo</StatusBadge>}
+                        </div>
+                        <span className="block text-[12px] text-muted truncate">
+                          {[client.category, client.email].filter(Boolean).join(' · ') || 'Sem categoria'}
+                        </span>
+                        </div>
+                      </TD>
+                      <TD className="text-muted hidden md:table-cell whitespace-nowrap">{client.contact}</TD>
+                      {canViewFinance && <TD align="right" className="tabular hidden sm:table-cell whitespace-nowrap">{formatCurrency(totals.totalPaid)}</TD>}
+                      {canViewFinance && (
+                        <TD align="right">
+                          <span className="tabular whitespace-nowrap">{formatCurrency(outstanding)}</span>
+                          {totals.totalOverdue > 0 && (
+                            <span className="block text-[12px] text-danger tabular"><span className="whitespace-nowrap">{formatCurrency(totals.totalOverdue)}</span> em atraso</span>
+                          )}
+                        </TD>
+                      )}
+                      {canViewFinance && (
+                        <TD className="hidden sm:table-cell">
+                          <StatusBadge tone={health.tone}>{health.label}</StatusBadge>
+                        </TD>
+                      )}
+                      <TD align="right" className="w-8">
+                        <ChevronRight size={16} strokeWidth={1.6} className="text-muted inline" aria-hidden="true" />
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          ) : (
+            emptyState
+          )}
         </div>
       </div>
 
-      {/* Finance Drawer Component */}
-      {selectedClient && createPortal(
-        <ClientFinanceDrawer
-          client={selectedClient}
-          onClose={() => setSelectedClient(null)}
-          onMarkAsPaid={handleMarkAsPaid}
-          onUnmarkAsPaid={handleUnmarkAsPaid}
-          onDeleteReceivable={handleDeleteReceivable}
-          onAddReceivable={handleAddReceivable}
-          onAddSubscription={handleAddSubscription}
-          onDeleteSubscription={handleDeleteSubscription}
-          onGenerateCharge={handleGenerateSubscriptionCharge}
-          isLoading={isDrawerLoading}
-          actionError={actionError}
-          onDismissError={() => setActionError(null)}
-          onUpdateClient={handleUpdateClient}
-          onDeactivateClient={handleDeactivateClient}
-          onRestoreClient={handleRestoreClient}
-        />,
-        document.body
-      )}
+      <ClientFinanceDrawer
+        client={selectedClient}
+        totals={selectedClient ? totalsOf(selectedClient.id) : EMPTY_TOTALS}
+        onClose={() => setSelectedClient(null)}
+        isLoading={isDrawerLoading}
+        actionError={actionError}
+        onDismissError={() => setActionError(null)}
+        onMarkAsPaid={(clientId, id) => runAction(clientId, () => api.payReceivable(id), 'Não foi possível marcar o lançamento como pago.')}
+        onUnmarkAsPaid={(clientId, id) => runAction(clientId, () => api.unpayReceivable(id), 'Não foi possível desfazer o pagamento.')}
+        onDeleteReceivable={(clientId, id) => runAction(clientId, () => api.deleteReceivable(id), 'Não foi possível excluir o lançamento.')}
+        onDeleteSubscription={(clientId, id) => runAction(clientId, () => api.deleteSubscription(id), 'Não foi possível cancelar a assinatura.')}
+        onAddReceivable={(clientId, rec) => runAction(clientId, () => api.createReceivable(clientId, rec), 'Não foi possível lançar a cobrança.')}
+        onAddSubscription={(clientId, sub) => runAction(clientId, () => api.createSubscription(clientId, sub), 'Não foi possível criar a assinatura.')}
+        onGenerateCharge={(clientId, id) => runAction(clientId, () => api.generateCharge(id), 'Não foi possível gerar a fatura do mês.')}
+        onUpdateClient={handleUpdateClient}
+        onDeactivateClient={handleDeactivateClient}
+        onRestoreClient={handleRestoreClient}
+      />
 
-      {/* Report Modal */}
-      {isReportModalOpen && createPortal(
-        <ClientReportModal
-          onClose={() => setIsReportModalOpen(false)}
-        />,
-        document.body
-      )}
+      <ClientReportModal open={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} />
 
-      {/* Client Trash Drawer */}
-      {isTrashOpen && createPortal(
-        <ClientTrashDrawer
-          onClose={() => setIsTrashOpen(false)}
-          onRestored={loadClients}
-          canRestore={canManageClients}
-        />,
-        document.body
-      )}
+      <ClientTrashDrawer
+        open={isTrashOpen}
+        onClose={() => setIsTrashOpen(false)}
+        onRestored={loadClients}
+        canRestore={canManageClients}
+      />
     </div>
   );
 };

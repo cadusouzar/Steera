@@ -45,9 +45,14 @@ export const PanelLink = ({ to, children }: { to: string; children: ReactNode })
 
 export type LoadStatus = 'loading' | 'ready' | 'error';
 
-export const StatValue = ({ value, format, suffix }: { value: number; format?: (n: number) => string; suffix?: ReactNode }) => (
-  <span className="flex items-baseline gap-1.5">
-    <AnimatedNumber value={value} format={format} className="text-[34px] leading-none font-semibold tracking-tight text-foreground" />
+// `compact` serve para valores longos (dinheiro), que no tamanho cheio estouram o card.
+export const StatValue = ({ value, format, suffix, compact = false }: { value: number; format?: (n: number) => string; suffix?: ReactNode; compact?: boolean }) => (
+  <span className="flex items-baseline gap-1.5 min-w-0">
+    <AnimatedNumber
+      value={value}
+      format={format}
+      className={`${compact ? 'text-[19px] sm:text-[22px] xl:text-[26px]' : 'text-[34px]'} leading-none font-semibold tracking-tight text-foreground whitespace-nowrap`}
+    />
     {suffix && <span className="text-[15px] text-muted tabular">{suffix}</span>}
   </span>
 );
