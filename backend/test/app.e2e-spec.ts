@@ -265,6 +265,22 @@ describe('QuickFlow backend (e2e)', () => {
     }
   });
 
+  it('restoring from the trash can put the client back into reports (the trash UI asks), and rejects a non-boolean choice', async () => {
+    const server = app.getHttpServer();
+    const client = (
+      await request(server).post('/clients').send({ name: 'Cliente E2E Restaura', contact: '(11) 96666-6666' }).set('Authorization', authHeader).expect(201)
+    ).body;
+    try {
+      await request(server).patch(`/clients/${client.id}/deactivate`).send({ includeInRevenueReport: false }).set('Authorization', authHeader).expect(200);
+      await request(server).patch(`/clients/${client.id}/restore`).send({ includeInRevenueReport: 'sim' }).set('Authorization', authHeader).expect(400);
+      const restored = await request(server).patch(`/clients/${client.id}/restore`).send({ includeInRevenueReport: true }).set('Authorization', authHeader).expect(200);
+      expect(restored.body.status).toBe('ACTIVE');
+      expect(restored.body.includeInRevenueReport).toBe(true);
+    } finally {
+      await runWithTenant(e2eCompanyId, () => prisma.client.delete({ where: { id: client.id } }));
+    }
+  });
+
   it('client trash: deactivating with includeInRevenueReport=false enters the trash, can be restored, and purges for real after 30 days — while includeInRevenueReport=true never gets purged', async () => {
     const server = app.getHttpServer();
 

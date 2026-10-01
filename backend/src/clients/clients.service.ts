@@ -9,6 +9,7 @@ import { ClientTrashService } from './client-trash.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { DeactivateClientDto } from './dto/deactivate-client.dto';
 import { QueryClientsDto } from './dto/query-clients.dto';
+import { RestoreClientDto } from './dto/restore-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 
 @Injectable()
@@ -155,14 +156,19 @@ export class ClientsService {
     return updatedClient;
   }
 
-  async restore(id: string) {
+  async restore(id: string, dto: RestoreClientDto = {}) {
     const client = await this.assertExists(id);
     if (client.status === ClientStatus.ACTIVE) {
       throw new ConflictException(`Cliente ${id} já está ativo`);
     }
     return this.prisma.client.update({
       where: { id },
-      data: { status: ClientStatus.ACTIVE, deactivatedAt: null },
+      data: {
+        status: ClientStatus.ACTIVE,
+        deactivatedAt: null,
+        // Só muda a flag quando quem restaura decidiu (a lixeira sempre pergunta, 01/10/2026).
+        ...(dto.includeInRevenueReport !== undefined ? { includeInRevenueReport: dto.includeInRevenueReport } : {}),
+      },
     });
   }
 

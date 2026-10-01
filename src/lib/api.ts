@@ -267,8 +267,13 @@ export async function listTrashedClients(): Promise<ClientRecord[]> {
   return items.map(mapClient);
 }
 
-export async function restoreClient(id: string): Promise<ClientRecord> {
-  const c = await request<ApiClient>(`/clients/${id}/restore`, { method: 'PATCH' });
+// `includeInRevenueReport` só é enviado quando quem restaura decidiu (a lixeira sempre pergunta);
+// sem ele, a flag fica como estava.
+export async function restoreClient(id: string, includeInRevenueReport?: boolean): Promise<ClientRecord> {
+  const c = await request<ApiClient>(`/clients/${id}/restore`, {
+    method: 'PATCH',
+    ...(includeInRevenueReport !== undefined ? { body: JSON.stringify({ includeInRevenueReport }) } : {}),
+  });
   return mapClient(c);
 }
 

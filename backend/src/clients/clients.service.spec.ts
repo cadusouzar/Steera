@@ -285,6 +285,18 @@ describe('ClientsService', () => {
       });
       expect(result).toEqual({ id: '1', status: 'ACTIVE', includeInRevenueReport: false, deactivatedAt: null });
     });
+
+    it('sets includeInRevenueReport when the caller decides it on restore (trash → back into reports)', async () => {
+      prisma.client.findFirst.mockResolvedValue({ id: '1', status: 'INACTIVE', includeInRevenueReport: false });
+      prisma.client.update.mockResolvedValue({ id: '1', status: 'ACTIVE', includeInRevenueReport: true, deactivatedAt: null });
+
+      await service.restore('1', { includeInRevenueReport: true });
+
+      expect(prisma.client.update).toHaveBeenCalledWith({
+        where: { id: '1' },
+        data: { status: 'ACTIVE', deactivatedAt: null, includeInRevenueReport: true },
+      });
+    });
   });
 
   describe('findTrash', () => {

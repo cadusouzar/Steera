@@ -7,6 +7,7 @@ import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { DeactivateClientDto } from './dto/deactivate-client.dto';
 import { QueryClientsDto } from './dto/query-clients.dto';
+import { RestoreClientDto } from './dto/restore-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 
 @UseGuards(ModulesGuard, PermissionsGuard)
@@ -53,7 +54,7 @@ export class ClientsController {
 
   @RequirePermission('clientes.gerenciar')
   @Patch(':id/restore')
-  restore(@Param('id') id: string) {
-    return this.clientsService.restore(id);
+  restore(@Param('id') id: string, @Body() dto: RestoreClientDto) {
+    return this.clientsService.restore(id, dto);
   }
 }

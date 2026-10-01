@@ -278,10 +278,10 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
       {isInactive && (
         <Notice className="mb-5">Cliente inativo. Os valores dele continuam contando nos relatórios.</Notice>
       )}
-      {/* Restaurar da lixeira reativa o cliente sem devolvê-lo aos relatórios (decisão da spec da lixeira:
-          a flag só volta a ser perguntada numa próxima desativação) — a ficha precisa dizer isso. */}
+      {/* Quem restaura da lixeira escolhe se o cliente volta aos relatórios; se escolheu "não" (ou foi
+          restaurado antes dessa pergunta existir), a ficha precisa dizer que ele está fora. */}
       {!isInactive && !client.includeInRevenueReport && (
-        <Notice tone="warning" className="mb-5">Este cliente não conta nos relatórios financeiros (ele foi restaurado da lixeira).</Notice>
+        <Notice tone="warning" className="mb-5">Este cliente não conta nos relatórios financeiros (foi restaurado da lixeira sem voltar a eles).</Notice>
       )}
 
       <dl className="mb-5 grid grid-cols-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] gap-x-4 gap-y-3 rounded-md border border-border px-4 py-3">

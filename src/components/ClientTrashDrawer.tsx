@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { listTrashedClients, restoreClient } from '../lib/api';
 import type { ClientRecord } from '../lib/api';
-import { Button, Drawer, EmptyState, Notice } from './ui';
+import { Button, Drawer, EmptyState, Modal, Notice } from './ui';
 
 // Lixeira de clientes (kit, etapa 5 do polimento — 01/10/2026). Recarrega a lista a cada abertura.
+// "Restaurar" pergunta se o cliente volta a contar nos relatórios (pedido do usuário, 01/10/2026) — antes,
+// restaurar reativava o cliente e o deixava fora dos relatórios sem avisar.
 
 interface ClientTrashDrawerProps {
   open: boolean;
@@ -31,6 +33,8 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ open, onClose, on
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<ClientRecord | null>(null);
+  const [restoreChoice, setRestoreChoice] = useState<'report' | 'only' | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -44,18 +48,22 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ open, onClose, on
     return () => { cancelled = true; };
   }, [open]);
 
-  const handleRestore = async (id: string) => {
-    if (restoringId) return; // evita duplo clique disparando duas restaurações
+  const handleRestore = async (includeInRevenueReport: boolean) => {
+    if (!restoreTarget || restoringId) return; // evita duplo clique disparando duas restaurações
+    const id = restoreTarget.id;
     setRestoringId(id);
+    setRestoreChoice(includeInRevenueReport ? 'report' : 'only');
     setError(null);
     try {
-      await restoreClient(id);
+      await restoreClient(id, includeInRevenueReport);
       setClients((prev) => prev.filter((c) => c.id !== id));
       onRestored();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível restaurar o cliente.');
     } finally {
       setRestoringId(null);
+      setRestoreChoice(null);
+      setRestoreTarget(null);
     }
   };
 
@@ -89,9 +97,8 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ open, onClose, on
                 {canRestore && (
                   <Button
                     variant="secondary" size="sm" icon={RotateCcw}
-                    onClick={() => handleRestore(client.id)}
-                    loading={restoringId === client.id}
-                    disabled={!!restoringId && restoringId !== client.id}
+                    onClick={() => setRestoreTarget(client)}
+                    disabled={!!restoringId}
                   >
                     Restaurar
                   </Button>
@@ -101,6 +108,32 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ open, onClose, on
           })}
         </ul>
       )}
+
+      <Modal
+        open={!!restoreTarget}
+        onClose={() => setRestoreTarget(null)}
+        title="Restaurar cliente"
+        description={restoreTarget ? `${restoreTarget.name} volta para a lista de clientes como ativo.` : undefined}
+        size="sm"
+        dismissable={!restoringId}
+        footer={<Button variant="secondary" onClick={() => setRestoreTarget(null)} disabled={!!restoringId}>Cancelar</Button>}
+      >
+        <p className="text-[14px] text-foreground mb-4">Os valores deste cliente devem voltar a contar nos relatórios?</p>
+        <div className="space-y-3">
+          <div>
+            <Button className="w-full" onClick={() => handleRestore(true)} loading={restoreChoice === 'report'} disabled={!!restoringId}>
+              Sim, voltar aos relatórios
+            </Button>
+            <p className="mt-1.5 text-[13px] text-muted">Os lançamentos dele entram de novo no relatório financeiro.</p>
+          </div>
+          <div>
+            <Button variant="secondary" className="w-full" onClick={() => handleRestore(false)} loading={restoreChoice === 'only'} disabled={!!restoringId}>
+              Não, só reativar
+            </Button>
+            <p className="mt-1.5 text-[13px] text-muted">Volta a ser ativo, mas continua fora do relatório. A ficha avisa isso.</p>
+          </div>
+        </div>
+      </Modal>
     </Drawer>
   );
 };
