@@ -81,7 +81,7 @@ const DashboardBuilder = () => {
         <div className="flex items-center gap-4">
           <button 
             onClick={() => navigate('/app/analytics')}
-            className="p-2 hover:bg-secondary/50 rounded-lg text-slate-500 hover:text-foreground transition-colors"
+            className="p-2 hover:bg-secondary/50 rounded-lg text-muted hover:text-foreground transition-colors"
           >
             <ArrowLeft size={18} />
           </button>
@@ -98,14 +98,14 @@ const DashboardBuilder = () => {
         <div className="flex items-center gap-3">
           <button 
             onClick={handleExportPDF}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-secondary/50 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-muted hover:bg-secondary/50 rounded-lg transition-colors"
           >
             <Download size={16} />
             Exportar PDF
           </button>
           <button 
             onClick={handleSave}
-            className="flex items-center gap-2 px-4 py-1.5 text-sm font-medium bg-primary text-white hover:bg-primary/90 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-4 py-1.5 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg transition-colors"
           >
             <Save size={16} />
             Salvar
@@ -149,7 +149,7 @@ const DashboardBuilder = () => {
             {selectedWidget && (
               <div className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-slate-500 mb-1">Título do Gráfico</label>
+                  <label className="block text-sm font-medium text-muted mb-1">Título do Gráfico</label>
                   <input 
                     type="text"
                     value={selectedWidget.title}
@@ -159,7 +159,7 @@ const DashboardBuilder = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-slate-500 mb-1">Tipo de Visualização</label>
+                  <label className="block text-sm font-medium text-muted mb-1">Tipo de Visualização</label>
                   <select 
                     value={selectedWidget.type}
                     onChange={(e) => updateWidget(selectedWidget.id, { type: e.target.value as WidgetType })}
@@ -173,7 +173,7 @@ const DashboardBuilder = () => {
                 </div>
                 
                 <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg mt-8">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                  <p className="text-xs text-muted">
                     Nesta área futura, o usuário poderá arrastar dimensões e métricas diretamente para os eixos X e Y deste gráfico específico, além de alterar paletas de cores.
                   </p>
                 </div>
@@ -182,8 +182,8 @@ const DashboardBuilder = () => {
           </aside>
         ) : (
           <aside className="w-16 border-l border-border bg-panel hidden lg:flex flex-col items-center py-4 cursor-pointer hover:bg-secondary/50 transition-colors" onClick={() => {}}>
-            <Settings size={20} className="text-slate-400" />
-            <div className="[writing-mode:vertical-lr] rotate-180 mt-6 text-xs tracking-widest text-slate-400 font-medium uppercase">
+            <Settings size={20} className="text-muted" />
+            <div className="[writing-mode:vertical-lr] rotate-180 mt-6 text-xs tracking-widest text-muted font-medium uppercase">
               Propriedades
             </div>
           </aside>

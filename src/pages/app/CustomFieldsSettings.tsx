@@ -422,7 +422,7 @@ const CustomFieldsSettings = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={openCreateModal}
-              className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
             >
               <Plus size={18} />
               Novo Campo
@@ -829,7 +829,7 @@ const CustomFieldsSettings = () => {
                     whileTap={{ scale: 0.98 }}
                     type="submit"
                     disabled={!isCreateFormValid || isSavingCreate}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
                     {isSavingCreate && <Loader2 size={16} className="animate-spin" />}
                     {isSavingCreate ? 'Criando...' : 'Criar Campo'}
@@ -995,7 +995,7 @@ const CustomFieldsSettings = () => {
                     whileTap={{ scale: 0.98 }}
                     type="submit"
                     disabled={!isEditFormValid || isSavingEdit || isCheckingOptionUsage}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
                     {(isSavingEdit || isCheckingOptionUsage) && <Loader2 size={16} className="animate-spin" />}
                     {isSavingEdit ? 'Salvando...' : isCheckingOptionUsage ? 'Verificando...' : 'Salvar'}
@@ -1139,10 +1139,10 @@ const CustomFieldsSettings = () => {
                   type="button"
                   onClick={handleConfirm}
                   disabled={isConfirmBusy || (confirmAction.kind === 'delete' && !isDeleteConfirmValid)}
-                  className={`flex-1 py-3 rounded-xl font-bold text-white transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2 ${
+                  className={`flex-1 py-3 rounded-xl font-bold transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2 ${
                     confirmAction.kind === 'delete' || confirmAction.kind === 'options-removed'
-                      ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20'
-                      : 'bg-primary hover:bg-primary/90 shadow-primary/20'
+                      ? 'text-white bg-red-500 hover:bg-red-600 shadow-red-500/20'
+                      : 'text-primary-foreground bg-primary hover:bg-primary/90 shadow-primary/20'
                   }`}
                 >
                   {isConfirmBusy && <Loader2 size={16} className="animate-spin" />}

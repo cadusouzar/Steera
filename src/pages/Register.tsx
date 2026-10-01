@@ -357,7 +357,7 @@ const Register = () => {
                 <div className="flex flex-col items-center gap-1">
                   <div
                     className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
-                      i <= step ? 'bg-primary text-white' : 'bg-secondary text-muted'
+                      i <= step ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted'
                     }`}
                   >
                     {i < step ? <Check size={14} /> : i + 1}
@@ -383,7 +383,7 @@ const Register = () => {
                     type="button"
                     onClick={() => handlePersonTypeChange('PJ')}
                     className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                      isPJ ? 'bg-primary text-white' : 'bg-secondary/50 text-foreground/70'
+                      isPJ ? 'bg-primary text-primary-foreground' : 'bg-secondary/50 text-foreground/70'
                     }`}
                   >
                     Pessoa Jurídica
@@ -392,7 +392,7 @@ const Register = () => {
                     type="button"
                     onClick={() => handlePersonTypeChange('PF')}
                     className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                      !isPJ ? 'bg-primary text-white' : 'bg-secondary/50 text-foreground/70'
+                      !isPJ ? 'bg-primary text-primary-foreground' : 'bg-secondary/50 text-foreground/70'
                     }`}
                   >
                     Pessoa Física
@@ -619,7 +619,7 @@ const Register = () => {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex-1 bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {step < 2 ? 'Próximo' : isSubmitting ? 'Criando conta...' : 'Criar Conta'}
               </button>

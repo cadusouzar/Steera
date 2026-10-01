@@ -502,7 +502,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                                       <button
                                         onClick={() => handleGenerateCharge(r.id)}
                                         disabled={busyId === r.id}
-                                        className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-white bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-primary-foreground bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
                                         {busyId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} Gerar Fatura do Mês
                                       </button>
@@ -637,7 +637,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                               <button
                                 onClick={handleConfirmSchedule}
                                 disabled={!scheduleStart || !scheduleEnd || isScheduling}
-                                className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+                                className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
                               >
                                 {isScheduling ? 'Agendando...' : 'Confirmar Agendamento'}
                               </button>
@@ -765,7 +765,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
                           <button
                             onClick={handleScheduleLeave}
                             disabled={!leaveScheduleStart || !leaveScheduleEnd || isSchedulingLeave}
-                            className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+                            className="flex-1 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
                           >
                             {isSchedulingLeave ? 'Agendando...' : 'Confirmar Agendamento'}
                           </button>

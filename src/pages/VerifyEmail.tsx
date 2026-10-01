@@ -101,7 +101,7 @@ const VerifyEmail = () => {
               de lá a pessoa usa "Entrar no sistema" (logada) ou "Entrar" (deslogada) na barra. */}
           <Link
             to="/"
-            className="inline-flex items-center justify-center w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20"
+            className="inline-flex items-center justify-center w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20"
           >
             Voltar para a página inicial
           </Link>
@@ -120,7 +120,7 @@ const VerifyEmail = () => {
               type="button"
               onClick={handleResend}
               disabled={resendState === 'sending'}
-              className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {resendState === 'sending' ? 'Enviando...' : 'Reenviar e-mail'}
             </button>

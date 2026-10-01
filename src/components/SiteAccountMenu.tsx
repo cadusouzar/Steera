@@ -73,7 +73,7 @@ const SiteAccountMenu: React.FC<SiteAccountMenuProps> = ({ user, onLoggedOut }) 
         className="flex items-center gap-1 p-1 rounded-full hover:bg-secondary/50 transition-colors border border-transparent hover:border-border/50"
       >
         <span className="relative">
-          <span className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background flex items-center justify-center text-white font-heading font-bold text-sm shadow-sm">
+          <span className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background flex items-center justify-center text-primary-foreground font-heading font-bold text-sm shadow-sm">
             {avatarInitial}
           </span>
           {emailPending && (

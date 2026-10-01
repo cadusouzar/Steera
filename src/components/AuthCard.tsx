@@ -30,7 +30,7 @@ const AuthCard = ({ title, subtitle, children }: AuthCardProps) => (
           className="glass-panel p-10 rounded-3xl"
         >
           <div className="text-center mb-8">
-            <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center font-heading font-bold text-white shadow-lg shadow-primary/20 mx-auto mb-4 text-xl">
+            <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center font-heading font-bold text-primary-foreground shadow-lg shadow-primary/20 mx-auto mb-4 text-xl">
               Q
             </div>
             <h1 className="text-2xl font-heading font-bold mb-2 text-foreground">{title}</h1>

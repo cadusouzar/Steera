@@ -296,7 +296,7 @@ const EmployeesList = () => {
           {canManageEmployees && (
           <Link
             to="/app/funcionarios/novo"
-            className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
           >
             <Plus size={18} />
             Novo Funcionário
@@ -901,7 +901,7 @@ const EmployeesList = () => {
                       <button
                         onClick={handleSaveEdit}
                         disabled={isSaving}
-                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2 disabled:opacity-60"
+                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2 disabled:opacity-60"
                       >
                         <Save size={18} />
                         {isSaving ? 'Salvando...' : 'Salvar Alterações'}

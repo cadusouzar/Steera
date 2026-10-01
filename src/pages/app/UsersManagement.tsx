@@ -525,7 +525,7 @@ const UsersManagement = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={openNewModal}
-              className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
             >
               <UserPlus size={18} />
               Novo Acesso
@@ -620,7 +620,7 @@ const UsersManagement = () => {
                         >
                           <td className="px-8 py-5">
                             <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background shadow-sm flex items-center justify-center text-white font-bold text-sm shrink-0">
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background shadow-sm flex items-center justify-center text-primary-foreground font-bold text-sm shrink-0">
                                 {user.email.charAt(0).toUpperCase()}
                               </div>
                               <div>
@@ -680,10 +680,10 @@ const UsersManagement = () => {
                               </span>
                             ) : user.status === 'invited' ? (
                               <span
-                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-foreground/10 text-foreground border border-foreground/20"
                                 title="Aguardando a pessoa aceitar o convite e definir a própria senha"
                               >
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                <span className="w-1.5 h-1.5 rounded-full bg-foreground" />
                                 Convite pendente
                               </span>
                             ) : user.status === 'locked' ? (
@@ -973,7 +973,7 @@ const UsersManagement = () => {
                     whileTap={{ scale: 0.98 }}
                     type="submit"
                     disabled={!isFormValid || isSaving}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
                     {isSaving && <Loader2 size={16} className="animate-spin" />}
                     {isSaving ? 'Criando...' : 'Criar Acesso'}
@@ -1067,7 +1067,7 @@ const UsersManagement = () => {
                     // `onDelete: SetNull`) deixava submeter vazio — o backend respondia com um erro
                     // de nome em branco, confuso. O formulário de criação já gatilhava assim.
                     disabled={isSavingEdit || !editProfileId}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
                     {isSavingEdit && <Loader2 size={16} className="animate-spin" />}
                     {isSavingEdit ? 'Salvando...' : 'Salvar Perfil'}
@@ -1157,7 +1157,7 @@ const UsersManagement = () => {
                     whileTap={{ scale: 0.98 }}
                     type="submit"
                     disabled={isLinking || !linkEmployeeId}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
+                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
                   >
                     {isLinking && <Loader2 size={16} className="animate-spin" />}
                     {isLinking ? 'Vinculando...' : 'Vincular'}
@@ -1340,7 +1340,7 @@ const UsersManagement = () => {
                   type="button"
                   onClick={handleConfirmResetPassword}
                   disabled={isResettingPassword}
-                  className="flex-1 py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                  className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
                 >
                   {isResettingPassword && <Loader2 size={16} className="animate-spin" />}
                   {isResettingPassword ? 'Enviando...' : 'Enviar Redefinição de Senha'}
@@ -1454,7 +1454,7 @@ const UsersManagement = () => {
               <button
                 type="button"
                 onClick={closeUserNotice}
-                className="w-full py-3 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm"
+                className="w-full py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm"
               >
                 {userNotice.kind === 'invite' && userNotice.inviteUrl ? 'Já copiei, fechar' : 'Fechar'}
               </button>

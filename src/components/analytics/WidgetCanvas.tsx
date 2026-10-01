@@ -62,9 +62,9 @@ export const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
       onClick={() => onSelectWidget && onSelectWidget('')} // Click outside deselects
     >
       {widgets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-full text-slate-400">
+        <div className="flex flex-col items-center justify-center h-full text-muted">
           <BarChart3 size={48} className="mb-4 opacity-50" />
-          <h3 className="text-lg font-medium text-slate-300">Canvas Vazio</h3>
+          <h3 className="text-lg font-medium text-muted">Canvas Vazio</h3>
           <p className="text-sm">Arraste métricas da barra lateral para começar a construir seu dashboard.</p>
         </div>
       ) : (

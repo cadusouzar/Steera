@@ -145,7 +145,7 @@ const Roles = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => navigate('/app/cargos/novo')}
-            className="bg-primary hover:bg-primary/90 text-white px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
           >
             <Plus size={18} />
             Novo Cargo
@@ -415,7 +415,7 @@ const Roles = () => {
                     <button
                       onClick={() => handleReactivateRole(selectedRole.id)}
                       disabled={isSaving}
-                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm flex items-center gap-2 disabled:opacity-60"
+                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm flex items-center gap-2 disabled:opacity-60"
                     >
                       <RotateCcw size={16} /> Reativar Cargo
                     </button>
@@ -430,7 +430,7 @@ const Roles = () => {
                       whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                       onClick={() => handleUpdateRole(selectedRole)}
                       disabled={isSaving}
-                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm disabled:opacity-60"
+                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm disabled:opacity-60"
                     >
                       {isSaving ? 'Salvando...' : 'Salvar'}
                     </motion.button>

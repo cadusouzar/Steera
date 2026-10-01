@@ -112,7 +112,7 @@ const ForcedPasswordChange = ({ onDone }: ForcedPasswordChangeProps) => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isSubmitting ? 'Salvando...' : 'Salvar nova senha'}
             </button>

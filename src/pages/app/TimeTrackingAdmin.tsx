@@ -130,7 +130,7 @@ const TimeTrackingAdmin = () => {
               key={key}
               onClick={() => setActiveTab(key)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                activeTab === key ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-secondary/50'
+                activeTab === key ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted hover:text-foreground hover:bg-secondary/50'
               }`}
             >
               <Icon size={16} /> {label}
@@ -609,7 +609,7 @@ function CorrectionTab() {
           <textarea required value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="Justifique a correção — obrigatório, sem exceção." className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary text-foreground resize-none" />
         </div>
 
-        <button type="submit" disabled={submitting || !employeeId || !targetDate || !reason.trim()} className="w-full py-3.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
+        <button type="submit" disabled={submitting || !employeeId || !targetDate || !reason.trim()} className="w-full py-3.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
           {submitting && <Loader2 size={16} className="animate-spin" />} Registrar Correção
         </button>
       </form>
@@ -705,8 +705,8 @@ function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { ha
         <h2 className="text-lg font-heading font-bold text-foreground">Regras da empresa</h2>
         {hasFullPontoAccess && hasOwnTeam && (
           <div className="flex gap-1 bg-secondary/30 rounded-lg p-1">
-            <button onClick={() => setScope('company')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'company' ? 'bg-primary text-white' : 'text-muted'}`}>Padrão da empresa</button>
-            <button onClick={() => setScope('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'team' ? 'bg-primary text-white' : 'text-muted'}`}>Minha equipe</button>
+            <button onClick={() => setScope('company')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'company' ? 'bg-primary text-primary-foreground' : 'text-muted'}`}>Padrão da empresa</button>
+            <button onClick={() => setScope('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scope === 'team' ? 'bg-primary text-primary-foreground' : 'text-muted'}`}>Minha equipe</button>
           </div>
         )}
       </div>
@@ -730,7 +730,7 @@ function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { ha
           <ToggleRow label="Exigir localização na marcação" checked={settings.requireLocation} onChange={() => toggle('requireLocation')} />
           <ToggleRow label="Permitir exceção de localização (fica em análise em vez de bloquear)" checked={settings.allowLocationException} onChange={() => toggle('allowLocationException')} />
           <ToggleRow label="Permitir períodos extras (Entrada/Saída Extra)" checked={settings.allowExtraPeriods} onChange={() => toggle('allowExtraPeriods')} />
-          <button onClick={save} disabled={saving} className="mt-4 px-5 py-3 bg-primary hover:bg-primary/90 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
+          <button onClick={save} disabled={saving} className="mt-4 px-5 py-3 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
             {saving && <Loader2 size={16} className="animate-spin" />} Salvar {saved && <Check size={16} />}
           </button>
         </div>
@@ -831,9 +831,9 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }:
       {showForm && (
         <form onSubmit={submit} className="mb-6 p-5 bg-secondary/10 border border-border/50 rounded-2xl space-y-4">
           <div className="flex gap-1 bg-secondary/30 rounded-lg p-1 w-fit">
-            {hasFullPontoAccess && <button type="button" onClick={() => setTier('company')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'company' ? 'bg-primary text-white' : 'text-muted'}`}>Empresa</button>}
-            {hasOwnTeam && <button type="button" onClick={() => setTier('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'team' ? 'bg-primary text-white' : 'text-muted'}`}>Meu time</button>}
-            <button type="button" onClick={() => setTier('individual')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'individual' ? 'bg-primary text-white' : 'text-muted'}`}>Individual</button>
+            {hasFullPontoAccess && <button type="button" onClick={() => setTier('company')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'company' ? 'bg-primary text-primary-foreground' : 'text-muted'}`}>Empresa</button>}
+            {hasOwnTeam && <button type="button" onClick={() => setTier('team')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'team' ? 'bg-primary text-primary-foreground' : 'text-muted'}`}>Meu time</button>}
+            <button type="button" onClick={() => setTier('individual')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tier === 'individual' ? 'bg-primary text-primary-foreground' : 'text-muted'}`}>Individual</button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             {tier === 'individual' && (
@@ -846,7 +846,7 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }:
           </div>
           <div className="flex gap-1.5 flex-wrap">
             {WEEKDAY_LABELS.map((label, i) => (
-              <button type="button" key={i} onClick={() => toggleWeekDay(i)} className={`w-10 h-10 rounded-lg text-xs font-bold transition-colors ${form.weekDays.includes(i) ? 'bg-primary text-white' : 'bg-secondary text-muted'}`}>
+              <button type="button" key={i} onClick={() => toggleWeekDay(i)} className={`w-10 h-10 rounded-lg text-xs font-bold transition-colors ${form.weekDays.includes(i) ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted'}`}>
                 {label}
               </button>
             ))}
@@ -864,7 +864,7 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }:
             <label className="block text-xs text-muted mb-1">Vigente a partir de</label>
             <input required type="date" value={form.validFrom} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} className="bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground" />
           </div>
-          <button type="submit" disabled={saving} className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
+          <button type="submit" disabled={saving} className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
             {saving && <Loader2 size={16} className="animate-spin" />} Criar Jornada
           </button>
         </form>
@@ -955,7 +955,7 @@ function WorkLocationsPanel({ canEdit }: { canEdit: boolean }) {
             <input required placeholder="Longitude" value={form.longitude} onChange={(e) => setForm({ ...form, longitude: e.target.value })} className="bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground" />
             <NumberField label="Raio (m)" value={form.radiusMeters} onChange={(v) => setForm({ ...form, radiusMeters: v })} />
           </div>
-          <button type="submit" disabled={saving} className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
+          <button type="submit" disabled={saving} className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
             {saving && <Loader2 size={16} className="animate-spin" />} Criar Local
           </button>
         </form>

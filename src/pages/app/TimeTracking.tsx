@@ -70,8 +70,8 @@ function getStatusColor(status: DisplayStatus) {
     case 'Completo': return 'bg-green-500/10 text-green-600 border-green-500/20';
     case 'Incompleto': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20';
     case 'Falta': return 'bg-red-500/10 text-red-600 border-red-500/20';
-    case 'Folga': return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
-    case 'Feriado': return 'bg-purple-500/10 text-purple-600 border-purple-500/20';
+    case 'Folga': return 'bg-foreground/10 text-foreground border-foreground/20';
+    case 'Feriado': return 'bg-foreground/10 text-foreground border-foreground/20';
     default: return 'bg-secondary text-muted border-border';
   }
 }
@@ -509,7 +509,7 @@ const TimeTracking = () => {
                 <button
                   onClick={handleLinkEmployee}
                   disabled={!selectedLinkId || linking}
-                  className="px-4 py-2.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-colors flex items-center gap-2"
+                  className="px-4 py-2.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors flex items-center gap-2"
                 >
                   {linking && <Loader2 size={16} className="animate-spin" />}
                   Vincular
@@ -572,10 +572,10 @@ const TimeTracking = () => {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={openPunchModal}
-                className="w-full py-5 rounded-2xl text-white font-bold text-lg shadow-lg shadow-primary/25 bg-primary hover:bg-primary/90 transition-all flex flex-col items-center justify-center gap-1"
+                className="w-full py-5 rounded-2xl text-primary-foreground font-bold text-lg shadow-lg shadow-primary/25 bg-primary hover:bg-primary/90 transition-all flex flex-col items-center justify-center gap-1"
               >
                 <span>Registrar {PUNCH_TYPE_LABELS[status.nextAllowedType]}</span>
-                <span className="text-xs font-medium text-white/70">Clique para capturar o horário</span>
+                <span className="text-xs font-medium text-primary-foreground/70">Clique para capturar o horário</span>
               </motion.button>
             ) : null}
           </div>
@@ -954,7 +954,7 @@ const TimeTracking = () => {
                     type="submit"
                     form="maintenanceForm"
                     disabled={submittingAdjustment}
-                    className="flex-1 py-3.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                    className="flex-1 py-3.5 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                   >
                     {submittingAdjustment && <Loader2 size={16} className="animate-spin" />}
                     Enviar Solicitação
@@ -1093,7 +1093,7 @@ const TimeTracking = () => {
                   <button
                     onClick={submitPunch}
                     disabled={!canSubmitPunch}
-                    className="flex-1 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                    className="flex-1 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                   >
                     {submittingPunch ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
                     {submittingPunch ? 'Enviando...' : 'Registrar'}

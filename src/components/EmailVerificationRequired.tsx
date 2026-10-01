@@ -102,7 +102,7 @@ const EmailVerificationRequired: React.FC<EmailVerificationRequiredProps> = ({ e
               type="button"
               onClick={handleResend}
               disabled={resendState === 'sending'}
-              className="w-full inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <RefreshCw size={16} className={resendState === 'sending' ? 'animate-spin' : ''} aria-hidden="true" />
               {resendState === 'sending' ? 'Enviando...' : 'Reenviar e-mail'}

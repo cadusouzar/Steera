@@ -664,7 +664,7 @@ const QuotesList = () => {
                       </button>
                       <button
                         onClick={handleUpdateQuote}
-                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                       >
                         Salvar Alterações
                       </button>
@@ -729,7 +729,7 @@ const QuotesList = () => {
                   <button
                     type="submit"
                     form="newQuoteForm"
-                    className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                    className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                   >
                     <CheckCircle2 size={18} />
                     Criar Orçamento

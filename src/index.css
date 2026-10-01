@@ -3,45 +3,106 @@
 @tailwind utilities;
 
 @layer base {
+  /* Visual monocromático (01/10/2026, referência URBN): cinza/branco/preto, ação em preto; cor só
+     para status. Canais RGB — ver tailwind.config.js. Contrastes conferidos para AA. */
   :root {
-    /* Light Theme (Clean SaaS aesthetic) */
-    --background: #F8FAFC; /* slate-50 */
-    --foreground: #0F172A; /* slate-900 */
-    
-    --primary: #2563EB; /* blue-600 */
-    --secondary: #E2E8F0; /* slate-200 */
-    --accent: #4F46E5; /* indigo-600 */
-    
-    --muted: #64748B; /* slate-500 */
-    --border: #CBD5E1; /* slate-300 */
-    
-    --panel: rgba(255, 255, 255, 0.8);
+    --background: 237 237 237;       /* #EDEDED */
+    --foreground: 20 20 20;          /* #141414 */
+    --panel: 255 255 255;            /* #FFFFFF */
+    --primary: 20 20 20;             /* ação = preto */
+    --primary-foreground: 255 255 255;
+    --accent: 20 20 20;
+    --secondary: 244 244 244;        /* #F4F4F4 — hover, fundos sutis */
+    --muted: 107 107 107;            /* #6B6B6B — 5.3:1 sobre branco */
+    --border: 226 226 226;           /* #E2E2E2 */
+    --sidebar: 248 248 248;          /* #F8F8F8 — segunda camada neutra (sidebar) */
+    --elevated: 255 255 255;         /* realce elevado sobre a sidebar */
+    --success: 23 122 67;            /* #177A43 */
+    --warning: 180 83 9;             /* #B45309 */
+    --danger: 192 38 45;             /* #C0262D */
+    color-scheme: light;
   }
 
   .dark {
-    /* Dark Theme (High-tech) */
-    --background: #0F172A; /* slate-900 */
-    --foreground: #F8FAFC; /* slate-50 */
-    
-    --primary: #3B82F6; /* blue-500 */
-    --secondary: #1E293B; /* slate-800 */
-    --accent: #6366F1; /* indigo-500 */
-    
-    --muted: #94A3B8; /* slate-400 */
-    --border: #334155; /* slate-700 */
-    
-    --panel: rgba(255, 255, 255, 0.05);
+    --background: 14 14 14;          /* #0E0E0E */
+    --foreground: 242 242 242;       /* #F2F2F2 */
+    --panel: 24 24 24;               /* #181818 */
+    --primary: 242 242 242;          /* ação = branco */
+    --primary-foreground: 20 20 20;
+    --accent: 242 242 242;
+    --secondary: 34 34 34;           /* #222222 */
+    --muted: 143 143 143;            /* #8F8F8F */
+    --border: 42 42 42;              /* #2A2A2A */
+    --sidebar: 18 18 18;             /* #121212 */
+    --elevated: 38 38 38;            /* #262626 — no escuro, elevar = clarear */
+    --success: 74 222 128;
+    --warning: 251 191 36;
+    --danger: 248 113 113;
+    color-scheme: dark;
   }
 
   body {
     @apply bg-background text-foreground transition-colors duration-300;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  h1, h2, h3, h4 {
+    letter-spacing: -0.015em;
+  }
+
+  ::selection {
+    @apply bg-foreground text-background;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--foreground));
+    outline-offset: 2px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--muted) / 0.35) transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
+  /* Antes: vidro translúcido com blur. Agora: painel sólido, borda fina, sombra quase nula. */
   .glass-panel {
-    @apply bg-panel backdrop-blur-lg border border-border shadow-sm dark:shadow-none;
+    @apply bg-panel border border-border shadow-sm;
   }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Esqueleto de carregamento: bloco neutro com um brilho que atravessa devagar. */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--secondary)) 0%,
+      rgb(var(--border) / 0.7) 50%,
+      rgb(var(--secondary)) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    border-radius: 4px;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
 }
 
 @media print {

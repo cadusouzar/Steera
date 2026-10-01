@@ -359,7 +359,7 @@ const InventoryList = () => {
 
                 <div className="pt-6 flex gap-3 sticky bottom-0 bg-background pb-2">
                   <button type="button" onClick={() => setIsNewProductModalOpen(false)} className="flex-1 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">Cancelar</button>
-                  <button type="submit" className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-md shadow-primary/20 flex items-center justify-center gap-2"><Plus size={18} /> Cadastrar Produto</button>
+                  <button type="submit" className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-md shadow-primary/20 flex items-center justify-center gap-2"><Plus size={18} /> Cadastrar Produto</button>
                 </div>
               </form>
             </motion.div>
@@ -550,7 +550,7 @@ const InventoryList = () => {
                       </button>
                       <button
                         onClick={handleUpdateProduct}
-                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                        className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                       >
                         Salvar Alterações
                       </button>

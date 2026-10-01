@@ -16,7 +16,16 @@ const MOCK_DATA = [
   { name: 'Jun', value: 2390, value2: 3800 },
 ];
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+// Paleta monocromática: tudo em `currentColor` (o wrapper usa text-foreground, então segue o tema
+// claro/escuro sozinho); as fatias do donut se distinguem por opacidade, não por matiz.
+const SLICE_OPACITY = [1, 0.62, 0.38, 0.2];
+const TOOLTIP_STYLE = {
+  borderRadius: '6px',
+  border: '1px solid rgb(var(--border))',
+  background: 'rgb(var(--panel))',
+  color: 'rgb(var(--foreground))',
+  boxShadow: '0 4px 12px -2px rgb(0 0 0 / 0.08)',
+};
 
 interface ChartRendererProps {
   type: WidgetType;
@@ -27,34 +36,35 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({ type }) => {
   if (type === 'kpi-card') {
     return (
       <div className="flex flex-col items-center justify-center h-full">
-        <span className="text-4xl font-bold font-heading text-primary">R$ 14.500</span>
-        <span className="text-sm text-green-500 font-medium mt-2">+12% vs mês anterior</span>
+        <span className="text-4xl font-semibold tabular text-foreground">R$ 14.500</span>
+        <span className="text-sm text-success font-medium mt-2">+12% vs mês anterior</span>
       </div>
     );
   }
 
   return (
+    <div className="h-full w-full text-foreground">
     <ResponsiveContainer width="100%" height="100%">
       {(() => {
         switch (type) {
           case 'bar-chart':
             return (
               <BarChart data={MOCK_DATA} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} />
-                <YAxis axisLine={false} tickLine={false} fontSize={12} />
-                <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" strokeOpacity={0.12} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} tick={{ fill: 'rgb(var(--muted))' }} />
+                <YAxis axisLine={false} tickLine={false} fontSize={12} tick={{ fill: 'rgb(var(--muted))' }} />
+                <Tooltip cursor={{fill: 'transparent'}} contentStyle={TOOLTIP_STYLE} />
+                <Bar dataKey="value" fill="currentColor" radius={[2, 2, 0, 0]} />
               </BarChart>
             );
           case 'line-chart':
             return (
               <LineChart data={MOCK_DATA} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} />
-                <YAxis axisLine={false} tickLine={false} fontSize={12} />
-                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" strokeOpacity={0.12} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} tick={{ fill: 'rgb(var(--muted))' }} />
+                <YAxis axisLine={false} tickLine={false} fontSize={12} tick={{ fill: 'rgb(var(--muted))' }} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <Line type="linear" dataKey="value" stroke="currentColor" strokeWidth={1.5} dot={false} activeDot={{ r: 4, fill: 'currentColor' }} />
               </LineChart>
             );
           case 'donut-chart':
@@ -70,10 +80,10 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({ type }) => {
                   dataKey="value"
                 >
                   {MOCK_DATA.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`cell-${index}`} fill="currentColor" fillOpacity={SLICE_OPACITY[index % SLICE_OPACITY.length]} stroke="none" />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
               </PieChart>
             );
           default:
@@ -81,5 +91,6 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({ type }) => {
         }
       })()}
     </ResponsiveContainer>
+    </div>
   );
 };

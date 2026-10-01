@@ -27,7 +27,7 @@ const PlanUpgradeNotice = ({ featureLabel, planLabel, onShowPlans }: PlanUpgrade
         <button
           type="button"
           onClick={onShowPlans}
-          className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-full text-sm font-medium transition-colors shadow-sm"
+          className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3 rounded-full text-sm font-medium transition-colors shadow-sm"
         >
           Ver planos
         </button>

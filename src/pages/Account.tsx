@@ -61,7 +61,7 @@ const Account = () => {
 
   const tabClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${
-      isActive ? 'bg-primary text-white shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'
+      isActive ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'
     }`;
 
   return (
@@ -76,7 +76,7 @@ const Account = () => {
           </div>
           <Link
             to="/app"
-            className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm self-start sm:self-auto"
+            className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm self-start sm:self-auto"
           >
             <LogIn size={16} aria-hidden="true" />
             Entrar no sistema
@@ -129,7 +129,7 @@ const Account = () => {
             <AccountSubscriptionDetails user={user}>
               <Link
                 to={{ pathname: '/', hash: '#pricing' }}
-                className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm"
+                className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm"
               >
                 Ver planos
               </Link>

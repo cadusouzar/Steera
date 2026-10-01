@@ -29,7 +29,7 @@ const AccountProfileDetails: React.FC<AccountProfileDetailsProps> = ({ user }) =
   return (
     <div className="space-y-8">
       <div className="flex flex-col items-center sm:flex-row sm:items-start gap-6">
-        <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-primary to-accent border-4 border-background shadow-xl flex items-center justify-center font-heading font-bold text-white text-3xl overflow-hidden shrink-0">
+        <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-primary to-accent border-4 border-background shadow-xl flex items-center justify-center font-heading font-bold text-primary-foreground text-3xl overflow-hidden shrink-0">
           {avatarInitial}
         </div>
         <div className="flex-1 min-w-0 space-y-1 text-center sm:text-left">

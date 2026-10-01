@@ -92,13 +92,13 @@ const PurchasingReportModal: React.FC<PurchasingReportModalProps> = ({ isOpen, o
               </div>
               
               <div className="p-5 rounded-2xl border border-border bg-background shadow-sm flex flex-col items-center justify-center text-center print:border-foreground/20">
-                <Building2 size={24} className="text-blue-500 mb-2" />
+                <Building2 size={24} className="text-foreground mb-2" />
                 <span className="text-3xl font-heading font-bold text-foreground">{totalSuppliers}</span>
                 <span className="text-xs font-medium text-muted uppercase tracking-wider mt-1">Fornecedores Diferentes</span>
               </div>
               
               <div className="p-5 rounded-2xl border border-border bg-background shadow-sm flex flex-col items-center justify-center text-center print:border-foreground/20">
-                <ShoppingCart size={24} className="text-purple-500 mb-2" />
+                <ShoppingCart size={24} className="text-foreground mb-2" />
                 <span className="text-3xl font-heading font-bold text-foreground">{productsWithQuotes}</span>
                 <span className="text-xs font-medium text-muted uppercase tracking-wider mt-1">Prod. com Cotação</span>
               </div>
@@ -112,8 +112,8 @@ const PurchasingReportModal: React.FC<PurchasingReportModalProps> = ({ isOpen, o
 
             {/* Most Quoted Insight */}
             {mostQuotedProduct && mostQuotedProduct.suppliers.length > 0 && (
-              <div className="mb-8 p-5 bg-blue-500/10 border border-blue-500/20 rounded-2xl print:bg-transparent print:border-foreground/20">
-                <h3 className="text-sm font-bold text-blue-600 mb-1">Maior Variedade de Ofertas</h3>
+              <div className="mb-8 p-5 bg-foreground/10 border border-foreground/20 rounded-2xl print:bg-transparent print:border-foreground/20">
+                <h3 className="text-sm font-bold text-foreground mb-1">Maior Variedade de Ofertas</h3>
                 <p className="text-sm text-foreground/80">
                   O produto <strong>{mostQuotedProduct.name}</strong> possui o maior número de cotações ({mostQuotedProduct.suppliers.length} fornecedores). 
                   Ter múltiplas opções ajuda a negociar melhores preços.

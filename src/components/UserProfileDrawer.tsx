@@ -47,19 +47,19 @@ const UserProfileDrawer: React.FC<UserProfileDrawerProps> = ({ onClose }) => {
             <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-2">
               <button
                 onClick={() => setActiveTab('geral')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'geral' ? 'bg-primary text-white shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'}`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'geral' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'}`}
               >
                 <User size={16} /> Geral
               </button>
               <button
                 onClick={() => setActiveTab('seguranca')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'seguranca' ? 'bg-primary text-white shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'}`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'seguranca' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'}`}
               >
                 <Shield size={16} /> Segurança
               </button>
               <button
                 onClick={() => setActiveTab('assinatura')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'assinatura' ? 'bg-primary text-white shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'}`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'assinatura' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted hover:text-foreground hover:bg-secondary/50'}`}
               >
                 <CreditCard size={16} /> Assinatura
               </button>

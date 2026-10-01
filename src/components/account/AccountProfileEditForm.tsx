@@ -243,7 +243,7 @@ const AccountProfileEditForm: React.FC<AccountProfileEditFormProps> = ({ user, o
         <button
           type="submit"
           disabled={isSaving}
-          className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 inline-flex items-center justify-center gap-2"
+          className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 inline-flex items-center justify-center gap-2"
         >
           {isSaving && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
           Salvar alterações

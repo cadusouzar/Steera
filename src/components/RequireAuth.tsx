@@ -88,7 +88,7 @@ const RequireAuth = () => {
           <button
             type="button"
             onClick={tryRestore}
-            className="mt-6 inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm"
+            className="mt-6 inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm"
           >
             <Loader2 size={16} className="animate-spin" aria-hidden="true" />
             Tentar agora

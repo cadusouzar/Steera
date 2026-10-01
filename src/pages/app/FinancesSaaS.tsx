@@ -540,7 +540,7 @@ export default function FinancesSaaS() {
             </h2>
             <button 
               onClick={() => setActiveModal('FIXED')}
-              className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center hover:bg-primary/90 transition-transform hover:scale-110 shadow-lg shadow-primary/20"
+              className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-transform hover:scale-110 shadow-lg shadow-primary/20"
             >
               <Plus size={18} />
             </button>
@@ -605,27 +605,27 @@ export default function FinancesSaaS() {
         
         {/* INVESTIMENTOS */}
         <div className="bg-panel border border-border rounded-3xl shadow-sm flex flex-col overflow-hidden h-[350px]">
-          <div className="p-5 border-b border-border flex justify-between items-center bg-indigo-500/5">
+          <div className="p-5 border-b border-border flex justify-between items-center bg-foreground/5">
             <h2 className="font-bold text-foreground flex items-center gap-2">
-              <Wallet className="text-indigo-500" size={20} />
+              <Wallet className="text-foreground" size={20} />
               Investimentos
             </h2>
             <button 
               onClick={() => setActiveModal('INVESTMENT')}
-              className="w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center hover:bg-indigo-600 transition-transform hover:scale-110 shadow-lg shadow-indigo-500/20"
+              className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-transform hover:scale-110 shadow-lg shadow-primary/20"
             >
               <Plus size={18} />
             </button>
           </div>
           <div className="p-4 flex-1 overflow-y-auto custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-4 auto-rows-max">
             {investments.map(inv => (
-              <div key={inv.id} className="group/item p-4 rounded-2xl bg-background border border-border flex flex-col justify-between hover:border-indigo-500/30 transition-colors relative">
+              <div key={inv.id} className="group/item p-4 rounded-2xl bg-background border border-border flex flex-col justify-between hover:border-foreground/30 transition-colors relative">
                 <div className="flex justify-between items-start mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-xl bg-foreground/10 text-foreground flex items-center justify-center">
                     {inv.icon || <TrendingUp size={18} />}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase font-bold text-indigo-500 bg-indigo-500/10 px-2 py-1 rounded-lg">
+                    <span className="text-[10px] uppercase font-bold text-foreground bg-foreground/10 px-2 py-1 rounded-lg">
                       {inv.bank}
                     </span>
                     <button 
@@ -651,7 +651,7 @@ export default function FinancesSaaS() {
                 <div>
                   <p className="font-bold text-foreground truncate">{inv.title}</p>
                   <p className="text-xs text-muted mb-2">{inv.type} <span className="font-bold text-foreground">({inv.expectedReturn || 0}% a.a)</span></p>
-                  <p className="font-heading font-extrabold text-xl text-indigo-600 dark:text-indigo-400">
+                  <p className="font-heading font-extrabold text-xl text-foreground">
                     {formatCurrency(inv.amount)}
                   </p>
                 </div>
@@ -785,11 +785,11 @@ export default function FinancesSaaS() {
               {/* Header */}
               <div className="p-6 border-b border-border flex items-center justify-between bg-secondary/10 shrink-0">
                 <h2 className="text-xl font-heading font-bold text-foreground flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-md ${
-                      activeModal === 'INCOME' ? 'bg-green-500 shadow-green-500/20' :
-                      activeModal === 'EXPENSE' ? 'bg-red-500 shadow-red-500/20' :
-                      activeModal === 'FIXED' ? 'bg-primary shadow-primary/20' :
-                      'bg-indigo-500 shadow-indigo-500/20'
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md ${
+                      activeModal === 'INCOME' ? 'text-white bg-green-500 shadow-green-500/20' :
+                      activeModal === 'EXPENSE' ? 'text-white bg-red-500 shadow-red-500/20' :
+                      activeModal === 'FIXED' ? 'text-primary-foreground bg-primary shadow-primary/20' :
+                      'text-primary-foreground bg-primary shadow-primary/20'
                   }`}>
                     {activeModal === 'INCOME' && <ArrowUpRight size={20} />}
                     {activeModal === 'EXPENSE' && <ArrowDownRight size={20} />}
@@ -999,11 +999,11 @@ export default function FinancesSaaS() {
                 </button>
                 <button 
                   onClick={handleSaveTransaction}
-                  className={`flex-[2] py-3.5 text-white font-bold rounded-xl transition-transform hover:scale-[1.02] active:scale-95 shadow-lg flex items-center justify-center gap-2 ${
-                    activeModal === 'INCOME' ? 'bg-green-500 hover:bg-green-600 shadow-green-500/20' :
-                    activeModal === 'EXPENSE' ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' :
-                    activeModal === 'FIXED' ? 'bg-primary hover:bg-primary/90 shadow-primary/20' :
-                    'bg-indigo-500 hover:bg-indigo-600 shadow-indigo-500/20'
+                  className={`flex-[2] py-3.5 font-bold rounded-xl transition-transform hover:scale-[1.02] active:scale-95 shadow-lg flex items-center justify-center gap-2 ${
+                    activeModal === 'INCOME' ? 'text-white bg-green-500 hover:bg-green-600 shadow-green-500/20' :
+                    activeModal === 'EXPENSE' ? 'text-white bg-red-500 hover:bg-red-600 shadow-red-500/20' :
+                    activeModal === 'FIXED' ? 'text-primary-foreground bg-primary hover:bg-primary/90 shadow-primary/20' :
+                    'text-primary-foreground bg-primary hover:bg-primary/90 shadow-primary/20'
                   }`}
                 >
                   <Plus size={18} />

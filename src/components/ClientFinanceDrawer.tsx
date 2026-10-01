@@ -364,13 +364,13 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                       <div className="flex bg-background border border-border rounded-lg p-1">
                         <button 
                           onClick={() => setAddType('single')}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${addType === 'single' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-foreground'}`}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${addType === 'single' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted hover:text-foreground'}`}
                         >
                           Cobrança Única
                         </button>
                         <button 
                           onClick={() => setAddType('recurring')}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors flex items-center gap-1 ${addType === 'recurring' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-foreground'}`}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors flex items-center gap-1 ${addType === 'recurring' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted hover:text-foreground'}`}
                         >
                           <Repeat size={12} /> Assinatura
                         </button>
@@ -395,7 +395,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                         </div>
                         <div className="flex gap-3 justify-end pt-2">
                           <button type="button" onClick={() => setIsAdding(false)} className="px-4 py-2.5 rounded-xl text-xs font-bold border border-border text-foreground hover:bg-secondary transition-colors">Cancelar</button>
-                          <button type="submit" className="px-4 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-bold transition-colors shadow-md shadow-primary/20">Lançar Cobrança</button>
+                          <button type="submit" className="px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-xs font-bold transition-colors shadow-md shadow-primary/20">Lançar Cobrança</button>
                         </div>
                       </form>
                     ) : (
@@ -416,7 +416,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                         </div>
                         <div className="flex gap-3 justify-end pt-2">
                           <button type="button" onClick={() => setIsAdding(false)} className="px-4 py-2.5 rounded-xl text-xs font-bold border border-border text-foreground hover:bg-secondary transition-colors">Cancelar</button>
-                          <button type="submit" className="px-4 py-2.5 bg-accent hover:bg-accent/90 text-white rounded-xl text-xs font-bold transition-colors shadow-md shadow-accent/20 flex items-center gap-1.5"><Repeat size={14}/> Criar Assinatura</button>
+                          <button type="submit" className="px-4 py-2.5 bg-accent hover:bg-accent/90 text-primary-foreground rounded-xl text-xs font-bold transition-colors shadow-md shadow-accent/20 flex items-center gap-1.5"><Repeat size={14}/> Criar Assinatura</button>
                         </div>
                       </form>
                     )}
@@ -460,7 +460,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                           ) : canManageFinance && (
                             <button
                               onClick={() => triggerGenerateCharge(sub.id)}
-                              className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-white bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm"
+                              className="flex items-center gap-1.5 text-xs font-bold text-accent hover:text-primary-foreground bg-accent/10 hover:bg-accent px-3 py-2 rounded-xl transition-all border border-accent/20 hover:border-accent shadow-sm"
                             >
                               <Zap size={14} /> Gerar Fatura do Mês
                             </button>
@@ -638,7 +638,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                 <button
                   onClick={handleSaveEdit}
                   disabled={isSaving}
-                  className="flex-1 py-3.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                  className="flex-1 py-3.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                 >
                   <Save size={18} />
                   {isSaving ? 'Salvando...' : 'Salvar Alterações'}
@@ -677,7 +677,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
                 <button
                   onClick={handleRestore}
                   disabled={isRestoring}
-                  className="px-5 py-3.5 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 disabled:opacity-60 transition-colors text-sm flex items-center gap-2 shadow-lg shadow-primary/20"
+                  className="px-5 py-3.5 rounded-xl font-bold text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-60 transition-colors text-sm flex items-center gap-2 shadow-lg shadow-primary/20"
                 >
                   <RotateCcw size={16} />
                   {isRestoring ? 'Reativando...' : 'Reativar Cliente'}
@@ -732,7 +732,7 @@ const ClientFinanceDrawer: React.FC<ClientFinanceDrawerProps> = ({
               <button
                 onClick={() => handleConfirmDeactivate(true)}
                 disabled={isDeactivating}
-                className="w-full py-3.5 rounded-xl font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 text-sm"
+                className="w-full py-3.5 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 text-sm"
               >
                 {isDeactivating ? 'Processando...' : 'Sim, manter nos relatórios'}
               </button>

@@ -15,7 +15,7 @@ const PricingCard: React.FC<PricingCardProps> = ({ name, price, features, isPopu
   return (
     <div className={`relative glass-panel rounded-3xl p-8 flex flex-col ${isPopular ? 'border-primary shadow-xl shadow-primary/10 scale-105 z-10' : ''}`}>
       {isPopular && (
-        <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-gradient-to-r from-primary to-accent text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+        <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-gradient-to-r from-primary to-accent text-primary-foreground text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
           Mais Escolhido
         </div>
       )}
@@ -41,7 +41,7 @@ const PricingCard: React.FC<PricingCardProps> = ({ name, price, features, isPopu
         to={`/register?plan=${name.toLowerCase()}`}
         className={`w-full py-3 rounded-xl font-medium text-center transition-colors ${
           isPopular 
-            ? 'bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/25' 
+            ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25' 
             : 'bg-background hover:bg-secondary/50 text-foreground border border-border shadow-sm'
         }`}
       >

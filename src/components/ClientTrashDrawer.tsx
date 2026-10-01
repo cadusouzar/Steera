@@ -120,7 +120,7 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ onClose, onRestor
                       <button
                         onClick={() => handleRestore(client.id)}
                         disabled={isRestoring}
-                        className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-primary hover:text-white hover:bg-primary px-3 py-2 rounded-lg transition-colors border border-primary/30 disabled:opacity-60"
+                        className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-foreground hover:bg-primary px-3 py-2 rounded-lg transition-colors border border-primary/30 disabled:opacity-60"
                       >
                         <RotateCcw size={14} />
                         {isRestoring ? 'Restaurando...' : 'Restaurar'}

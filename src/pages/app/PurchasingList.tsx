@@ -378,7 +378,7 @@ const PurchasingList = () => {
                       <div className="sm:col-span-2">
                         <button 
                           type="submit"
-                          className="w-full py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                          className="w-full py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                         >
                           Salvar Cotação
                         </button>
@@ -540,7 +540,7 @@ const PurchasingList = () => {
                   <button
                     type="submit"
                     form="newProductForm"
-                    className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
+                    className="flex-1 py-3.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                   >
                     <CheckCircle2 size={18} />
                     Criar Produto

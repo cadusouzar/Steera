@@ -18,7 +18,7 @@ const DashboardHub = () => {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold font-heading">Analytics e Dashboards</h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">Gerencie e visualize seus painéis de dados gerenciais.</p>
+          <p className="text-muted mt-1">Gerencie e visualize seus painéis de dados gerenciais.</p>
         </div>
         <button 
           onClick={() => navigate('/app/analytics/new')}
@@ -35,7 +35,7 @@ const DashboardHub = () => {
             <LayoutDashboard size={32} className="text-primary" />
           </div>
           <h2 className="text-xl font-bold mb-2">Nenhum Dashboard Criado</h2>
-          <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
+          <p className="text-muted mb-6 max-w-md mx-auto">
             Você ainda não criou nenhum painel de análise. Clique no botão abaixo para começar a explorar seus dados.
           </p>
           <button 
@@ -55,15 +55,15 @@ const DashboardHub = () => {
               className="bg-panel border border-border rounded-xl p-5 hover:border-primary/50 hover:shadow-md transition-all group"
             >
               <div className="flex justify-between items-start mb-4">
-                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-colors">
-                  <LayoutDashboard size={20} className={dashboards.length % 2 === 0 ? 'text-primary group-hover:text-white' : 'text-primary group-hover:text-white'} />
+                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                  <LayoutDashboard size={20} className={dashboards.length % 2 === 0 ? 'text-primary group-hover:text-primary-foreground' : 'text-primary group-hover:text-primary-foreground'} />
                 </div>
-                <button className="text-slate-400 hover:text-foreground">
+                <button className="text-muted hover:text-foreground">
                   <MoreVertical size={16} />
                 </button>
               </div>
               <h3 className="font-semibold text-lg mb-1 truncate">{dashboard.title}</h3>
-              <div className="flex items-center text-xs text-slate-500 dark:text-slate-400 mt-4">
+              <div className="flex items-center text-xs text-muted mt-4">
                 <Clock size={14} className="mr-1" />
                 Atualizado em {new Date(dashboard.lastModified).toLocaleDateString()}
               </div>

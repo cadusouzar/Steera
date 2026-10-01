@@ -62,16 +62,16 @@ export const DataSidebar: React.FC = () => {
                 key={dim.id}
                 draggable
                 onDragStart={(e) => handleDragStart(e, 'bar-chart')} // Simplificando para gerar barras ao soltar
-                className="flex items-center gap-2 bg-background border border-border rounded-lg px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-blue-500/50 hover:bg-blue-500/5 transition-colors"
+                className="flex items-center gap-2 bg-background border border-border rounded-lg px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-foreground/50 hover:bg-foreground/5 transition-colors"
               >
-                <div className="text-blue-500/70">{dim.icon}</div>
+                <div className="text-foreground/70">{dim.icon}</div>
                 <span>{dim.name}</span>
               </div>
             ))}
           </div>
         </div>
         
-        <div className="p-3 bg-secondary/30 rounded-lg border border-border/50 text-xs text-slate-500 dark:text-slate-400">
+        <div className="p-3 bg-secondary/30 rounded-lg border border-border/50 text-xs text-muted">
           <p>💡 Arraste as métricas para a área central (Canvas) para criar gráficos automaticamente.</p>
         </div>
       </div>
