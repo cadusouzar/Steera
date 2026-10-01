@@ -29,5 +29,5 @@ export class RegisterDto {
   @IsIn(BRAZILIAN_STATES) state!: string;
   @Trim() @IsString() @MinLength(1) @MaxLength(255) name!: string;
   @IsEmail() email!: string;
-  @IsString() @MinLength(8) password!: string;
+  @IsString() @MinLength(8) @MaxLength(128) password!: string;
 }

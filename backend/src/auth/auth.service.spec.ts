@@ -13,13 +13,16 @@ import { accountLockedError } from './account-lock.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
 import * as passwordUtil from './password.util';
 
+// Senha que passa no medidor de força (zxcvbn >= 3) — toda senha NOVA definida nestes testes usa ela.
+const STRONG_PASSWORD = 'correto-cavalo-bateria-grampo';
+
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: any;
   let jwtService: any;
   let authorization: any;
   let email: { send: jest.Mock };
-  let userTokens: { issue: jest.Mock; consume: jest.Mock; hasRecentPending: jest.Mock };
+  let userTokens: { issue: jest.Mock; peek: jest.Mock; consume: jest.Mock; hasRecentPending: jest.Mock };
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
   // E-mails (aviso de trava, esqueci minha senha) saem em segundo plano, sem a resposta esperar por
   // eles (anti-enumeração por latência) — os testes que olham o envio esperam a fila esvaziar.
@@ -47,7 +50,7 @@ describe('AuthService', () => {
     state: 'SP',
     name: 'Carlos Eduardo',
     email: 'a@b.com',
-    password: 'senha12345678',
+    password: STRONG_PASSWORD,
   };
 
   beforeEach(async () => {
@@ -85,6 +88,7 @@ describe('AuthService', () => {
     email = { send: jest.fn().mockResolvedValue(true) };
     userTokens = {
       issue: jest.fn().mockResolvedValue('raw-reset-token'),
+      peek: jest.fn(),
       consume: jest.fn(),
       hasRecentPending: jest.fn().mockResolvedValue(false),
     };
@@ -1010,7 +1014,7 @@ describe('AuthService', () => {
   it('changePassword rejects an incorrect current password', async () => {
     prisma.user.findUniqueOrThrow.mockResolvedValue({ id: '1', passwordHash: 'h' });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(false);
-    await expect(service.changePassword('1', { currentPassword: 'errada', newPassword: 'nova12345' })).rejects.toThrow('Senha atual incorreta');
+    await expect(service.changePassword('1', { currentPassword: 'errada', newPassword: STRONG_PASSWORD })).rejects.toThrow('Senha atual incorreta');
   });
 
   it('changePassword revokes every active refresh token, clears mustChangePassword, and returns a fresh access token', async () => {
@@ -1018,7 +1022,7 @@ describe('AuthService', () => {
       id: 'u1', companyId: 'c1', role: 'ADMIN', modules: ['DASHBOARD'], passwordHash: 'h', mustChangePassword: true,
     });
     jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
-    const result = await service.changePassword('u1', { currentPassword: 'antiga12345', newPassword: 'nova12345' });
+    const result = await service.changePassword('u1', { currentPassword: 'antiga12345', newPassword: STRONG_PASSWORD });
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u1' },
       data: { passwordHash: expect.any(String), mustChangePassword: false },
@@ -1394,15 +1398,66 @@ describe('AuthService', () => {
   });
 
   // Task 7 ("Acesso e sessões"): aceite de convite — define a senha, ativa e confirma o e-mail.
+  // Senha forte (zxcvbn >= 3) em todo fluxo que DEFINE uma senha. Nos fluxos com link (convite,
+  // redefinição) a checagem vem ANTES do consume(): senha fraca nunca queima o link da pessoa.
+  describe('senha forte obrigatória', () => {
+    it('register recusa senha fraca antes de qualquer escrita', async () => {
+      await expect(service.register({ ...baseRegisterDto, password: 'Senha@123' }, fakeRes)).rejects.toThrow(/^Senha fraca\./);
+      expect(prisma.company.create).not.toHaveBeenCalled();
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('register recusa senha montada com o nome da empresa', async () => {
+      await expect(
+        service.register({ ...baseRegisterDto, password: 'padariacentral2026' }, fakeRes),
+      ).rejects.toThrow(/dados pessoais/);
+    });
+
+    it('changePassword recusa senha nova fraca sem gravar nada', async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', companyId: 'c1', passwordHash: 'h' });
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+      await expect(
+        service.changePassword('u1', { currentPassword: 'antiga', newPassword: 'Teste@1234' }),
+      ).rejects.toThrow(/^Senha fraca\./);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('changePassword recusa senha com os dados da empresa da pessoa', async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', companyId: 'c1', passwordHash: 'h' });
+      prisma.company.findUnique.mockResolvedValue({ name: 'Padaria Central', legalName: null, tradeName: null });
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+      await expect(
+        service.changePassword('u1', { currentPassword: 'antiga', newPassword: 'PadariaCentral#1' }),
+      ).rejects.toThrow(/dados pessoais/);
+    });
+
+    it('resetPassword com senha fraca não consome o token nem grava', async () => {
+      userTokens.peek.mockResolvedValue('u1');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', companyId: 'c1', status: 'ACTIVE' });
+      await expect(service.resetPassword('token-valido', 'Senha@123')).rejects.toThrow(/^Senha fraca\./);
+      expect(userTokens.consume).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('acceptInvite com senha fraca não consome o token nem grava', async () => {
+      userTokens.peek.mockResolvedValue('u5');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u5', email: 'novo@teste.com', companyId: 'c1', status: 'INVITED' });
+      await expect(service.acceptInvite('token-valido', 'Senha@123')).rejects.toThrow(/^Senha fraca\./);
+      expect(userTokens.consume).not.toHaveBeenCalled();
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('acceptInvite', () => {
     const invitedUser = { id: 'u5', email: 'novo@teste.com', status: 'INVITED' };
 
     it('token válido de usuário INVITED define a senha, ativa o login e confirma o e-mail', async () => {
+      userTokens.peek.mockResolvedValue('u5');
       userTokens.consume.mockResolvedValue('u5');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...invitedUser });
       prisma.user.updateMany.mockResolvedValue({ count: 1 });
 
-      await service.acceptInvite('token-valido', 'senhaNova12345');
+      await service.acceptInvite('token-valido', STRONG_PASSWORD);
 
       expect(userTokens.consume).toHaveBeenCalledWith('token-valido', 'INVITE');
       expect(prisma.user.updateMany).toHaveBeenCalledWith({
@@ -1418,14 +1473,15 @@ describe('AuthService', () => {
         }),
       });
       const data = prisma.user.updateMany.mock.calls[0][0].data;
-      expect(data.passwordHash).not.toBe('senhaNova12345');
+      expect(data.passwordHash).not.toBe(STRONG_PASSWORD);
     });
 
     it.each(['BLOCKED', 'ACTIVE', 'LOCKED'])('usuário %s é recusado com o 400 genérico, sem alterar nada', async (status) => {
+      userTokens.peek.mockResolvedValue('u5');
       userTokens.consume.mockResolvedValue('u5');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...invitedUser, status });
 
-      await expect(service.acceptInvite('token-valido', 'senhaNova12345')).rejects.toThrow(
+      await expect(service.acceptInvite('token-valido', STRONG_PASSWORD)).rejects.toThrow(
         new BadRequestException('Link inválido ou expirado. Peça um novo.'),
       );
       expect(prisma.user.update).not.toHaveBeenCalled();
@@ -1433,19 +1489,20 @@ describe('AuthService', () => {
     });
 
     it('corrida: bloqueado entre a leitura e a escrita (updateMany count 0) → mesmo 400', async () => {
+      userTokens.peek.mockResolvedValue('u5');
       userTokens.consume.mockResolvedValue('u5');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...invitedUser });
       prisma.user.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(service.acceptInvite('token-valido', 'senhaNova12345')).rejects.toThrow(
+      await expect(service.acceptInvite('token-valido', STRONG_PASSWORD)).rejects.toThrow(
         'Link inválido ou expirado. Peça um novo.',
       );
     });
 
     it('token inválido/expirado repassa a BadRequestException de consume()', async () => {
-      userTokens.consume.mockRejectedValue(new BadRequestException('Link inválido ou expirado. Peça um novo.'));
+      userTokens.peek.mockRejectedValue(new BadRequestException('Link inválido ou expirado. Peça um novo.'));
 
-      await expect(service.acceptInvite('token-invalido', 'senhaNova12345')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.acceptInvite('token-invalido', STRONG_PASSWORD)).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
@@ -1457,10 +1514,11 @@ describe('AuthService', () => {
     };
 
     it('token válido troca a senha, zera o bloqueio, confirma o e-mail e revoga as sessões — sem e-mail de aviso', async () => {
+      userTokens.peek.mockResolvedValue('u1');
       userTokens.consume.mockResolvedValue('u1');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser });
 
-      await service.resetPassword('token-valido', 'senhaNova12345');
+      await service.resetPassword('token-valido', STRONG_PASSWORD);
 
       expect(userTokens.consume).toHaveBeenCalledWith('token-valido', 'PASSWORD_RESET');
       expect(prisma.user.update).toHaveBeenCalledWith({
@@ -1484,10 +1542,11 @@ describe('AuthService', () => {
 
     it('mantém emailVerifiedAt já existente em vez de sobrescrever com a data de agora', async () => {
       const verifiedAt = new Date('2026-01-01T00:00:00.000Z');
+      userTokens.peek.mockResolvedValue('u1');
       userTokens.consume.mockResolvedValue('u1');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser, emailVerifiedAt: verifiedAt });
 
-      await service.resetPassword('token-valido', 'senhaNova12345');
+      await service.resetPassword('token-valido', STRONG_PASSWORD);
 
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
@@ -1496,20 +1555,22 @@ describe('AuthService', () => {
     });
 
     it('usuário BLOCKED tem a senha trocada mas status nunca entra no data (BLOCKED nunca é desfeito por reset)', async () => {
+      userTokens.peek.mockResolvedValue('u1');
       userTokens.consume.mockResolvedValue('u1');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser, status: 'BLOCKED' });
 
-      await service.resetPassword('token-valido', 'senhaNova12345');
+      await service.resetPassword('token-valido', STRONG_PASSWORD);
 
       const data = prisma.user.update.mock.calls[0][0].data;
       expect(data).not.toHaveProperty('status');
     });
 
     it('usuário INVITED é recusado — convite se aceita pela rota de convite, nunca por redefinir senha', async () => {
+      userTokens.peek.mockResolvedValue('u2');
       userTokens.consume.mockResolvedValue('u2');
       prisma.user.findUniqueOrThrow.mockResolvedValue({ ...activeUser, id: 'u2', status: 'INVITED' });
 
-      await expect(service.resetPassword('token-valido', 'senhaNova12345')).rejects.toThrow(
+      await expect(service.resetPassword('token-valido', STRONG_PASSWORD)).rejects.toThrow(
         'Link inválido ou expirado. Peça um novo.',
       );
       expect(prisma.user.update).not.toHaveBeenCalled();
@@ -1517,9 +1578,9 @@ describe('AuthService', () => {
     });
 
     it('token inválido/expirado repassa a BadRequestException de consume()', async () => {
-      userTokens.consume.mockRejectedValue(new BadRequestException('Link inválido ou expirado. Peça um novo.'));
+      userTokens.peek.mockRejectedValue(new BadRequestException('Link inválido ou expirado. Peça um novo.'));
 
-      await expect(service.resetPassword('token-invalido', 'senhaNova12345')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.resetPassword('token-invalido', STRONG_PASSWORD)).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(prisma.user.update).not.toHaveBeenCalled();
     });

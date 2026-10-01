@@ -314,4 +314,52 @@ describe('Acesso e sessões — confirmação de e-mail, convites e bloqueio tem
     const lockMessages = fake.sent.filter((m) => m.to === email);
     expect(lockMessages).toHaveLength(1);
   });
+
+  // Senha forte (zxcvbn >= 3, 01/10/2026) em todo fluxo que DEFINE senha — inclusive a garantia de
+  // que uma senha fraca recusada no aceite de convite NÃO gasta o link (peek() antes de consume()).
+  describe('senha forte obrigatória', () => {
+    it('cadastro com senha fraca → 400 "Senha fraca", nenhuma empresa criada', async () => {
+      const email = `weak-register-${runId}@test.com`;
+      const res = await request(app.getHttpServer())
+        .post('/auth/register')
+        .set(CSRF_HEADER)
+        .send(buildRegisterBody({ companyName: 'Empresa Senha Fraca', email, password: 'Senha@123' }))
+        .expect(400);
+      expect(res.body.message).toMatch(/^Senha fraca\./);
+      expect(await sys(() => prisma.user.findUnique({ where: { email } }))).toBeNull();
+    });
+
+    it('troca de senha com senha nova fraca → 400, senha antiga continua valendo', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/auth/me/password')
+        .set('Authorization', adminToken)
+        .set(CSRF_HEADER)
+        .send({ currentPassword: PASSWORD, newPassword: 'Teste@1234' })
+        .expect(400);
+      expect(res.body.message).toMatch(/^Senha fraca\./);
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .set(CSRF_HEADER)
+        .send({ email: adminEmail, password: PASSWORD })
+        .expect(201);
+    });
+
+    it('aceite de convite com senha fraca → 400 e o MESMO link ainda funciona com uma senha forte', async () => {
+      const { email, inviteUrl } = await inviteEmployeeLogin('senha-fraca');
+      const token = new URL(inviteUrl).searchParams.get('token')!;
+      const weak = await request(app.getHttpServer())
+        .post('/auth/accept-invite')
+        .set(CSRF_HEADER)
+        .send({ token, password: 'Senha@123' })
+        .expect(400);
+      expect(weak.body.message).toMatch(/^Senha fraca\./);
+
+      await acceptInvite(app, inviteUrl, 'senha-do-convidado-forte-789');
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .set(CSRF_HEADER)
+        .send({ email, password: 'senha-do-convidado-forte-789' })
+        .expect(201);
+    });
+  });
 });

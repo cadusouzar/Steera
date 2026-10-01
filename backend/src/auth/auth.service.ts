@@ -24,6 +24,7 @@ import { RegisterDto } from './dto/register.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { getDummyPasswordHash, hashPassword, verifyPassword } from './password.util';
+import { assertStrongPassword, buildPasswordUserInputs } from './password-strength.util';
 import { effectiveHasFullPontoAccess } from './ponto-access.util';
 import { assertEmployeeLinkable, canSelfLinkEmployee, saveEmployeeLink, SELF_LINK_DENIED_MESSAGE } from './employee-link.util';
 import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.util';
@@ -300,6 +301,7 @@ export class AuthService {
     const tradeName = dto.tradeName?.trim() || null;
     const legalName = dto.legalName.trim();
     const displayName = tradeName ?? legalName;
+    assertStrongPassword(dto.password, buildPasswordUserInputs([dto.email, dto.name, legalName, tradeName]));
     await this.assertRegisterIdentityAvailable(dto, document);
     const passwordHash = await hashPassword(dto.password);
     let result: {
@@ -661,12 +663,16 @@ export class AuthService {
   async resetPassword(rawToken: string, newPassword: string): Promise<void> {
     // consume() já lança BadRequestException('Link inválido ou expirado. Peça um novo.') sozinho
     // pra token ausente/tipo errado/expirado/já usado — repassada como está (Step 1, teste 7).
-    const userId = await this.userTokens.consume(rawToken, 'PASSWORD_RESET');
+    // peek() antes de consume(): a senha nova é conferida (força) sem gastar o link — uma senha
+    // fraca recusada não obriga a pessoa a pedir outro e-mail.
+    const userId = await this.userTokens.peek(rawToken, 'PASSWORD_RESET');
     const user = await runAsSystem(() => this.prisma.user.findUniqueOrThrow({ where: { id: userId } }));
 
     if (user.status === 'INVITED') {
       throw new BadRequestException(INVALID_OR_EXPIRED_MESSAGE);
     }
+    assertStrongPassword(newPassword, await this.passwordUserInputsFor(user));
+    await this.userTokens.consume(rawToken, 'PASSWORD_RESET');
 
     const passwordHash = await hashPassword(newPassword);
 
@@ -764,9 +770,12 @@ export class AuthService {
   // update não casa nada e o BLOCKED fica. runAsSystem: rota @Public(), mesmo raciocínio de
   // resetPassword().
   async acceptInvite(rawToken: string, password: string): Promise<void> {
-    const userId = await this.userTokens.consume(rawToken, 'INVITE');
+    // peek() antes de consume(): mesmo motivo de resetPassword() — senha fraca não queima o convite.
+    const userId = await this.userTokens.peek(rawToken, 'INVITE');
     const user = await runAsSystem(() => this.prisma.user.findUniqueOrThrow({ where: { id: userId } }));
     if (user.status !== 'INVITED') throw new BadRequestException(INVALID_OR_EXPIRED_MESSAGE);
+    assertStrongPassword(password, await this.passwordUserInputsFor(user));
+    await this.userTokens.consume(rawToken, 'INVITE');
 
     const passwordHash = await hashPassword(password);
     const { count } = await runAsSystem(() =>
@@ -823,11 +832,24 @@ export class AuthService {
     res.clearCookie(REFRESH_COOKIE_NAME, { path: '/auth' });
   }
 
+  // "Palavras proibidas" da senha nova: e-mail e nome do login + nomes da empresa (Company é central,
+  // sem RLS — runAsSystem só pra não depender do contexto de quem chama, rota pública ou não).
+  private async passwordUserInputsFor(user: { email: string; name?: string | null; companyId: string }) {
+    const company = await runAsSystem(() =>
+      this.prisma.company.findUnique({
+        where: { id: user.companyId },
+        select: { name: true, legalName: true, tradeName: true },
+      }),
+    );
+    return buildPasswordUserInputs([user.email, user.name, company?.name, company?.legalName, company?.tradeName]);
+  }
+
   async changePassword(userId: string, dto: { currentPassword: string; newPassword: string }) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     if (!(await verifyPassword(user.passwordHash, dto.currentPassword))) {
       throw new BadRequestException('Senha atual incorreta');
     }
+    assertStrongPassword(dto.newPassword, await this.passwordUserInputsFor(user));
     const passwordHash = await hashPassword(dto.newPassword);
     // Mesmo padrão de UsersService.block(): update de senha + revogação de
     // TODOS os refresh tokens ativos numa única transação. Sem isso, um

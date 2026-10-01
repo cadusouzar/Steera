@@ -81,6 +81,20 @@ export class UserTokensService {
     });
   }
 
+  // Confere o token SEM gastá-lo — usado por resetPassword/acceptInvite pra validar a força da senha
+  // nova antes do consume(): sem isso, uma senha fraca rejeitada queimaria o link da pessoa. Não
+  // substitui o consume() (que continua sendo a reivindicação atômica), só antecipa o erro.
+  async peek(rawToken: string, type: UserTokenType): Promise<string> {
+    return runAsSystem(async () => {
+      const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+      const found = await this.prisma.userToken.findUnique({ where: { tokenHash } });
+      if (!found || found.type !== type || found.usedAt !== null || found.expiresAt.getTime() <= Date.now()) {
+        throw new BadRequestException(INVALID_OR_EXPIRED_MESSAGE);
+      }
+      return found.userId;
+    });
+  }
+
   async consume(rawToken: string, type: UserTokenType): Promise<string> {
     return runAsSystem(async () => {
       const tokenHash = createHash('sha256').update(rawToken).digest('hex');

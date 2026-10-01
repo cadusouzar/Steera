@@ -51,6 +51,29 @@ describe('UserTokensService', () => {
     });
   });
 
+  describe('peek (confere o token sem gastá-lo)', () => {
+    const future = new Date(Date.now() + 60_000);
+
+    it('token válido, não usado e não expirado → devolve o userId sem escrever nada', async () => {
+      prisma.userToken.findUnique.mockResolvedValue({ id: 't1', userId: 'u1', type: 'INVITE', usedAt: null, expiresAt: future });
+      await expect(service.peek('raw', 'INVITE')).resolves.toBe('u1');
+      expect(prisma.userToken.findUnique).toHaveBeenCalledWith({
+        where: { tokenHash: createHash('sha256').update('raw').digest('hex') },
+      });
+      expect(prisma.userToken.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['inexistente', null],
+      ['de outro tipo', { id: 't1', userId: 'u1', type: 'PASSWORD_RESET', usedAt: null, expiresAt: future }],
+      ['já usado', { id: 't1', userId: 'u1', type: 'INVITE', usedAt: new Date(), expiresAt: future }],
+      ['expirado', { id: 't1', userId: 'u1', type: 'INVITE', usedAt: null, expiresAt: new Date(Date.now() - 1) }],
+    ])('token %s → mesma mensagem genérica', async (_label, found) => {
+      prisma.userToken.findUnique.mockResolvedValue(found);
+      await expect(service.peek('raw', 'INVITE')).rejects.toThrow(INVALID_OR_EXPIRED_MESSAGE);
+    });
+  });
+
   it('consume marks the token used atomically and returns the userId', async () => {
     prisma.userToken.findUnique.mockResolvedValue({ id: 't1', userId: 'u1', type: 'INVITE' });
     prisma.userToken.updateMany.mockResolvedValue({ count: 1 });

@@ -5,10 +5,7 @@ import { IsString, MaxLength, MinLength } from 'class-validator';
 // verdade de validade/expiração, que é sempre `consume()`).
 export class ResetPasswordDto {
   @IsString() @MinLength(20) @MaxLength(200) token!: string;
-  // Mesmo piso de senha do RegisterDto/ChangePasswordDto (@MinLength(8) — nenhum dos dois tem hoje
-  // um teto de tamanho). @MaxLength(128) adicionado aqui por consistência com o resto do projeto
-  // (toda "Consistência de Validação" trouxe teto pra campo que só tinha piso, ver CLAUDE.md) —
-  // registrado no relatório da task como uma pequena divergência em relação aos dois DTOs irmãos,
-  // que ficam sem teto por não fazerem parte do escopo desta task.
+  // Mesmo piso/teto de RegisterDto/ChangePasswordDto/AcceptInviteDto; a força (zxcvbn) é conferida
+  // em AuthService.resetPassword, antes de gastar o token.
   @IsString() @MinLength(8) @MaxLength(128) newPassword!: string;
 }
