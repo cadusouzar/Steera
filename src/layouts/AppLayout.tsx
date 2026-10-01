@@ -1,16 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import {
+  BriefcaseBusiness, Clock3, HeartHandshake, KeyRound, LayoutGrid, LineChart, Menu, Package,
+  ShieldCheck, SlidersHorizontal, Users, Wallet, X,
+} from 'lucide-react';
 import { useTheme } from '../components/ThemeProvider';
 import ThemeToggle from '../components/ThemeToggle';
 import UserProfileDropdown from '../components/UserProfileDropdown';
 import UserProfileDrawer from '../components/UserProfileDrawer';
-import LockedNavItem from '../components/LockedNavItem';
 import PlanUpgradeNotice from '../components/PlanUpgradeNotice';
 import PlanUpgradeModal, { type PlanUpgradeTarget } from '../components/PlanUpgradeModal';
 import type { PlanCatalogItem } from '../lib/api';
 import { can, useCurrentUser } from '../lib/auth';
 import { PLAN_ITEM_LABELS } from '../lib/planCatalog';
-import { Users, BarChart3, TrendingUp, LayoutDashboard, HeartHandshake, ChevronDown, Package, Shield, Settings } from 'lucide-react';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+import { usePontoPendingCount } from '../hooks/usePontoPendingCount';
+import AppSidebar, { type NavEntry, type NavGroup, type NavLink, type NavSection } from './AppSidebar';
 
 // Mapa de prefixo de rota → item de plano (módulo/recurso) que a protege — checado do mais
 // específico pro mais genérico (ex.: /app/ponto-administracao antes de /app/ponto, que também
@@ -30,6 +36,15 @@ function lockedItemForPath(pathname: string): string | null {
   return null;
 }
 
+// Grupo da sidebar que contém cada prefixo de rota — abre sozinho quando a rota atual está dentro dele.
+const GROUP_PREFIXES: Record<string, string[]> = {
+  rh: ['/app/funcionarios', '/app/cargos'],
+  // `/app/ponto` já cobre /app/ponto-administracao (prefixo de string).
+  ponto: ['/app/ponto'],
+  comercial: ['/app/orcamentos'],
+  operacoes: ['/app/estoque', '/app/compras'],
+};
+
 // Espelha o enum `AppModule` do backend (backend/prisma/schema.prisma) — os valores já chegam em
 // maiúsculo de getCurrentUser()?.modules (vindos direto de /auth/login, /auth/me e do refresh),
 // sem precisar de normalização. `RH` sozinho nunca é mais atribuído a um login novo (17/09/2026) —
@@ -40,10 +55,13 @@ type AppModule =
   | 'DASHBOARD' | 'CLIENTES' | 'RH' | 'RH_CARGOS' | 'RH_FUNCIONARIOS'
   | 'PONTO_REGISTRO' | 'PONTO_ADMINISTRACAO' | 'COMERCIAL' | 'OPERACOES' | 'FINANCAS';
 
+const BRAND = 'QuickFlow';
+
 const AppLayout = () => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const currentUser = useCurrentUser();
+  const reduceMotion = useReducedMotion();
 
   // Filtro de navegação por módulo: convenção de UI apenas (esconde links
   // que o usuário não tem em `modules`) — não é a fronteira de segurança
@@ -60,6 +78,7 @@ const AppLayout = () => {
   const showClientes = hasModule('CLIENTES') && hasPermission('clientes.ver');
   const showCargos = hasModule('RH_CARGOS') && hasPermission('cargos.ver');
   const showFuncionarios = hasModule('RH_FUNCIONARIOS') && hasPermission('funcionarios.ver');
+  const showPontoAdmin = hasModule('PONTO_ADMINISTRACAO') && hasPermission('ponto.administrar');
   const canManageUsers = hasPermission('usuarios.gerenciar');
   const canManageCustomFields = hasPermission('campos-personalizados.gerenciar');
 
@@ -71,381 +90,223 @@ const AppLayout = () => {
 
   const lockedRouteItem = lockedItemForPath(location.pathname);
   const lockedRoute = lockedRouteItem ? lockOf(lockedRouteItem) : undefined;
+
+  // Oferta de upgrade aberta por cima da tela atual (clique num item travado ou em "Ver planos" da
+  // rota travada) — nunca navega.
+  const [upgradeTarget, setUpgradeTarget] = useState<PlanUpgradeTarget | null>(null);
+  const closeUpgrade = useCallback(() => setUpgradeTarget(null), []);
   const openUpgrade = (featureLabel: string, item: string) => {
     const lock = lockOf(item);
     if (!lock) return;
     setUpgradeTarget({ featureLabel, requiredTier: lock.tier as PlanCatalogItem['tier'], requiredLabel: lock.label });
   };
 
-  const isActive = (path: string) => path === '/app' ? location.pathname === '/app' : (location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const isActive = useCallback(
+    (path: string) => (path === '/app' ? location.pathname === '/app' : matchesPrefix(location.pathname, path)),
+    [location.pathname],
+  );
 
-  // State for submenus
-  const [isHrOpen, setIsHrOpen] = useState(false);
-  const [isPontoOpen, setIsPontoOpen] = useState(false);
-  const [isOperationsOpen, setIsOperationsOpen] = useState(false);
-  const [isCommercialOpen, setIsCommercialOpen] = useState(false);
-  
-  // State for profile drawer
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  // Oferta de upgrade aberta por cima da tela atual (clique num item travado ou em "Ver planos" da
-  // rota travada) — nunca navega.
-  const [upgradeTarget, setUpgradeTarget] = useState<PlanUpgradeTarget | null>(null);
-  const closeUpgrade = useCallback(() => setUpgradeTarget(null), []);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (key: string) => setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // Auto-open submenu if active route is inside it
+  // Abre sozinho o grupo que contém a rota atual (nunca fecha o que a pessoa abriu).
   useEffect(() => {
-    if (location.pathname.startsWith('/app/funcionarios') || location.pathname.startsWith('/app/cargos')) {
-      setIsHrOpen(true);
-    }
-    // `startsWith('/app/ponto')` já cobre /app/ponto-administracao também (prefixo de string) —
-    // sem precisar de uma condição separada. Ponto virou um submenu próprio, independente de RH
-    // (17/09/2026).
-    if (location.pathname.startsWith('/app/ponto')) {
-      setIsPontoOpen(true);
-    }
-    if (location.pathname.startsWith('/app/estoque') || location.pathname.startsWith('/app/compras')) {
-      setIsOperationsOpen(true);
-    }
-    if (location.pathname.startsWith('/app/orcamentos')) {
-      setIsCommercialOpen(true);
+    const opened = Object.entries(GROUP_PREFIXES)
+      .filter(([, prefixes]) => prefixes.some((p) => location.pathname.startsWith(p)))
+      .map(([key]) => key);
+    if (opened.length > 0) {
+      setOpenGroups((prev) => {
+        const next = { ...prev };
+        opened.forEach((key) => { next[key] = true; });
+        return next;
+      });
     }
   }, [location.pathname]);
 
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const closeMobileNav = useCallback(() => setIsMobileNavOpen(false), []);
+  useEscapeKey(closeMobileNav);
+  useEffect(() => setIsMobileNavOpen(false), [location.pathname]);
+
+  const pontoPending = usePontoPendingCount(showPontoAdmin && !lockOf('PONTO_ADMINISTRACAO'), location.pathname);
+
+  const sections = useMemo<NavSection[]>(() => {
+    const main: NavEntry[] = [];
+    if (hasModule('DASHBOARD')) {
+      main.push({ kind: 'link', key: 'overview', to: '/app', label: 'Visão Geral', icon: LayoutGrid });
+    }
+    if (showClientes) {
+      main.push({ kind: 'link', key: 'clientes', to: '/app/clientes', label: 'Clientes', icon: HeartHandshake });
+    }
+    // Recursos Humanos — só Cargos/Funcionários desde 17/09/2026 (Ponto é um menu próprio).
+    if (showCargos || showFuncionarios) {
+      const children: NavLink[] = [];
+      if (showFuncionarios) children.push({ kind: 'link', key: 'funcionarios', to: '/app/funcionarios', label: 'Funcionários' });
+      if (showCargos) children.push({ kind: 'link', key: 'cargos', to: '/app/cargos', label: 'Cargos' });
+      main.push({ kind: 'group', key: 'rh', label: 'Recursos Humanos', icon: Users, children });
+    }
+    // Ponto (17/09/2026): "Controle de Ponto" (bater o próprio) e "Administração de Ponto" (aprovar
+    // ajustes/justificativas, escalas, feriados) são módulos INDEPENDENTES.
+    if (hasModule('PONTO_REGISTRO') || hasModule('PONTO_ADMINISTRACAO')) {
+      if (lockOf('PONTO_REGISTRO') && lockOf('PONTO_ADMINISTRACAO')) {
+        main.push({
+          kind: 'locked', key: 'ponto', label: 'Ponto', icon: Clock3,
+          planLabel: lockOf('PONTO_REGISTRO')!.label, onClick: () => openUpgrade('Ponto', 'PONTO_REGISTRO'),
+        });
+      } else {
+        const children: NavLink[] = [];
+        if (hasModule('PONTO_REGISTRO')) children.push({ kind: 'link', key: 'ponto-registro', to: '/app/ponto', label: 'Controle de Ponto' });
+        if (showPontoAdmin) {
+          children.push({
+            kind: 'link', key: 'ponto-admin', to: '/app/ponto-administracao', label: 'Administração de Ponto',
+            badge: pontoPending ? { count: pontoPending, label: pontoPending === 1 ? '1 pendência de ponto aguardando análise' : `${pontoPending} pendências de ponto aguardando análise` } : null,
+          });
+        }
+        main.push({ kind: 'group', key: 'ponto', label: 'Ponto', icon: Clock3, children });
+      }
+    }
+    if (hasModule('COMERCIAL')) {
+      main.push(lockOf('COMERCIAL')
+        ? { kind: 'locked', key: 'comercial', label: 'Comercial', icon: BriefcaseBusiness, planLabel: lockOf('COMERCIAL')!.label, onClick: () => openUpgrade('Comercial', 'COMERCIAL') }
+        : {
+          kind: 'group', key: 'comercial', label: 'Comercial', icon: BriefcaseBusiness,
+          children: [{ kind: 'link', key: 'orcamentos', to: '/app/orcamentos', label: 'Orçamentos' }],
+        } satisfies NavGroup);
+    }
+    if (hasModule('OPERACOES')) {
+      main.push(lockOf('OPERACOES')
+        ? { kind: 'locked', key: 'operacoes', label: 'Operações', icon: Package, planLabel: lockOf('OPERACOES')!.label, onClick: () => openUpgrade('Operações', 'OPERACOES') }
+        : {
+          kind: 'group', key: 'operacoes', label: 'Operações', icon: Package,
+          children: [
+            { kind: 'link', key: 'estoque', to: '/app/estoque', label: 'Estoque' },
+            { kind: 'link', key: 'compras', to: '/app/compras', label: 'Compras / Cotações' },
+            // Antes era um <a href="#"> que não levava a lugar nenhum.
+            { kind: 'disabled', key: 'logistica', label: 'Logística', note: 'Em breve' },
+          ],
+        } satisfies NavGroup);
+    }
+    if (hasModule('FINANCAS')) {
+      main.push(lockOf('FINANCAS')
+        ? { kind: 'locked', key: 'financas', label: 'Finanças', icon: Wallet, planLabel: lockOf('FINANCAS')!.label, onClick: () => openUpgrade('Finanças', 'FINANCAS') }
+        : { kind: 'link', key: 'financas', to: '/app/financas', label: 'Finanças', icon: Wallet });
+    }
+    if (hasModule('DASHBOARD')) {
+      main.push(lockOf('ANALYTICS')
+        ? { kind: 'locked', key: 'analytics', label: 'Analytics e Dashboards', icon: LineChart, planLabel: lockOf('ANALYTICS')!.label, onClick: () => openUpgrade('Analytics e Dashboards', 'ANALYTICS') }
+        : { kind: 'link', key: 'analytics', to: '/app/analytics', label: 'Analytics e Dashboards', icon: LineChart });
+    }
+
+    // Administração — gateada pelas permissões do perfil (27/09/2026), não por `role === 'admin'`:
+    // Usuários e Perfis com `usuarios.gerenciar`, Campos Personalizados com
+    // `campos-personalizados.gerenciar` (as mesmas que o backend exige).
+    const admin: NavEntry[] = [];
+    if (canManageUsers) {
+      admin.push({ kind: 'link', key: 'usuarios', to: '/app/usuarios', label: 'Usuários e Acessos', icon: ShieldCheck });
+      admin.push({ kind: 'link', key: 'perfis', to: '/app/perfis', label: 'Perfis de Acesso', icon: KeyRound });
+    }
+    if (canManageCustomFields) {
+      admin.push({ kind: 'link', key: 'campos', to: '/app/campos-personalizados', label: 'Campos Personalizados', icon: SlidersHorizontal });
+    }
+    return [{ key: 'main', entries: main }, { key: 'admin', entries: admin }];
+    // Recalcula quando o login (módulos/permissões/plano) ou a contagem de pendências mudam.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, pontoPending]);
+
+  const sidebarProps = { sections, isActive, openGroups, onToggleGroup: toggleGroup, brand: BRAND };
+
   return (
-    <div className="min-h-screen bg-background flex transition-colors duration-300">
-      
-      {/* Sidebar (ERP Shell) */}
-      <aside className="w-64 border-r border-border bg-panel hidden md:flex flex-col transition-colors duration-300">
-        <div className="h-16 flex items-center px-6 border-b border-border">
-          <div className="w-6 h-6 rounded bg-primary flex items-center justify-center font-heading font-bold text-white text-xs mr-2">
-            Q
-          </div>
-          <span className="font-heading font-bold text-foreground">QuickFlow</span>
-        </div>
-        
-        <nav className="flex-1 px-4 py-6 space-y-1">
-          <div className="text-xs font-semibold text-muted uppercase tracking-wider mb-4 px-2">Módulos</div>
-          
-          {hasModule('DASHBOARD') && (
-            <Link
-              to="/app"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                isActive('/app') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-              }`}
-            >
-              <LayoutDashboard size={18} />
-              Visão Geral
-            </Link>
-          )}
-          {showClientes && (
-            <Link
-              to="/app/clientes"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                isActive('/app/clientes') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-              }`}
-            >
-              <HeartHandshake size={18} />
-              Clientes
-            </Link>
-          )}
-
-          {/* Recursos Humanos Submenu — só Cargos/Funcionários desde 17/09/2026 (Ponto virou um
-              menu próprio, independente, logo abaixo) */}
-          {(showCargos || showFuncionarios) && (
-          <div className="space-y-1">
-            <button
-              onClick={() => setIsHrOpen(!isHrOpen)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                (isActive('/app/funcionarios') || isActive('/app/cargos'))
-                  ? 'bg-primary/5 text-primary'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Users size={18} />
-                Recursos Humanos
-              </div>
-              <ChevronDown size={16} className={`transition-transform duration-300 ${isHrOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isHrOpen ? 'max-h-24 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-              <div className="pl-11 pr-2 space-y-1">
-                {showFuncionarios && (
-                <Link
-                  to="/app/funcionarios"
-                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-                    isActive('/app/funcionarios') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                  }`}
-                >
-                  Funcionários
-                </Link>
-                )}
-                {showCargos && (
-                <Link
-                  to="/app/cargos"
-                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-                    isActive('/app/cargos') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                  }`}
-                >
-                  Cargos
-                </Link>
-                )}
-              </div>
-            </div>
-          </div>
-          )}
-
-          {/* Ponto Submenu (novo em 17/09/2026, independente de Recursos Humanos) — "Controle de
-              Ponto" (bater o próprio ponto) e "Administração de Ponto" (aprovar ajustes/
-              justificativas de outros, escalas, feriados, configuração) são módulos
-              INDEPENDENTES: dá pra conceder um sem o outro, ex. um login que só bate o próprio
-              ponto, sem enxergar a administração. */}
-          {(hasModule('PONTO_REGISTRO') || hasModule('PONTO_ADMINISTRACAO')) && (
-            lockOf('PONTO_REGISTRO') && lockOf('PONTO_ADMINISTRACAO') ? (
-              <LockedNavItem icon={Users} label="Ponto" planLabel={lockOf('PONTO_REGISTRO')!.label} onClick={() => openUpgrade('Ponto', 'PONTO_REGISTRO')} />
-            ) : (
-          <div className="space-y-1">
-            <button
-              onClick={() => setIsPontoOpen(!isPontoOpen)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                (isActive('/app/ponto') || isActive('/app/ponto-administracao'))
-                  ? 'bg-primary/5 text-primary'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Users size={18} />
-                Ponto
-              </div>
-              <ChevronDown size={16} className={`transition-transform duration-300 ${isPontoOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isPontoOpen ? 'max-h-40 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-              <div className="pl-11 pr-2 space-y-1">
-                {hasModule('PONTO_REGISTRO') && (
-                <Link
-                  to="/app/ponto"
-                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-                    isActive('/app/ponto') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                  }`}
-                >
-                  Controle de Ponto
-                </Link>
-                )}
-                {hasModule('PONTO_ADMINISTRACAO') && hasPermission('ponto.administrar') && (
-                <Link
-                  to="/app/ponto-administracao"
-                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-                    isActive('/app/ponto-administracao') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                  }`}
-                >
-                  Administração de Ponto
-                </Link>
-                )}
-              </div>
-            </div>
-          </div>
-            )
-          )}
-
-          {/* Comercial Submenu */}
-          {hasModule('COMERCIAL') && (
-            lockOf('COMERCIAL') ? (
-              <LockedNavItem icon={TrendingUp} label="Comercial" planLabel={lockOf('COMERCIAL')!.label} onClick={() => openUpgrade('Comercial', 'COMERCIAL')} />
-            ) : (
-          <div className="space-y-1">
-            <button
-              onClick={() => setIsCommercialOpen(!isCommercialOpen)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                (isActive('/app/orcamentos')) 
-                  ? 'bg-primary/5 text-primary' 
-                  : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <TrendingUp size={18} />
-                Comercial
-              </div>
-              <ChevronDown size={16} className={`transition-transform duration-300 ${isCommercialOpen ? 'rotate-180' : ''}`} />
-            </button>
-            
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isCommercialOpen ? 'max-h-40 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-              <div className="pl-11 pr-2 space-y-1">
-                <Link 
-                  to="/app/orcamentos" 
-                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-                    isActive('/app/orcamentos') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                  }`}
-                >
-                  Orçamentos
-                </Link>
-              </div>
-            </div>
-          </div>
-            )
-          )}
-
-          {/* Operações Submenu */}
-          {hasModule('OPERACOES') && (
-            lockOf('OPERACOES') ? (
-              <LockedNavItem icon={Package} label="Operações" planLabel={lockOf('OPERACOES')!.label} onClick={() => openUpgrade('Operações', 'OPERACOES')} />
-            ) : (
-          <div className="space-y-1">
-            <button
-              onClick={() => setIsOperationsOpen(!isOperationsOpen)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                (isActive('/app/estoque') || isActive('/app/compras')) 
-                  ? 'bg-primary/5 text-primary' 
-                  : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Package size={18} />
-                Operações
-              </div>
-              <ChevronDown size={16} className={`transition-transform duration-300 ${isOperationsOpen ? 'rotate-180' : ''}`} />
-            </button>
-            
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isOperationsOpen ? 'max-h-40 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-              <div className="pl-11 pr-2 space-y-1">
-                <Link 
-                  to="/app/estoque" 
-                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-                    isActive('/app/estoque') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                  }`}
-                >
-                  Estoque
-                </Link>
-                <Link 
-                  to="/app/compras" 
-                  className={`block px-3 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-                    isActive('/app/compras') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                  }`}
-                >
-                  Compras / Cotações
-                </Link>
-                <a href="#" className="block px-3 py-2 rounded-lg text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50 transition-all duration-300">
-                  Logística
-                </a>
-              </div>
-            </div>
-          </div>
-            )
-          )}
-          {hasModule('FINANCAS') && (
-            lockOf('FINANCAS') ? (
-              <LockedNavItem icon={BarChart3} label="Finanças" planLabel={lockOf('FINANCAS')!.label} onClick={() => openUpgrade('Finanças', 'FINANCAS')} />
-            ) : (
-          <Link
-            to="/app/financas"
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-              isActive('/app/financas') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-            }`}
-          >
-            <BarChart3 size={18} />
-            Finanças
-          </Link>
-            )
-          )}
-
-          {hasModule('DASHBOARD') && (
-            lockOf('ANALYTICS') ? (
-              <LockedNavItem icon={LayoutDashboard} label="Analytics e Dashboards" planLabel={lockOf('ANALYTICS')!.label} onClick={() => openUpgrade('Analytics e Dashboards', 'ANALYTICS')} />
-            ) : (
-          <Link
-            to="/app/analytics"
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-              isActive('/app/analytics') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-            }`}
-          >
-            <LayoutDashboard size={18} />
-            Analytics e Dashboards
-          </Link>
-            )
-          )}
-
-          {/* Seção Administração — gateada pelas permissões do perfil (27/09/2026), não mais por
-              `role === 'admin'`: Usuários e Perfis com `usuarios.gerenciar`, Campos Personalizados
-              com `campos-personalizados.gerenciar` (as mesmas que o backend exige). */}
-          {(canManageUsers || canManageCustomFields) && (
-            <>
-              <div className="text-xs font-semibold text-muted uppercase tracking-wider mt-8 pt-6 border-t border-border/40 mb-4 px-2">Administração</div>
-
-              {canManageUsers && (
-              <>
-              <Link
-                to="/app/usuarios"
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                  isActive('/app/usuarios') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                }`}
-              >
-                <Shield size={18} />
-                Usuários e Acessos
-              </Link>
-
-              <Link
-                to="/app/perfis"
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                  isActive('/app/perfis') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                }`}
-              >
-                <Shield size={18} />
-                Perfis de Acesso
-              </Link>
-              </>
-              )}
-
-              {canManageCustomFields && (
-              <Link
-                to="/app/campos-personalizados"
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-                  isActive('/app/campos-personalizados') ? 'bg-primary/10 text-primary' : 'text-slate-500 dark:text-slate-400 hover:text-foreground hover:bg-secondary/50'
-                }`}
-              >
-                <Settings size={18} />
-                Campos Personalizados
-              </Link>
-              )}
-            </>
-          )}
-        </nav>
-        
-
+    <div className="min-h-screen bg-background flex">
+      {/* Sidebar (desktop) */}
+      <aside className="w-[272px] shrink-0 border-r border-border bg-sidebar hidden md:block h-screen sticky top-0">
+        <AppSidebar {...sidebarProps} layoutId="sidebar-desktop" />
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden">
-        {/* Top Header */}
-        <header className="h-16 border-b border-border bg-panel flex items-center justify-between px-6 z-10 transition-colors duration-300">
-          <div className="flex items-center gap-4">
-            <div className="md:hidden w-8 h-8 rounded bg-primary flex items-center justify-center font-heading font-bold text-white text-sm">
-              Q
-            </div>
+      {/* Sidebar (celular): gaveta lateral com o mesmo componente */}
+      <AnimatePresence>
+        {isMobileNavOpen && (
+          <div className="md:hidden fixed inset-0 z-[90]" role="dialog" aria-modal="true" aria-label="Menu">
+            <motion.button
+              type="button"
+              aria-label="Fechar menu"
+              className="absolute inset-0 bg-black/30"
+              onClick={closeMobileNav}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            />
+            <motion.aside
+              className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-sidebar border-r border-border shadow-xl"
+              initial={reduceMotion ? { opacity: 0 } : { x: '-100%' }}
+              animate={reduceMotion ? { opacity: 1 } : { x: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { x: '-100%' }}
+              transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <button
+                type="button"
+                onClick={closeMobileNav}
+                className="absolute right-3 top-3 h-8 w-8 inline-flex items-center justify-center rounded-md text-muted hover:text-foreground hover:bg-secondary"
+                aria-label="Fechar menu"
+              >
+                <X size={18} strokeWidth={1.6} />
+              </button>
+              <AppSidebar {...sidebarProps} layoutId="sidebar-mobile" />
+            </motion.aside>
           </div>
-          
-          <div className="flex items-center gap-4">
+        )}
+      </AnimatePresence>
+
+      {/* Conteúdo */}
+      <main className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden">
+        <header className="h-14 shrink-0 border-b border-border bg-panel flex items-center justify-between px-4 md:px-6 z-10">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsMobileNavOpen(true)}
+              className="md:hidden h-9 w-9 inline-flex items-center justify-center rounded-lg border border-border text-foreground hover:bg-secondary"
+              aria-label="Abrir menu"
+            >
+              <Menu size={18} strokeWidth={1.6} />
+            </button>
+            <span className="md:hidden text-[15px] font-bold tracking-[0.08em] uppercase text-foreground">{BRAND}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
             <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
             <UserProfileDropdown onOpenProfile={() => setIsProfileOpen(true)} />
           </div>
         </header>
 
-        {/* Dynamic Route Content */}
-        <div className="flex-1 overflow-auto bg-background/50">
-          {lockedRoute ? (
-            <PlanUpgradeNotice
-              featureLabel={PLAN_ITEM_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string)}
-              planLabel={lockedRoute.label}
-              onShowPlans={() =>
-                openUpgrade(PLAN_ITEM_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string), lockedRouteItem as string)
-              }
-            />
-          ) : (
-            <Outlet />
-          )}
+        <div className="flex-1 overflow-auto">
+          <motion.div
+            key={location.pathname}
+            // h-full: várias telas (ex.: Clientes) montam a altura a partir do container de rolagem;
+            // sem isso o invólucro da animação colapsa e corta o conteúdo.
+            className="h-full"
+            initial={reduceMotion ? false : { opacity: 0, y: 6, filter: 'blur(4px)' }}
+            // `filter` só durante a entrada: mesmo `blur(0px)` cria um novo bloco de contenção e
+            // quebraria todo `position: fixed` (modais/gavetas) renderizado dentro das páginas — por
+            // isso termina em `none` (o `y: 0` o framer já devolve como `transform: none`).
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)', transitionEnd: { filter: 'none' } }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {lockedRoute ? (
+              <PlanUpgradeNotice
+                featureLabel={PLAN_ITEM_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string)}
+                planLabel={lockedRoute.label}
+                onShowPlans={() =>
+                  openUpgrade(PLAN_ITEM_LABELS[lockedRouteItem as string] ?? (lockedRouteItem as string), lockedRouteItem as string)
+                }
+              />
+            ) : (
+              <Outlet />
+            )}
+          </motion.div>
         </div>
       </main>
 
-      {/* User Profile Drawer */}
       {isProfileOpen && <UserProfileDrawer onClose={() => setIsProfileOpen(false)} />}
       <PlanUpgradeModal target={upgradeTarget} onClose={closeUpgrade} />
     </div>

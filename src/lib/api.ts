@@ -217,6 +217,15 @@ export async function listClients(): Promise<ClientRecord[]> {
   return res.items.map(mapClient);
 }
 
+// Contagem exata pelo `total` da paginação (pageSize=1) — usada pelo painel (Overview). Diferente
+// de listClients(), que traz no máximo 100 itens.
+export async function countClients(status?: 'active' | 'inactive'): Promise<number> {
+  const qs = new URLSearchParams({ excludeTrashed: 'true', pageSize: '1' });
+  if (status) qs.set('status', status.toUpperCase());
+  const res = await request<Paginated<ApiClient>>(`/clients?${qs.toString()}`);
+  return res.total;
+}
+
 export async function getClientTotals(id: string): Promise<ClientTotals> {
   const c = await request<ApiClient>(`/clients/${id}`);
   return mapClientTotals(c);
@@ -679,6 +688,14 @@ export async function reactivateRole(id: string): Promise<Role> {
 export async function listEmployees(): Promise<EmployeeListItem[]> {
   const res = await request<Paginated<ApiEmployeeListItem>>(`/employees?pageSize=100`);
   return res.items.map(mapEmployeeListItem);
+}
+
+// Mesma ideia de countClients(): total exato, já no alcance do login (o backend aplica o escopo).
+export async function countEmployees(status?: 'active' | 'inactive'): Promise<number> {
+  const qs = new URLSearchParams({ pageSize: '1' });
+  if (status) qs.set('status', status.toUpperCase());
+  const res = await request<Paginated<ApiEmployeeListItem>>(`/employees?${qs.toString()}`);
+  return res.total;
 }
 
 export async function getEmployee(id: string): Promise<EmployeeDetail> {

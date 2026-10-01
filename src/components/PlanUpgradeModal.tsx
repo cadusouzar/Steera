@@ -8,7 +8,7 @@ import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../lib/planCatalog';
 import BillingContacts from './account/BillingContacts';
 
 // Oferta de upgrade (26/09/2026): aberta por cima da tela atual quando a pessoa clica num item de
-// menu travado pelo plano (LockedNavItem) ou em "Ver planos" na tela de rota travada
+// menu travado pelo plano (item "locked" da AppSidebar) ou em "Ver planos" na tela de rota travada
 // (PlanUpgradeNotice) — nunca navega, fechar deixa a pessoa exatamente onde estava. Mostra só os
 // planos que liberam o módulo (acima do atual), com o plano mínimo em destaque. Dados de
 // GET /plans/me (mesma fonte da aba Assinatura), então preço/limite nunca divergem do backend. Sem
@@ -175,7 +175,7 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
                       }`}
                     >
                       {recommended && (
-                        <span className="absolute -top-3 left-5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-white text-[11px] font-bold uppercase tracking-wide">
+                        <span className="absolute -top-3 left-5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-[11px] font-bold uppercase tracking-wide">
                           <Sparkles size={12} aria-hidden="true" /> Recomendado
                         </span>
                       )}
@@ -201,7 +201,7 @@ const PlanUpgradeModalContent = ({ target, onClose }: { target: PlanUpgradeTarge
                             disabled
                             className={`w-full py-2.5 rounded-xl font-medium text-sm cursor-not-allowed ${
                               recommended
-                                ? 'bg-primary text-white opacity-60'
+                                ? 'bg-primary text-primary-foreground opacity-60'
                                 : 'bg-background border border-border text-muted'
                             }`}
                           >

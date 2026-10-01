@@ -48,9 +48,12 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
       {/* Trigger */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 p-1 pr-2 rounded-full hover:bg-secondary/50 transition-colors border border-transparent hover:border-border/50"
+        className="flex items-center gap-2 p-1 pr-2 rounded-lg hover:bg-secondary transition-colors"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-label="Menu da conta"
       >
-        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background flex items-center justify-center text-white font-heading font-bold text-sm shadow-sm">
+        <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold text-sm">
           {avatarInitial}
         </div>
         <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
@@ -60,14 +63,14 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            className="absolute right-0 mt-2 w-64 bg-background border border-border rounded-2xl shadow-xl overflow-hidden z-[100]"
+            initial={{ opacity: 0, y: -6, filter: 'blur(4px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, y: -6, filter: 'blur(4px)' }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute right-0 mt-2 w-64 bg-panel border border-border rounded-lg shadow-lg overflow-hidden z-[100]"
           >
-            <div className="p-4 border-b border-border/50 bg-secondary/10">
-              <p className="font-bold text-foreground text-sm truncate">{displayName}</p>
+            <div className="p-4 border-b border-border">
+              <p className="font-semibold text-foreground text-sm truncate">{displayName}</p>
               {currentUser?.name && <p className="text-xs text-muted truncate">{email}</p>}
               <p className="text-xs text-muted font-medium mt-0.5 truncate">
                 {roleLabel}
@@ -83,16 +86,16 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ onOpenProfile
                 }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-foreground/80 hover:text-foreground hover:bg-secondary/50 transition-colors text-left"
               >
-                <User size={16} className="text-primary/70" />
+                <User size={16} strokeWidth={1.6} className="text-muted" />
                 Meu Perfil
               </button>
             </div>
             
-            <div className="p-2 border-t border-border/50">
+            <div className="p-2 border-t border-border">
               <button
                 type="button"
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:text-red-600 hover:bg-red-500/10 transition-colors text-left"
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-danger hover:bg-danger/10 transition-colors text-left"
               >
                 <LogOut size={16} />
                 Sair
