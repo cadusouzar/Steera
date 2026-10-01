@@ -104,6 +104,6 @@ export const WEEKLY_MINUTES_MAX = 10080;
 // a cor da borda/anel de foco quando há erro.
 export function inputBorderClass(hasError: boolean): string {
   return hasError
-    ? 'border-red-500/60 focus:ring-red-500/40'
-    : 'border-border/80 focus:ring-primary/50';
+    ? 'border-danger/70 focus:ring-danger/30'
+    : 'border-border focus:ring-foreground/20';
 }

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, ArrowUpRight, RotateCw } from 'lucide-react';
+import { ArrowRight, RotateCw } from 'lucide-react';
 import AnimatedNumber from '../../components/motion/AnimatedNumber';
+import { ButtonLink, Panel, PanelLink, StatCard, StatValue } from '../../components/ui';
 import { can, useCurrentUser } from '../../lib/auth';
 import {
   countClients,
@@ -58,23 +58,6 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 
 // ---------- peças ----------
 
-const Panel = ({ title, action, children, className = '' }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) => (
-  <section className={`bg-panel border border-border rounded-lg shadow-sm flex flex-col ${className}`}>
-    <header className="flex items-center justify-between gap-4 px-5 pt-5">
-      <h2 className="text-[15px] font-semibold text-foreground">{title}</h2>
-      {action}
-    </header>
-    <div className="flex-1 px-5 pb-5 pt-4">{children}</div>
-  </section>
-);
-
-const PanelLink = ({ to, children }: { to: string; children: ReactNode }) => (
-  <Link to={to} className="group inline-flex items-center gap-1 text-[13px] text-muted hover:text-foreground transition-colors">
-    {children}
-    <ArrowRight size={14} strokeWidth={1.8} className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-  </Link>
-);
-
 const ErrorState = ({ onRetry }: { onRetry: () => void }) => (
   <div className="flex items-center justify-between gap-3 text-[13px] text-muted">
     <span>Não foi possível carregar.</span>
@@ -84,8 +67,8 @@ const ErrorState = ({ onRetry }: { onRetry: () => void }) => (
   </div>
 );
 
-// Card de número no formato da referência ("82 / 100" + faixa inferior com contexto).
-const StatCard = ({
+// Liga o estado de carregamento local (`useLoad`) ao StatCard do kit.
+const DashStat = ({
   label, load, render, footer, onRetry, to,
 }: {
   label: string;
@@ -95,35 +78,14 @@ const StatCard = ({
   onRetry: () => void;
   to: string;
 }) => (
-  <div className="group relative bg-panel border border-border rounded-lg shadow-sm flex flex-col transition-[box-shadow,border-color] duration-200 hover:shadow-md hover:border-foreground/15 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-foreground">
-    {/* Link de cobertura: o card inteiro é clicável sem aninhar o botão de "Tentar de novo" num link. */}
-    <Link to={to} className="absolute inset-0 rounded-lg outline-none" aria-label={`${label}: abrir`} />
-    <div className="px-5 pt-5 pb-4">
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[13px] text-muted">{label}</span>
-        <ArrowUpRight size={15} strokeWidth={1.6} className="text-muted opacity-0 -translate-y-0.5 translate-x-[-2px] transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0 group-hover:translate-y-0" aria-hidden="true" />
-      </div>
-      <div className="mt-2 min-h-[40px] flex items-end">
-        {load === 'loading' && <span className="skeleton h-8 w-24" aria-label="Carregando" />}
-        {load === 'ready' && render()}
-        {load === 'error' && (
-          <div className="relative z-10 w-full">
-            <ErrorState onRetry={onRetry} />
-          </div>
-        )}
-      </div>
-    </div>
-    <div className="mt-auto border-t border-border px-5 py-3 text-[13px] text-muted min-h-[45px] flex items-center">
-      {load === 'ready' ? footer() : load === 'loading' ? <span className="skeleton h-3.5 w-32" /> : null}
-    </div>
-  </div>
-);
-
-const BigValue = ({ value, format, suffix }: { value: number; format?: (n: number) => string; suffix?: ReactNode }) => (
-  <span className="flex items-baseline gap-1.5">
-    <AnimatedNumber value={value} format={format} className="text-[34px] leading-none font-semibold tracking-tight text-foreground" />
-    {suffix && <span className="text-[15px] text-muted tabular">{suffix}</span>}
-  </span>
+  <StatCard
+    label={label}
+    to={to}
+    status={load}
+    value={load === 'ready' ? render() : null}
+    footer={load === 'ready' ? footer() : null}
+    error={<ErrorState onRetry={onRetry} />}
+  />
 );
 
 // ---------- blocos ----------
@@ -305,12 +267,7 @@ const MyDayBlock = ({ load, onRetry }: { load: Load<MyDay>; onRetry: () => void 
           {ordered.map((p) => <li key={p.id}>{hhmm(p.recordedAt)}</li>)}
         </ol>
       )}
-      <Link
-        to="/app/ponto"
-        className="self-start inline-flex items-center gap-2 h-10 px-4 rounded-md bg-primary text-primary-foreground text-[14px] font-medium hover:bg-primary/90 transition-colors"
-      >
-        Bater ponto <ArrowRight size={15} strokeWidth={1.8} aria-hidden="true" />
-      </Link>
+      <ButtonLink to="/app/ponto" trailingIcon={ArrowRight} className="self-start">Bater ponto</ButtonLink>
     </div>
   );
 };
@@ -371,14 +328,14 @@ const Overview = () => {
   const statCards: ReactNode[] = [];
   if (showEmployees) {
     statCards.push(
-      <StatCard
+      <DashStat
         key="employees"
         to="/app/funcionarios"
         label="Funcionários ativos"
         load={employees.state.status}
         onRetry={employees.retry}
         render={() => employees.state.status === 'ready' && (
-          <BigValue value={employees.state.data.active} suffix={`/ ${employees.state.data.total}`} />
+          <StatValue value={employees.state.data.active} suffix={`/ ${employees.state.data.total}`} />
         )}
         footer={() => {
           if (employees.state.status !== 'ready') return null;
@@ -390,14 +347,14 @@ const Overview = () => {
   }
   if (showClients) {
     statCards.push(
-      <StatCard
+      <DashStat
         key="clients"
         to="/app/clientes"
         label="Clientes ativos"
         load={clients.state.status}
         onRetry={clients.retry}
         render={() => clients.state.status === 'ready' && (
-          <BigValue value={clients.state.data.active} suffix={`/ ${clients.state.data.total}`} />
+          <StatValue value={clients.state.data.active} suffix={`/ ${clients.state.data.total}`} />
         )}
         footer={() => {
           if (clients.state.status !== 'ready') return null;
@@ -409,13 +366,13 @@ const Overview = () => {
   }
   if (showFinance) {
     statCards.push(
-      <StatCard
+      <DashStat
         key="finance"
         to="/app/clientes"
         label="Total recebido"
         load={finance.state.status}
         onRetry={finance.retry}
-        render={() => finance.state.status === 'ready' && <BigValue value={finance.state.data.totalPaid} format={brlCompact} />}
+        render={() => finance.state.status === 'ready' && <StatValue value={finance.state.data.totalPaid} format={brlCompact} />}
         footer={() => {
           if (finance.state.status !== 'ready') return null;
           const { totalOverdue, totalPending } = finance.state.data;
@@ -428,14 +385,14 @@ const Overview = () => {
   }
   if (showPontoAdmin) {
     statCards.push(
-      <StatCard
+      <DashStat
         key="ponto"
         to="/app/ponto-administracao"
         label="Pendências de ponto"
         load={pontoQueue.state.status}
         onRetry={pontoQueue.retry}
         render={() => pontoQueue.state.status === 'ready' && (
-          <BigValue value={pontoQueue.state.data.adjustmentsTotal + pontoQueue.state.data.justificationsTotal} />
+          <StatValue value={pontoQueue.state.data.adjustmentsTotal + pontoQueue.state.data.justificationsTotal} />
         )}
         footer={() => {
           if (pontoQueue.state.status !== 'ready') return null;
@@ -481,15 +438,11 @@ const Overview = () => {
             </div>
             <ol className="flex items-center gap-3 shrink-0">
               <li>
-                <Link to="/app/cargos" className="inline-flex items-center gap-2 h-10 px-4 rounded-md bg-primary text-primary-foreground text-[14px] font-medium hover:bg-primary/90 transition-colors">
-                  1. Criar cargos
-                </Link>
+                <ButtonLink to="/app/cargos">1. Criar cargos</ButtonLink>
               </li>
               {showEmployees && (
                 <li>
-                  <Link to="/app/funcionarios" className="inline-flex items-center gap-2 h-10 px-4 rounded-md border border-border text-foreground text-[14px] font-medium hover:bg-secondary transition-colors">
-                    2. Adicionar funcionários
-                  </Link>
+                  <ButtonLink to="/app/funcionarios" variant="secondary">2. Adicionar funcionários</ButtonLink>
                 </li>
               )}
             </ol>

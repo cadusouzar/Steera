@@ -20,6 +20,7 @@
     --success: 23 122 67;            /* #177A43 */
     --warning: 180 83 9;             /* #B45309 */
     --danger: 192 38 45;             /* #C0262D */
+    --danger-foreground: 255 255 255;
     color-scheme: light;
   }
 
@@ -38,6 +39,7 @@
     --success: 74 222 128;
     --warning: 251 191 36;
     --danger: 248 113 113;
+    --danger-foreground: 20 20 20;
     color-scheme: dark;
   }
 

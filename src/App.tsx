@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './components/ThemeProvider';
 import LandingPage from './pages/LandingPage';
@@ -29,6 +30,10 @@ import CustomFieldsSettings from './pages/app/CustomFieldsSettings';
 import DashboardHub from './pages/analytics/DashboardHub';
 import DashboardBuilder from './pages/analytics/DashboardBuilder';
 
+// Catálogo do kit de peças: só em desenvolvimento. Em produção `import.meta.env.DEV` é `false` e o
+// Vite descarta o import dinâmico inteiro (nem o arquivo entra no build).
+const KitCatalog = import.meta.env.DEV ? lazy(() => import('./pages/app/KitCatalog')) : null;
+
 function App() {
   return (
     <ThemeProvider>
@@ -49,6 +54,9 @@ function App() {
             <Route path="/conta/seguranca" element={<Account />} />
             <Route path="/app" element={<AppLayout />}>
               <Route index element={<Overview />} />
+              {KitCatalog && (
+                <Route path="_kit" element={<Suspense fallback={null}><KitCatalog /></Suspense>} />
+              )}
               <Route path="cargos" element={<Roles />} />
               <Route path="cargos/novo" element={<RoleForm />} />
               <Route path="funcionarios" element={<EmployeesList />} />

@@ -29,7 +29,10 @@ export default {
         elevated: token('elevated'),
         success: token('success'),
         warning: token('warning'),
-        danger: token('danger'),
+        danger: {
+          DEFAULT: token('danger'),
+          foreground: token('danger-foreground'),
+        },
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
