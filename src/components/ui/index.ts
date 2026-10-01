@@ -5,7 +5,10 @@ export { Field, Input, Select, Textarea } from './Field';
 export { controlClass } from './fieldStyles';
 export { Modal, Drawer, ConfirmDialog } from './Dialog';
 export { Table, THead, TH, TBody, TR, TD } from './Table';
+export { default as Tabs, type TabItem } from './Tabs';
+export { default as SegmentedControl } from './SegmentedControl';
+export { default as Switch } from './Switch';
 export {
-  PageHeader, Panel, PanelLink, StatCard, StatValue, StatusBadge, EmptyState,
+  PageHeader, Panel, PanelLink, StatCard, StatValue, StatusBadge, EmptyState, Notice,
   type LoadStatus, type StatusTone,
 } from './Display';

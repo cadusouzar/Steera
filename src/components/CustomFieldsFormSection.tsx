@@ -28,8 +28,8 @@ const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) 
   };
 
   return (
-    <div className="mt-6 pt-6 border-t border-border/40">
-      <div className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Campos personalizados</div>
+    <div className="mt-6 pt-6 border-t border-border">
+      <h4 className="text-[14px] font-semibold text-foreground mb-4">Campos personalizados</h4>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
         {fields.map((field) => {
           // Só entra em jogo quando o campo nunca foi tocado (`values[columnName] === undefined`) —
@@ -41,10 +41,10 @@ const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) 
           const value = rawValue !== undefined ? rawValue : parseDefaultForDisplay(field);
           return (
             <div key={field.id} className={needsFullWidth(field.type) ? 'md:col-span-2' : undefined}>
-              <label className="block text-sm font-medium text-foreground mb-1.5">
-                {field.displayName}{field.required && <span className="text-red-500"> *</span>}
+              <label className="block text-[13px] font-medium text-foreground mb-1.5">
+                {field.displayName}{field.required && <span className="text-danger" aria-hidden="true"> *</span>}
               </label>
-              {field.description && <p className="text-xs text-muted mb-1.5">{field.description}</p>}
+              {field.description && <p className="text-[12px] text-muted mb-1.5">{field.description}</p>}
               {renderTypedInput(field.type, field.configuration?.options, value, (v) => setField(field.columnName, v))}
             </div>
           );

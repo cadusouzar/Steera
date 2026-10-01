@@ -1,40 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Save, User, Briefcase, DollarSign, AlertTriangle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Briefcase, User, Wallet } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import CustomSelect from '../../components/CustomSelect';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
-import FormField from '../../components/FormField';
 import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
+import { Button, ButtonLink, Field, Input, Notice, Select, Switch, Tabs } from '../../components/ui';
 import * as api from '../../lib/api';
 import type { EmployeeListItem, Role } from '../../lib/api';
 import { ApiError } from '../../lib/apiError';
 import { useCan } from '../../lib/auth';
 import {
-  formatPhoneInput, formatCpfInput, inputBorderClass, isValidCpf, isValidEmail, isValidPhone,
+  formatPhoneInput, formatCpfInput, isValidCpf, isValidEmail, isValidPhone,
   MONEY_MAX_VALUE, NAME_MAX_LENGTH,
 } from '../../lib/validation';
+
+// Cadastro de funcionário (redesenho no kit de peças, 01/10/2026). A aba "Advertências" que existia
+// aqui foi removida: era só um botão sem ação — advertência se registra na ficha, depois de criado.
+
+type Tab = 'pessoal' | 'vinculo' | 'financeiro';
+
+const TABS = [
+  { id: 'pessoal' as const, label: 'Dados pessoais', icon: User },
+  { id: 'vinculo' as const, label: 'Cargo e vínculo', icon: Briefcase },
+  { id: 'financeiro' as const, label: 'Financeiro', icon: Wallet },
+];
 
 const EmployeeForm = () => {
   const navigate = useNavigate();
   const canCreate = useCan()('funcionarios.gerenciar');
-  const [activeTab, setActiveTab] = useState('pessoal');
+  const [activeTab, setActiveTab] = useState<Tab>('pessoal');
   const [roles, setRoles] = useState<Role[]>([]);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Dados Pessoais
+  // Dados pessoais
   const [fullName, setFullName] = useState('');
   const [cpf, setCpf] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
 
-  // Validação visual por campo (17/09/2026) — espelha as mesmas regras que o backend já aplica
-  // (checksum de CPF, formato de telefone/e-mail, teto de tamanho/valor); mostrado ao sair do
-  // campo (`onBlur`), nunca a cada tecla, pra não incomodar no meio da digitação.
+  // Validação visual por campo (17/09/2026) — espelha as regras do backend (checksum de CPF, formato
+  // de telefone/e-mail, teto de tamanho/valor); mostrada ao sair do campo, nunca a cada tecla.
   const [fullNameError, setFullNameError] = useState<string>();
   const [cpfError, setCpfError] = useState<string>();
   const [emailError, setEmailError] = useState<string>();
@@ -42,7 +50,7 @@ const EmployeeForm = () => {
   const [departmentError, setDepartmentError] = useState<string>();
   const [baseValueError, setBaseValueError] = useState<string>();
 
-  // Cargo & Vínculo
+  // Cargo e vínculo
   const [roleId, setRoleId] = useState('');
   const [managerId, setManagerId] = useState('');
   const [department, setDepartment] = useState('');
@@ -73,16 +81,8 @@ const EmployeeForm = () => {
     api.listEmployees().then(setEmployees).catch(() => setEmployees([]));
   }, [canCreate]);
 
-  const tabs = [
-    { id: 'pessoal', label: 'Dados Pessoais', icon: <User size={16} /> },
-    { id: 'vinculo', label: 'Cargo & Vínculo', icon: <Briefcase size={16} /> },
-    { id: 'financeiro', label: 'Financeiro', icon: <DollarSign size={16} /> },
-    { id: 'advertencias', label: 'Advertências', icon: <AlertTriangle size={16} /> },
-  ];
-
-  // Roda de novo no submit (não só no blur) — cobre o caso de a pessoa nunca ter saído do campo,
-  // ou ter colado um valor via script/autofill sem disparar `onBlur`. Devolve o primeiro erro de
-  // cada campo (ou undefined) e a aba onde ele mora, pra já trocar pra ela se precisar.
+  // Roda de novo no submit (não só no blur) — cobre quem nunca saiu do campo ou colou um valor via
+  // autofill. Devolve a aba do primeiro erro, pra já trocar pra ela.
   const validateAll = () => {
     const errors = {
       fullName: fullName && fullName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined,
@@ -98,26 +98,26 @@ const EmployeeForm = () => {
     setPhoneError(errors.phone);
     setDepartmentError(errors.department);
     setBaseValueError(errors.baseValue);
-    if (errors.fullName || errors.cpf) return { valid: false, tab: 'pessoal' } as const;
-    if (errors.email || errors.phone) return { valid: false, tab: 'pessoal' } as const;
+    if (errors.fullName || errors.cpf || errors.email || errors.phone) return { valid: false, tab: 'pessoal' } as const;
     if (errors.department) return { valid: false, tab: 'vinculo' } as const;
     if (errors.baseValue) return { valid: false, tab: 'financeiro' } as const;
     return { valid: true } as const;
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (isSaving) return;
 
-    const missingFields: string[] = [];
-    if (!fullName) missingFields.push('Nome Completo');
-    if (!cpf) missingFields.push('CPF');
-    if (!roleId) missingFields.push('Cargo');
-    if (!admissionDate) missingFields.push('Data de Admissão');
-    if (!department) missingFields.push('Departamento');
-    if (!baseValue) missingFields.push('Salário Base');
-    if (missingFields.length > 0) {
-      setSaveError(`Preencha os campos obrigatórios: ${missingFields.join(', ')}.`);
+    const missing: Array<[string, Tab]> = [];
+    if (!fullName) missing.push(['Nome completo', 'pessoal']);
+    if (!cpf) missing.push(['CPF', 'pessoal']);
+    if (!roleId) missing.push(['Cargo', 'vinculo']);
+    if (!department) missing.push(['Departamento', 'vinculo']);
+    if (!admissionDate) missing.push(['Data de admissão', 'vinculo']);
+    if (!baseValue) missing.push(['Salário base', 'financeiro']);
+    if (missing.length > 0) {
+      setActiveTab(missing[0][1]);
+      setSaveError(`Preencha os campos obrigatórios: ${missing.map(([label]) => label).join(', ')}.`);
       return;
     }
 
@@ -146,7 +146,7 @@ const EmployeeForm = () => {
             dueDay: paymentDay === 'last' ? 31 : Number(paymentDay),
           });
         } catch {
-          // Funcionário já foi criado — a recorrência pode ser configurada depois na aba de pagamentos.
+          // Funcionário já foi criado — a recorrência pode ser configurada depois em Pagamentos e férias.
           recurrenceWarning = true;
         }
       }
@@ -164,255 +164,148 @@ const EmployeeForm = () => {
   }
 
   return (
-    <div className="p-6 md:p-8">
-      <motion.div 
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="max-w-4xl mx-auto"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <Link
-              to="/app/funcionarios"
-              className="w-10 h-10 rounded-full bg-secondary/50 flex items-center justify-center text-muted hover:text-foreground transition-colors"
-            >
-              <ArrowLeft size={18} />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-heading font-bold text-foreground">Novo Funcionário</h1>
-              <p className="text-muted text-sm mt-1">Preencha o dossiê do colaborador.</p>
-            </div>
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-3xl mx-auto">
+        <Link to="/app/funcionarios" className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-muted hover:text-foreground transition-colors">
+          <ArrowLeft size={15} strokeWidth={1.8} aria-hidden="true" /> Funcionários
+        </Link>
+        <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-[26px] md:text-[28px] font-semibold tracking-tight text-foreground leading-tight">Novo funcionário</h1>
+            <p className="mt-1 text-[14px] text-muted">Os campos com * são obrigatórios. Advertências e férias ficam na ficha, depois do cadastro.</p>
           </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/app/funcionarios')}
-              className="px-5 py-2.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary/50 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-              {isSaving ? 'Salvando...' : 'Salvar Registro'}
-            </button>
+          <div className="flex gap-2">
+            <ButtonLink to="/app/funcionarios" variant="secondary">Cancelar</ButtonLink>
+            <Button onClick={() => handleSave()} loading={isSaving}>Salvar funcionário</Button>
           </div>
-        </div>
+        </header>
 
-        {/* Error Banner */}
-        {saveError && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-            {saveError}
-          </div>
-        )}
+        {saveError && <Notice tone="danger" className="mb-4">{saveError}</Notice>}
 
-        {/* Content Area with Tabs */}
-        <div className="glass-panel rounded-[2rem] border border-border/50">
-          {/* Tab Navigation */}
-          <div className="flex border-b border-border/50 overflow-x-auto">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
-                  activeTab === tab.id 
-                    ? 'border-primary text-primary bg-primary/5' 
-                    : 'border-transparent text-muted hover:text-foreground hover:bg-secondary/20'
-                }`}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </div>
+        <form onSubmit={handleSave} className="bg-panel border border-border rounded-lg shadow-sm">
+          <Tabs<Tab> label="Seções do cadastro" tabs={TABS} value={activeTab} onChange={setActiveTab} className="px-3" />
 
-          {/* Form Content */}
-          <form className="p-6 md:p-8" onSubmit={handleSave}>
+          <div className="p-5 md:p-6">
             {activeTab === 'pessoal' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="md:col-span-2">
-                    <FormField label="Nome Completo" required error={fullNameError}>
-                      <input
-                        type="text" value={fullName} maxLength={NAME_MAX_LENGTH}
-                        onChange={(e) => setFullName(e.target.value)}
-                        onBlur={() => setFullNameError(fullName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
-                        className={`w-full bg-background border ${inputBorderClass(!!fullNameError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
-                        placeholder="Nome completo do funcionário"
-                      />
-                    </FormField>
-                  </div>
-                  <FormField label="CPF" required error={cpfError}>
-                    <input
-                      type="text" value={cpf} maxLength={14}
-                      onChange={(e) => setCpf(formatCpfInput(e.target.value))}
-                      onBlur={() => setCpfError(cpf && !isValidCpf(cpf) ? 'CPF inválido' : undefined)}
-                      className={`w-full bg-background border ${inputBorderClass(!!cpfError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
-                      placeholder="000.000.000-00"
-                    />
-                  </FormField>
-                  <FormField label="E-mail Pessoal" error={emailError}>
-                    <input
-                      type="email" value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      onBlur={() => setEmailError(email && !isValidEmail(email) ? 'E-mail inválido' : undefined)}
-                      className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
-                      placeholder="email@exemplo.com"
-                    />
-                  </FormField>
-                  <FormField label="Telefone / WhatsApp" error={phoneError}>
-                    <input
-                      type="text" value={phone} maxLength={15}
-                      onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
-                      onBlur={() => setPhoneError(phone && !isValidPhone(phone) ? 'Telefone deve ter DDD + 8 ou 9 dígitos' : undefined)}
-                      className={`w-full bg-background border ${inputBorderClass(!!phoneError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
-                      placeholder="(00) 00000-0000"
-                    />
-                  </FormField>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Endereço Completo</label>
-                    <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Rua, Número, Bairro, Cidade - Estado" />
-                  </div>
-                </div>
-              </motion.div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="Nome completo" htmlFor="f-name" required error={fullNameError} className="md:col-span-2">
+                  <Input
+                    id="f-name" value={fullName} maxLength={NAME_MAX_LENGTH} invalid={!!fullNameError}
+                    onChange={(e) => setFullName(e.target.value)}
+                    onBlur={() => setFullNameError(fullName.length > NAME_MAX_LENGTH ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                    placeholder="Nome completo do funcionário"
+                  />
+                </Field>
+                <Field label="CPF" htmlFor="f-cpf" required error={cpfError}>
+                  <Input
+                    id="f-cpf" value={cpf} maxLength={14} invalid={!!cpfError} inputMode="numeric"
+                    onChange={(e) => setCpf(formatCpfInput(e.target.value))}
+                    onBlur={() => setCpfError(cpf && !isValidCpf(cpf) ? 'CPF inválido' : undefined)}
+                    placeholder="000.000.000-00"
+                  />
+                </Field>
+                <Field label="E-mail" htmlFor="f-email" error={emailError}>
+                  <Input
+                    id="f-email" type="email" value={email} invalid={!!emailError}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onBlur={() => setEmailError(email && !isValidEmail(email) ? 'E-mail inválido' : undefined)}
+                    placeholder="email@exemplo.com"
+                  />
+                </Field>
+                <Field label="Telefone / WhatsApp" htmlFor="f-phone" error={phoneError}>
+                  <Input
+                    id="f-phone" value={phone} maxLength={15} invalid={!!phoneError} inputMode="tel"
+                    onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
+                    onBlur={() => setPhoneError(phone && !isValidPhone(phone) ? 'Telefone deve ter DDD + 8 ou 9 dígitos' : undefined)}
+                    placeholder="(00) 00000-0000"
+                  />
+                </Field>
+                <Field label="Endereço" htmlFor="f-address">
+                  <Input id="f-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Rua, número, bairro, cidade" />
+                </Field>
+              </div>
             )}
 
             {activeTab === 'vinculo' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Cargo</label>
-                    {loadError && (
-                      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-3 text-red-600 dark:text-red-400 text-xs">
-                        {loadError}
-                      </div>
-                    )}
-                    <CustomSelect
-                      value={roleId}
-                      onChange={(val) => {
-                        setRoleId(val);
-                        const role = roles.find(r => r.id === val);
-                        if (role) setDepartment(role.department);
-                      }}
-                      options={roles.map(r => ({ value: r.id, label: `${r.name} (${r.department})` }))}
-                      placeholder="Selecione um cargo..."
-                    />
-                    <p className="text-xs text-muted mt-2">Os cargos devem ser cadastrados previamente na tela de Cargos.</p>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Superior (opcional)</label>
-                    <CustomSelect
-                      value={managerId}
-                      onChange={setManagerId}
-                      options={[
-                        { value: '', label: 'Nenhum — sem superior' },
-                        ...employees.map(e => ({ value: e.id, label: e.fullName })),
-                      ]}
-                      placeholder="Selecione um superior..."
-                    />
-                    <p className="text-xs text-muted mt-2">
-                      Define quem administra o ponto deste funcionário (aprova/rejeita solicitações de
-                      ajuste, corrige marcações) — moldável por empresa, sem hierarquia fixa.
-                    </p>
-                  </div>
-                  <div className="md:col-span-2">
-                    <FormField label="Departamento" required error={departmentError}>
-                      <input
-                        type="text" value={department} maxLength={NAME_MAX_LENGTH}
-                        onChange={(e) => setDepartment(e.target.value)}
-                        onBlur={() => setDepartmentError(department.length > NAME_MAX_LENGTH ? `Departamento deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
-                        className={`w-full bg-background border ${inputBorderClass(!!departmentError)} rounded-xl px-4 py-3 focus:ring-2 transition-colors`}
-                      />
-                    </FormField>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Data de Admissão</label>
-                    <input type="date" value={admissionDate} onChange={(e) => setAdmissionDate(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 text-foreground" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Tipo de Contrato</label>
-                    <CustomSelect
-                      value={contractType}
-                      onChange={(val) => setContractType(val as typeof contractType)}
-                      options={[
-                        { value: 'clt', label: 'CLT' },
-                        { value: 'pj', label: 'PJ' },
-                        { value: 'estagio', label: 'Estágio' }
-                      ]}
-                    />
-                  </div>
-                </div>
-              </motion.div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {loadError && <Notice tone="danger" className="md:col-span-2">{loadError}</Notice>}
+                <Field label="Cargo" htmlFor="f-role" required hint="Os cargos são cadastrados na tela de Cargos." className="md:col-span-2">
+                  <Select
+                    id="f-role" value={roleId}
+                    onChange={(e) => {
+                      setRoleId(e.target.value);
+                      const role = roles.find((r) => r.id === e.target.value);
+                      if (role) setDepartment(role.department);
+                    }}
+                  >
+                    <option value="" disabled>Selecione um cargo</option>
+                    {roles.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.department})</option>)}
+                  </Select>
+                </Field>
+                <Field label="Superior" htmlFor="f-manager" className="md:col-span-2" hint="Quem administra o ponto deste funcionário (aprova ou rejeita ajustes e corrige marcações). Opcional.">
+                  <Select id="f-manager" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
+                    <option value="">Nenhum (sem superior)</option>
+                    {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Departamento" htmlFor="f-dept" required error={departmentError} className="md:col-span-2">
+                  <Input
+                    id="f-dept" value={department} maxLength={NAME_MAX_LENGTH} invalid={!!departmentError}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    onBlur={() => setDepartmentError(department.length > NAME_MAX_LENGTH ? `Departamento deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined)}
+                  />
+                </Field>
+                <Field label="Data de admissão" htmlFor="f-admission" required>
+                  <Input id="f-admission" type="date" value={admissionDate} onChange={(e) => setAdmissionDate(e.target.value)} />
+                </Field>
+                <Field label="Tipo de contrato" htmlFor="f-contract">
+                  <Select id="f-contract" value={contractType} onChange={(e) => setContractType(e.target.value as typeof contractType)}>
+                    <option value="clt">CLT</option>
+                    <option value="pj">PJ</option>
+                    <option value="estagio">Estágio</option>
+                  </Select>
+                </Field>
+              </div>
             )}
 
             {activeTab === 'financeiro' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <FormField label="Salário Base (R$)" required error={baseValueError}>
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted">R$</span>
-                      <input
-                        type="number" step="0.01" value={baseValue}
-                        onChange={(e) => setBaseValue(e.target.value)}
-                        onBlur={() => setBaseValueError(baseValue && Number(baseValue) > MONEY_MAX_VALUE ? `Salário deve ser menor ou igual a ${MONEY_MAX_VALUE.toLocaleString('pt-BR')}` : undefined)}
-                        className={`w-full bg-background border ${inputBorderClass(!!baseValueError)} rounded-xl pl-10 pr-4 py-3 focus:ring-2 transition-colors`}
-                        placeholder="0,00"
-                      />
-                    </div>
-                  </FormField>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Dia de Pagamento</label>
-                    <CustomSelect
-                      value={paymentDay}
-                      onChange={(val) => setPaymentDay(val as typeof paymentDay)}
-                      options={[
-                        { value: '5', label: 'Dia 5 útil' },
-                        { value: '15', label: 'Dia 15' },
-                        { value: '20', label: 'Dia 20' },
-                        { value: 'last', label: 'Último dia útil' }
-                      ]}
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Dados Bancários (Opcional)</label>
-                    <input type="text" value={bankDetails} onChange={(e) => setBankDetails(e.target.value)} className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50" placeholder="Banco, Agência, Conta PIX..." />
-                  </div>
-                  <div className="md:col-span-2 flex items-center justify-between p-5 bg-primary/5 rounded-xl border border-primary/20 mt-2">
-                    <div>
-                      <h4 className="font-semibold text-primary mb-1">Recorrência de Salário</h4>
-                      <p className="text-sm text-muted">Gerar despesa de salário automaticamente todo mês, para não precisar adicionar manualmente.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                      <input type="checkbox" className="sr-only peer" checked={salaryRecurrenceEnabled} onChange={(e) => setSalaryRecurrenceEnabled(e.target.checked)} />
-                      <div className="w-14 h-7 bg-secondary border-border border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary shadow-inner"></div>
-                    </label>
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="Salário base (R$)" htmlFor="f-salary" required error={baseValueError}>
+                  <Input
+                    id="f-salary" type="number" min={0} step="0.01" value={baseValue} invalid={!!baseValueError}
+                    onChange={(e) => setBaseValue(e.target.value)}
+                    onBlur={() => setBaseValueError(baseValue && Number(baseValue) > MONEY_MAX_VALUE ? `Salário deve ser menor ou igual a ${MONEY_MAX_VALUE.toLocaleString('pt-BR')}` : undefined)}
+                    placeholder="0,00"
+                  />
+                </Field>
+                <Field label="Dia de pagamento" htmlFor="f-payday">
+                  <Select id="f-payday" value={paymentDay} onChange={(e) => setPaymentDay(e.target.value as typeof paymentDay)}>
+                    <option value="5">5º dia útil</option>
+                    <option value="15">Dia 15</option>
+                    <option value="20">Dia 20</option>
+                    <option value="last">Último dia útil</option>
+                  </Select>
+                </Field>
+                <Field label="Dados bancários" htmlFor="f-bank" hint="Opcional: banco, agência, conta ou PIX." className="md:col-span-2">
+                  <Input id="f-bank" value={bankDetails} onChange={(e) => setBankDetails(e.target.value)} />
+                </Field>
+                <div className="md:col-span-2 rounded-md border border-border px-4 py-3">
+                  <Switch
+                    checked={salaryRecurrenceEnabled}
+                    onChange={setSalaryRecurrenceEnabled}
+                    label="Gerar o salário automaticamente todo mês"
+                    description="Cria o pagamento do salário no dia escolhido, sem precisar lançar à mão."
+                  />
                 </div>
-              </motion.div>
-            )}
-
-            {activeTab === 'advertencias' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                <div className="text-center py-10 bg-secondary/20 rounded-2xl border border-dashed border-border">
-                  <AlertTriangle size={32} className="mx-auto text-muted mb-3" />
-                  <h3 className="font-medium text-foreground mb-1">Nenhuma advertência</h3>
-                  <p className="text-sm text-muted mb-4">Este funcionário tem o histórico limpo.</p>
-                  <button type="button" className="text-sm font-medium text-primary hover:underline">
-                    + Registrar nova advertência
-                  </button>
-                </div>
-              </motion.div>
+              </div>
             )}
 
             <CustomFieldsFormSection entity="employee" values={customFields} onChange={setCustomFields} />
-          </form>
-        </div>
-      </motion.div>
+          </div>
+          {/* Enter dentro de um campo envia o formulário. */}
+          <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
+        </form>
+      </div>
     </div>
   );
 };

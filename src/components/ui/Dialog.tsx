@@ -14,6 +14,9 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 let openCount = 0;
+// Pilha de janelas abertas: só a do topo reage a Esc e prende o foco (ex.: confirmação aberta por
+// cima de um modal — Esc fecha só a confirmação).
+const dialogStack: symbol[] = [];
 
 function useDialogBehavior(open: boolean, onClose: () => void, panelRef: React.RefObject<HTMLElement>) {
   const onCloseRef = useRef(onClose);
@@ -22,6 +25,9 @@ function useDialogBehavior(open: boolean, onClose: () => void, panelRef: React.R
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    const token = Symbol('dialog');
+    dialogStack.push(token);
+    const isTop = () => dialogStack[dialogStack.length - 1] === token;
     openCount += 1;
     document.body.style.overflow = 'hidden';
 
@@ -34,6 +40,7 @@ function useDialogBehavior(open: boolean, onClose: () => void, panelRef: React.R
     }, 30);
 
     const onKey = (e: KeyboardEvent) => {
+      if (!isTop()) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         onCloseRef.current();
@@ -52,6 +59,7 @@ function useDialogBehavior(open: boolean, onClose: () => void, panelRef: React.R
     return () => {
       window.clearTimeout(focusTimer);
       document.removeEventListener('keydown', onKey);
+      dialogStack.splice(dialogStack.indexOf(token), 1);
       openCount -= 1;
       if (openCount === 0) document.body.style.overflow = '';
       previouslyFocused?.focus?.();
@@ -70,7 +78,7 @@ interface BaseProps {
   dismissable?: boolean;
 }
 
-const MODAL_WIDTH = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl' } as const;
+const MODAL_WIDTH = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-4xl' } as const;
 
 const CloseButton = ({ onClose }: { onClose: () => void }) => (
   <button

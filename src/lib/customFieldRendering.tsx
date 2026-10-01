@@ -1,4 +1,5 @@
 import { CustomFieldDefinition, CustomFieldType } from './api';
+import { controlClass } from '../components/ui/fieldStyles';
 import { formatCnpjInput, formatCpfInput, formatPhoneInput, isValidCnpj, isValidCpf, isValidPhone } from './validation';
 
 // Compartilhado entre CustomFieldsFormSection (preenche o valor de um campo num registro real) e
@@ -61,10 +62,11 @@ export function renderTypedInput(
   value: unknown,
   onChange: (v: unknown) => void,
 ) {
-  const baseClass = 'w-full px-3 py-2 rounded-lg border bg-panel text-foreground text-sm';
+  // Mesmo visual dos campos do kit (controlClass) — a borda/anel de erro vem de borderClass abaixo.
+  const baseClass = '';
   // Só entra em jogo pros tipos com formato validável neste arquivo (CPF/CNPJ/PHONE) — o campo
   // ainda vazio nunca é tratado como inválido, só depois que a pessoa começa a digitar.
-  const borderClass = (invalid: boolean) => (invalid ? 'border-red-500/60' : 'border-border');
+  const borderClass = (invalid: boolean) => controlClass(invalid, 'min-h-10 py-2');
 
   switch (type) {
     case 'LONG_TEXT':
@@ -90,7 +92,7 @@ export function renderTypedInput(
       );
     case 'BOOLEAN':
       return (
-        <input type="checkbox" className="w-5 h-5" checked={Boolean(value)}
+        <input type="checkbox" className="w-4 h-4 accent-foreground" checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)} />
       );
     case 'SELECT':
@@ -105,7 +107,7 @@ export function renderTypedInput(
       return (
         <div className="flex flex-wrap gap-2">
           {(options ?? []).map((opt) => (
-            <label key={opt} className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-lg border border-border">
+            <label key={opt} className="flex items-center gap-1.5 text-[13px] h-8 px-2.5 rounded-md border border-border cursor-pointer hover:bg-secondary">
               <input type="checkbox" checked={selected.includes(opt)}
                 onChange={(e) => onChange(e.target.checked ? [...selected, opt] : selected.filter((o) => o !== opt))} />
               {opt}

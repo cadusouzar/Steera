@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, ArrowUpRight } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, X } from 'lucide-react';
 import AnimatedNumber from '../motion/AnimatedNumber';
 
 // Peças de exibição do kit (01/10/2026): título de página, painel, card de número, selo de status
@@ -114,5 +114,35 @@ export const EmptyState = ({ title, description, action }: { title: ReactNode; d
       {description && <p className="mt-1 text-[14px] text-muted max-w-md">{description}</p>}
     </div>
     {action}
+  </div>
+);
+
+// ---------- Notice ----------
+
+const NOTICE_TONE = {
+  danger: 'border-danger/30 bg-danger/[0.06] text-danger',
+  warning: 'border-warning/30 bg-warning/[0.07] text-warning',
+  info: 'border-border bg-secondary text-foreground',
+} as const;
+
+// Aviso em faixa (erro de carregamento, aviso de ação, informação). `onDismiss` mostra o "fechar".
+export const Notice = ({
+  tone = 'info', children, onDismiss, className = '',
+}: { tone?: keyof typeof NOTICE_TONE; children: ReactNode; onDismiss?: () => void; className?: string }) => (
+  <div
+    role={tone === 'danger' ? 'alert' : 'status'}
+    className={`flex items-start justify-between gap-3 rounded-md border px-4 py-3 text-[14px] ${NOTICE_TONE[tone]} ${className}`}
+  >
+    <div className="min-w-0">{children}</div>
+    {onDismiss && (
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 -mr-1 h-6 w-6 inline-flex items-center justify-center rounded opacity-70 hover:opacity-100 outline-none focus-visible:ring-2 focus-visible:ring-current"
+        aria-label="Fechar aviso"
+      >
+        <X size={15} strokeWidth={1.8} />
+      </button>
+    )}
   </div>
 );
