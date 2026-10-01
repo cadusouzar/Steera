@@ -1,10 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import FlowBackground from '../components/FlowBackground';
 import FormField from '../components/FormField';
+import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import { usePasswordStrength } from '../hooks/usePasswordStrength';
+import { buildPasswordUserInputs, isWeakPasswordError } from '../lib/passwordStrength';
 import { register, type RegisterPayload } from '../lib/auth';
 import { fetchAddressByCep, fetchCnpjData } from '../lib/brazilLookups';
 import {
@@ -41,12 +44,14 @@ interface FormState {
   name: string;
   email: string;
   password: string;
+  // Só no formulário — nunca vai no payload do cadastro.
+  confirmPassword: string;
 }
 
 const EMPTY_FORM: FormState = {
   personType: 'PJ', document: '', legalName: '', tradeName: '', phone: '',
   zipCode: '', street: '', number: '', complement: '', district: '', city: '', state: '',
-  name: '', email: '', password: '',
+  name: '', email: '', password: '', confirmPassword: '',
 };
 
 const STEP_TITLES = ['Empresa', 'Endereço', 'Seu acesso'] as const;
@@ -59,7 +64,8 @@ function required(value: string, label: string): string | undefined {
   return undefined;
 }
 
-function validateStep(step: Step, f: FormState): Errors {
+// `password`: estado do medidor de força (usePasswordStrength) — só usado na etapa 3.
+function validateStep(step: Step, f: FormState, password = { isStrong: false, isChecking: false }): Errors {
   const e: Errors = {};
   if (step === 0) {
     const isPJ = f.personType === 'PJ';
@@ -81,7 +87,11 @@ function validateStep(step: Step, f: FormState): Errors {
   } else {
     e.name = required(f.name, 'Seu nome');
     e.email = !f.email.trim() ? 'E-mail é obrigatório' : isValidEmail(f.email) ? undefined : 'E-mail inválido';
-    e.password = f.password.length >= 8 ? undefined : 'Senha deve ter pelo menos 8 caracteres';
+    e.password = f.password.length < 8
+      ? 'Senha deve ter pelo menos 8 caracteres'
+      : password.isStrong ? undefined
+      : password.isChecking ? 'Aguarde a verificação da força da senha.' : 'Escolha uma senha mais forte para continuar.';
+    e.confirmPassword = f.confirmPassword === f.password ? undefined : 'As senhas não coincidem';
   }
   return Object.fromEntries(Object.entries(e).filter(([, v]) => v)) as Errors;
 }
@@ -98,6 +108,12 @@ const Register = () => {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Errors>({});
   const [lookupNotice, setLookupNotice] = useState<string | null>(null);
+  // Dados já digitados viram "palavras proibidas" da senha (ex.: "padariacentral2026" é fraca).
+  const passwordUserInputs = useMemo(
+    () => buildPasswordUserInputs([form.email, form.name, form.legalName, form.tradeName]),
+    [form.email, form.name, form.legalName, form.tradeName],
+  );
+  const passwordStrength = usePasswordStrength(form.password, passwordUserInputs);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
@@ -255,7 +271,7 @@ const Register = () => {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (step < 2) return goNext();
-    const stepErrors = validateStep(2, form);
+    const stepErrors = validateStep(2, form, passwordStrength);
     setErrors(stepErrors);
     if (Object.keys(stepErrors).length) return;
     setError(null);
@@ -284,6 +300,10 @@ const Register = () => {
       navigate('/', { state: { registered: true } });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Não foi possível criar a conta.';
+      if (isWeakPasswordError(message)) {
+        setErrors({ password: message });
+        return;
+      }
       setError(message);
       // Documento duplicado é erro da etapa 1 — leva o usuário de volta pra lá.
       if (/CNPJ|CPF/.test(message)) setStep(0);
@@ -563,7 +583,22 @@ const Register = () => {
                     value={form.password}
                     onChange={(e) => set('password', e.target.value)}
                     className={`w-full bg-background border ${inputBorderClass(!!errors.password)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder="Crie uma senha forte (mín. 8 caracteres)"
+                    placeholder="Crie uma senha forte"
+                    autoComplete="new-password"
+                    onFocus={() => setIsCovering(true)}
+                    onBlurCapture={() => setIsCovering(false)}
+                  />
+                  <PasswordStrengthMeter strength={passwordStrength.strength} isChecking={passwordStrength.isChecking} />
+                </FormField>
+
+                <FormField label="Confirmar senha" required error={errors.confirmPassword}>
+                  <input
+                    type="password"
+                    value={form.confirmPassword}
+                    onChange={(e) => set('confirmPassword', e.target.value)}
+                    className={`w-full bg-background border ${inputBorderClass(!!errors.confirmPassword)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    placeholder="Repita a senha"
+                    autoComplete="new-password"
                     onFocus={() => setIsCovering(true)}
                     onBlurCapture={() => setIsCovering(false)}
                   />

@@ -6,6 +6,13 @@ import { useUrlToken } from '../hooks/useUrlToken';
 import { inputBorderClass } from '../lib/validation';
 import { acceptInvite } from '../lib/auth';
 import { ApiError } from '../lib/apiError';
+import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import { usePasswordStrength } from '../hooks/usePasswordStrength';
+import { isWeakPasswordError } from '../lib/passwordStrength';
+
+// Rota pública só com o token: o login ainda não é conhecido aqui, então o medidor roda sem
+// "palavras proibidas" — o backend confere de novo com o e-mail/nome reais antes de gastar o link.
+const NO_USER_INPUTS: string[] = [];
 
 interface Errors {
   password?: string;
@@ -26,9 +33,12 @@ const AcceptInvite = () => {
   const [invalid, setInvalid] = useState(!token);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const { strength, isStrong, isChecking } = usePasswordStrength(password, NO_USER_INPUTS);
+
   const validate = (): Errors => {
     const e: Errors = {};
     if (password.length < 8) e.password = 'Senha deve ter pelo menos 8 caracteres';
+    else if (!isStrong) e.password = isChecking ? 'Aguarde a verificação da força da senha.' : 'Escolha uma senha mais forte para continuar.';
     if (confirmPassword !== password) e.confirmPassword = 'As senhas não coincidem';
     return e;
   };
@@ -44,7 +54,9 @@ const AcceptInvite = () => {
       await acceptInvite(token, password);
       navigate('/login', { state: { notice: 'Senha criada. Entre para começar.' } });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 400) {
+      if (err instanceof ApiError && err.status === 400 && isWeakPasswordError(err.message)) {
+        setErrors({ password: err.message });
+      } else if (err instanceof ApiError && err.status === 400) {
         setInvalid(true);
       } else {
         setError(err instanceof Error ? err.message : 'Não foi possível criar a senha. Tente novamente em instantes.');
@@ -85,8 +97,10 @@ const AcceptInvite = () => {
               setErrors((prev) => ({ ...prev, password: undefined }));
             }}
             className={`w-full bg-background border ${inputBorderClass(!!errors.password)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-            placeholder="Mínimo de 8 caracteres"
+            placeholder="Crie uma senha forte"
+            autoComplete="new-password"
           />
+          <PasswordStrengthMeter strength={strength} isChecking={isChecking} />
         </FormField>
 
         <FormField label="Confirmar senha" required error={errors.confirmPassword}>

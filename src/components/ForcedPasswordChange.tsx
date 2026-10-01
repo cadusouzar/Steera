@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import FlowBackground from './FlowBackground';
-import { changePassword } from '../lib/auth';
+import { changePassword, useCurrentUser } from '../lib/auth';
+import { buildPasswordUserInputs } from '../lib/passwordStrength';
+import { usePasswordStrength } from '../hooks/usePasswordStrength';
+import PasswordStrengthMeter from './PasswordStrengthMeter';
 
 // Tela mínima, reaproveitando os estilos de Login.tsx, mostrada por
 // RequireAuth no lugar do app quando `currentUser.mustChangePassword` é
@@ -17,10 +20,20 @@ const ForcedPasswordChange = ({ onDone }: ForcedPasswordChangeProps) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const user = useCurrentUser();
+  const userInputs = useMemo(
+    () => buildPasswordUserInputs([user?.email, user?.name, user?.companyName]),
+    [user?.email, user?.name, user?.companyName],
+  );
+  const { strength, isStrong, isChecking } = usePasswordStrength(newPassword, userInputs);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!isStrong) {
+      setError(isChecking ? 'Aguarde a verificação da força da senha.' : 'Escolha uma senha mais forte para continuar.');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setError('As senhas novas não coincidem.');
       return;
@@ -76,9 +89,11 @@ const ForcedPasswordChange = ({ onDone }: ForcedPasswordChangeProps) => {
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                 placeholder="••••••••"
+                autoComplete="new-password"
                 minLength={8}
                 required
               />
+              <PasswordStrengthMeter strength={strength} isChecking={isChecking} />
             </div>
 
             <div>

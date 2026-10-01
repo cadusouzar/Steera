@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { CheckCircle2, Loader2, Shield } from 'lucide-react';
-import { changePassword } from '../../lib/auth';
+import { changePassword, useCurrentUser } from '../../lib/auth';
+import { buildPasswordUserInputs } from '../../lib/passwordStrength';
+import { usePasswordStrength } from '../../hooks/usePasswordStrength';
+import PasswordStrengthMeter from '../PasswordStrengthMeter';
 import FormField from '../FormField';
 import { inputBorderClass } from '../../lib/validation';
 
@@ -14,6 +17,12 @@ const AccountPasswordForm: React.FC = () => {
   const [confirmError, setConfirmError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const user = useCurrentUser();
+  const userInputs = useMemo(
+    () => buildPasswordUserInputs([user?.email, user?.name, user?.companyName]),
+    [user?.email, user?.name, user?.companyName],
+  );
+  const { strength, isStrong, isChecking } = usePasswordStrength(newPassword, userInputs);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,6 +30,10 @@ const AccountPasswordForm: React.FC = () => {
     setConfirmError('');
     if (newPassword.length < 8) {
       setPasswordError('A nova senha precisa ter pelo menos 8 caracteres.');
+      return;
+    }
+    if (!isStrong) {
+      setPasswordError(isChecking ? 'Aguarde a verificação da força da senha.' : 'Escolha uma senha mais forte para continuar.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -68,7 +81,7 @@ const AccountPasswordForm: React.FC = () => {
             className={inputClass}
           />
         </FormField>
-        <FormField label="Nova Senha" htmlFor="new-password" hint="Mínimo de 8 caracteres.">
+        <FormField label="Nova Senha" htmlFor="new-password">
           <input
             id="new-password"
             type="password"
@@ -79,6 +92,7 @@ const AccountPasswordForm: React.FC = () => {
             required
             className={inputClass}
           />
+          <PasswordStrengthMeter strength={strength} isChecking={isChecking} />
         </FormField>
         <FormField label="Confirmar Nova Senha" htmlFor="confirm-password" error={confirmError}>
           <input
