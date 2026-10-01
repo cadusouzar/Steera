@@ -353,5 +353,17 @@ describe('TimeAttendanceCalculationService', () => {
       expect(result.days.every((d) => new Date(d.date).getTime() <= Date.now())).toBe(true);
       jest.useRealTimers();
     });
+
+    // Bug de 01/10/2026: o corte de "dia futuro" comparava a meia-noite UTC do dia com o agora. Entre
+    // 21h e 23h59 no horário de Brasília (UTC-3) o dia seguinte já começou em UTC, e o espelho
+    // ganhava um dia que, para a empresa, ainda é amanhã.
+    it('uses the company day: at 23:30 in São Paulo the next day is still in the future', async () => {
+      jest.useFakeTimers().setSystemTime(new Date(Date.UTC(2026, 0, 4, 2, 30))); // 03/01 23:30 em São Paulo
+
+      const result = await service.calculateMonthlySummary('emp-1', 2026, 1);
+
+      expect(result.days.map((d) => d.date)).toEqual(['2026-01-01', '2026-01-02', '2026-01-03']);
+      jest.useRealTimers();
+    });
   });
 });

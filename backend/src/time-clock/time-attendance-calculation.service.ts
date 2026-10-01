@@ -265,11 +265,17 @@ export class TimeAttendanceCalculationService {
     // depende do resultado de outro (cada `calculateDailySummary` só olha pro próprio `date`), então
     // não há razão pra serializar — `Promise.all` preserva a ordem cronológica do array de datas
     // independente da ordem em que cada promise resolve.
+    // "Dia futuro" é decidido no dia civil da EMPRESA (Company.timezone), não em UTC: entre 21h e
+    // 23h59 no horário de Brasília o dia seguinte já começou em UTC, e comparar a meia-noite UTC
+    // com o agora fazia o espelho ganhar o dia de amanhã (bug corrigido em 01/10/2026).
+    const employee = await this.prisma.employee.findUnique({ where: { id: employeeId }, select: { companyId: true } });
+    const company = employee ? await this.prisma.company.findUnique({ where: { id: employee.companyId }, select: { timezone: true } }) : null;
+    const timezone = company?.timezone ?? 'America/Sao_Paulo';
     const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
     const dates: Date[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(Date.UTC(year, month - 1, d));
-      if (date.getTime() > Date.now()) break; // não gera dias futuros
+      if (localMidnightUtc(date, timezone).getTime() > Date.now()) break; // não gera dias futuros
       dates.push(date);
     }
     const days = await Promise.all(dates.map((date) => this.calculateDailySummary(employeeId, date)));
