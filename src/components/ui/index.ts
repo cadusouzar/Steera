@@ -8,6 +8,7 @@ export { Table, THead, TH, TBody, TR, TD } from './Table';
 export { default as Tabs, type TabItem } from './Tabs';
 export { default as SegmentedControl } from './SegmentedControl';
 export { default as Switch } from './Switch';
+export { default as Menu, type MenuItem } from './Menu';
 export {
   PageHeader, Panel, PanelLink, StatCard, StatValue, StatusBadge, EmptyState, Notice,
   type LoadStatus, type StatusTone,

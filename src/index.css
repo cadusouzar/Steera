@@ -76,6 +76,16 @@
   }
 }
 
+@layer utilities {
+  /* Faixas que rolam de lado no celular (filtros segmentados): rolagem por toque, sem a barra cinza. */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @layer components {
   /* Antes: vidro translúcido com blur. Agora: painel sólido, borda fina, sombra quase nula. */
   .glass-panel {

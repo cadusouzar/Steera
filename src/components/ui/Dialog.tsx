@@ -74,7 +74,7 @@ interface BaseProps {
   description?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
-  /** Impede fechar por Esc/fundo (ex.: enquanto salva). */
+  /** Impede fechar por Esc, fundo ou "X" (o X some) — ex.: enquanto salva, ou um aviso que pede ação explícita. */
   dismissable?: boolean;
 }
 
@@ -132,7 +132,7 @@ export const Modal = ({
                 <h2 id={titleId} className="text-[17px] font-semibold text-foreground">{title}</h2>
                 {description && <p id={descId} className="mt-1 text-[14px] text-muted">{description}</p>}
               </div>
-              <CloseButton onClose={close} />
+              {dismissable && <CloseButton onClose={close} />}
             </header>
             {children && <div className="px-6 pb-5 overflow-y-auto">{children}</div>}
             {footer && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-6 py-4">{footer}</footer>}
@@ -187,7 +187,7 @@ export const Drawer = ({
                 <h2 id={titleId} className="text-[17px] font-semibold text-foreground truncate">{title}</h2>
                 {description && <p id={descId} className="mt-0.5 text-[14px] text-muted">{description}</p>}
               </div>
-              <CloseButton onClose={close} />
+              {dismissable && <CloseButton onClose={close} />}
             </header>
             <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
             {footer && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-6 py-4">{footer}</footer>}

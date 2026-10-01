@@ -1,17 +1,13 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Check, Copy, KeyRound, Link2, Lock, Pencil, Search, Send, ShieldCheck, ShieldOff, Trash2, UserPlus, X } from 'lucide-react';
 import {
-  Shield, Search, X, UserPlus, FileQuestion, LayoutDashboard, HeartHandshake, Users,
-  TrendingUp, Package, BarChart3, Loader2, KeyRound, Copy, Check, ShieldOff, ShieldCheck,
-  Pencil, Trash2, AlertTriangle, Clock, ChevronDown, Send, Mail, Link2, Lock,
-} from 'lucide-react';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
-import CustomSelect from '../../components/CustomSelect';
+  Button, ConfirmDialog, EmptyState, Field, Input, Menu, Modal, Notice, PageHeader, SegmentedControl, Select,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, type MenuItem, type StatusTone,
+} from '../../components/ui';
 import { can, useCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { SystemUser, EmployeeListItem } from '../../lib/api';
-import { inputBorderClass, isValidEmail } from '../../lib/validation';
+import { isValidEmail } from '../../lib/validation';
 import {
   LINK_REQUIRES_FULL_SCOPE_HINT,
   LOGIN_ABOVE_CALLER_MESSAGE,
@@ -19,52 +15,43 @@ import {
   isWithinCaller,
 } from '../../lib/grantCoverage';
 
+// Usuários e acessos (redesenho no kit, etapa 6 do polimento — 01/10/2026). Mudanças aprovadas:
+// uso de logins do plano abaixo do título; filtro por situação; a coluna "Módulos" virou "Perfil"
+// (o nome do perfil e os módulos resumidos numa linha); a janela "Módulos autorizados" saiu — a lista
+// completa aparece em "Trocar perfil"; o menu "Ações" ganhou teclado (peça `Menu` do kit). O status
+// legado `locked` (convertido em ACTIVE desde 26/09/2026) é exibido como "Bloqueado".
+
 const ROLE_OPTIONS = [
-  { value: 'admin', label: 'Administrador' },
-  { value: 'employee', label: 'Funcionário' },
+  { value: 'admin' as const, label: 'Administrador' },
+  { value: 'employee' as const, label: 'Funcionário' },
 ];
 
-interface ModuleOption { id: string; label: string; icon: React.ReactNode }
-interface ModuleGroup { id: string; groupLabel: string; groupIcon: React.ReactNode; options: ModuleOption[] }
+// Ids iguais ao enum `AppModule` do backend.
+const MODULE_LABELS: Record<string, string> = {
+  DASHBOARD: 'Visão Geral',
+  CLIENTES: 'Clientes',
+  COMERCIAL: 'Comercial',
+  OPERACOES: 'Operações',
+  FINANCAS: 'Finanças',
+  RH_CARGOS: 'Cargos',
+  RH_FUNCIONARIOS: 'Funcionários',
+  PONTO_REGISTRO: 'Bater o próprio ponto',
+  PONTO_ADMINISTRACAO: 'Administração do ponto',
+};
+const moduleLabel = (id: string) => MODULE_LABELS[id] ?? id;
+const MAX_INLINE_MODULES = 2;
 
-// Ids em maiúsculo pra bater 1:1 com o enum `AppModule` do backend (backend/prisma/schema.prisma)
-// — módulos valem igualmente pra login ADMIN e EMPLOYEE, então o mesmo seletor aparece nos dois
-// casos. Módulos sem sub-divisão continuam soltos; RH e Ponto viraram grupos com dois
-// sub-módulos independentes cada um (17/09/2026 — antes "RH" cobria Cargos/Funcionários/Ponto de
-// uma vez só; ver DECISOES-TECNICAS no vault pro raciocínio completo).
-const STANDALONE_MODULES: ModuleOption[] = [
-  { id: 'DASHBOARD', label: 'Visão Geral', icon: <LayoutDashboard size={16}/> },
-  { id: 'CLIENTES', label: 'Clientes', icon: <HeartHandshake size={16}/> },
-  { id: 'COMERCIAL', label: 'Comercial', icon: <TrendingUp size={16}/> },
-  { id: 'OPERACOES', label: 'Operações', icon: <Package size={16}/> },
-  { id: 'FINANCAS', label: 'Finanças', icon: <BarChart3 size={16}/> },
-];
+type StatusFilter = 'all' | 'active' | 'invited' | 'blocked';
 
-const MODULE_GROUPS: ModuleGroup[] = [
-  {
-    id: 'rh', groupLabel: 'Recursos Humanos', groupIcon: <Users size={16}/>,
-    options: [
-      { id: 'RH_CARGOS', label: 'Cargos', icon: <Users size={14}/> },
-      { id: 'RH_FUNCIONARIOS', label: 'Funcionários', icon: <Users size={14}/> },
-    ],
-  },
-  {
-    id: 'ponto', groupLabel: 'Ponto', groupIcon: <Clock size={16}/>,
-    options: [
-      { id: 'PONTO_REGISTRO', label: 'Bater o próprio ponto', icon: <Clock size={14}/> },
-      { id: 'PONTO_ADMINISTRACAO', label: 'Administração de Ponto', icon: <Clock size={14}/> },
-    ],
-  },
-];
+const isBlockedStatus = (status: SystemUser['status']) => status === 'blocked' || status === 'locked';
+const statusGroup = (status: SystemUser['status']): Exclude<StatusFilter, 'all'> =>
+  isBlockedStatus(status) ? 'blocked' : status;
 
-const ALL_MODULE_OPTIONS: ModuleOption[] = [...STANDALONE_MODULES, ...MODULE_GROUPS.flatMap(g => g.options)];
-const moduleLabel = (id: string) => ALL_MODULE_OPTIONS.find(m => m.id === id)?.label ?? id;
-
-// Cap de pills visíveis na tabela — sem isso, um login com muitos módulos (ex.: um ADMIN com todos
-// os 9) fazia a linha da tabela crescer verticalmente sem limite conforme os badges quebravam linha
-// dentro do `max-w-xs`. O resto vira um único badge "+N", com `title` listando os módulos ocultos —
-// a lista completa (e editável) continua a um clique de distância no modal de "Editar módulos".
-const MAX_VISIBLE_MODULE_PILLS = 3;
+const STATUS_BADGE: Record<Exclude<StatusFilter, 'all'>, { label: string; tone: StatusTone }> = {
+  active: { label: 'Ativo', tone: 'success' },
+  invited: { label: 'Convite pendente', tone: 'neutral' },
+  blocked: { label: 'Bloqueado', tone: 'danger' },
+};
 
 interface UserFormState {
   email: string;
@@ -76,8 +63,8 @@ interface UserFormState {
 const emptyForm: UserFormState = { email: '', role: 'admin', employeeId: '', profileId: '' };
 
 // Aviso de convite/redefinição de senha ("Acesso e sessões", 26/09/2026) — 'invite' cobre tanto a
-// criação de um login quanto "Reenviar Convite" (mesma resposta de backend, `inviteUrl`/`sent`);
-// 'reset' cobre "Enviar Redefinição de Senha" pra um login que já aceitou o convite (sem link pra
+// criação de um login quanto "Reenviar convite" (mesma resposta de backend, `inviteUrl`/`sent`);
+// 'reset' cobre "Enviar redefinição de senha" pra um login que já aceitou o convite (sem link pra
 // copiar — só confirma que o e-mail foi enviado).
 type UserNotice =
   | { kind: 'invite'; email: string; inviteUrl: string | null; sent: boolean }
@@ -94,9 +81,7 @@ const UsersManagement = () => {
   // Vincular logins a fichas (e criar login de funcionário, que nasce vinculado) exige que todo
   // alcance do perfil de quem está na tela seja EMPRESA: o backend recusa com 403 caso contrário.
   const canLinkEmployees = currentUser?.canSelfLinkEmployee !== false;
-  const roleOptions = ROLE_OPTIONS.filter(
-    (o) => (o.value === 'admin' ? callerIsAdmin : canLinkEmployees),
-  );
+  const roleOptions = ROLE_OPTIONS.filter((o) => (o.value === 'admin' ? callerIsAdmin : canLinkEmployees));
   const canCreateLogins = roleOptions.length > 0;
   const newUserForm: UserFormState = { ...emptyForm, role: callerIsAdmin ? 'admin' : 'employee' };
   // Concessão limitada (28/09/2026): só perfis que cabem no perfil de quem está na tela são
@@ -109,10 +94,12 @@ const UsersManagement = () => {
   // depende só de `usuarios.gerenciar`, não do alcance em Funcionários de quem está na tela.
   const [linkableEmployees, setLinkableEmployees] = useState<api.LinkableEmployee[]>([]);
   const [profiles, setProfiles] = useState<api.Profile[]>([]);
+  const [plan, setPlan] = useState<api.MyPlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -121,76 +108,26 @@ const UsersManagement = () => {
 
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
 
-  // Edição de perfil de um login já existente (17/09/2026, adaptado pra Perfis em 19/09/2026) —
-  // sem precisar bloquear e recriar.
+  // Troca de perfil de um login já existente (17/09/2026, adaptado pra Perfis em 19/09/2026).
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [editProfileId, setEditProfileId] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  // Exclusão de verdade (17/09/2026) — confirmação em duas etapas, nunca window.confirm().
+  // Exclusão de verdade (17/09/2026) — sempre confirmada, nunca window.confirm().
   const [deletingUser, setDeletingUser] = useState<SystemUser | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Vincular um login ainda sem ficha de funcionário (27/09/2026). Quem tem alcance restrito não se
-  // vincula sozinho no Ponto, então alguém com todos os alcances em EMPRESA faz isso por aqui (desde
-  // 28/09/2026 só essa pessoa: a ação some pra quem tem `canSelfLinkEmployee === false`).
+  // Vincular um login ainda sem ficha de funcionário (27/09/2026; desde 28/09/2026 só quem tem todos
+  // os alcances em EMPRESA: a ação some pra quem tem `canSelfLinkEmployee === false`).
   const [linkingUser, setLinkingUser] = useState<SystemUser | null>(null);
   const [linkEmployeeId, setLinkEmployeeId] = useState('');
   const [isLinking, setIsLinking] = useState(false);
 
-  // Redefinição de senha por um admin (17/09/2026) — confirmação em duas etapas antes de gerar.
+  // Envio de redefinição de senha por quem administra (confirmado antes de enviar).
   const [resettingPasswordUser, setResettingPasswordUser] = useState<SystemUser | null>(null);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
-  // Ver a lista completa de módulos de um login (17/09/2026) — a tabela só mostra os 3 primeiros
-  // badges por linha (ver MAX_VISIBLE_MODULE_PILLS); clicar no badge "+N" abre isso em vez de só
-  // depender do `title` (hover não existe em touch, e o usuário pediu algo clicável). Somente
-  // leitura — quem quiser editar de fato usa "Editar Módulos" (ação de admin, botão separado).
-  const [viewingModulesUser, setViewingModulesUser] = useState<SystemUser | null>(null);
-
-  // Menu de ações por linha (17/09/2026) — antes eram 4-5 botões inline (Editar/Senha/Bloquear/
-  // Excluir + o link de acesso ao Ponto na coluna de Login), que com texto visível em cada um
-  // (pedido do usuário: "precisava que fosse algo escrito e não apenas ícones") ficaram largos e
-  // desalinhados entre si ("parecendo uma pirâmide"). Um único botão "Ações" por linha, abrindo um
-  // menu com cada ação por extenso, resolve os dois problemas de uma vez — inclusive o toggle de
-  // acesso total ao Ponto, que o usuário pediu pra mover pra cá em vez de ficar solto na coluna de
-  // Login. Renderizado via portal (posição calculada a partir do botão que abriu) pra nunca ser
-  // cortado pelo `overflow-hidden` do painel da tabela.
-  const [openActionsMenuUserId, setOpenActionsMenuUserId] = useState<string | null>(null);
-  const [actionsMenuAnchor, setActionsMenuAnchor] = useState<DOMRect | null>(null);
-  const actionsMenuRef = useRef<HTMLDivElement>(null);
-
-  const closeActionsMenu = useCallback(() => setOpenActionsMenuUserId(null), []);
-
-  const openActionsMenu = (event: React.MouseEvent<HTMLButtonElement>, userId: string) => {
-    if (openActionsMenuUserId === userId) {
-      closeActionsMenu();
-      return;
-    }
-    setActionsMenuAnchor(event.currentTarget.getBoundingClientRect());
-    setOpenActionsMenuUserId(userId);
-  };
-
-  useEffect(() => {
-    if (!openActionsMenuUserId) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (actionsMenuRef.current?.contains(target)) return;
-      if (target.closest('[data-actions-trigger]')) return;
-      closeActionsMenu();
-    };
-    window.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('scroll', closeActionsMenu, true);
-    window.addEventListener('resize', closeActionsMenu);
-    return () => {
-      window.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('scroll', closeActionsMenu, true);
-      window.removeEventListener('resize', closeActionsMenu);
-    };
-  }, [openActionsMenuUserId, closeActionsMenu]);
-
-  // Substitui o antigo banner de senha temporária (`tempPasswordBanner`) — fecha só com ação
-  // explícita do admin (nunca backdrop/Escape), mesmo padrão de sempre.
+  // Substitui o antigo banner de senha temporária — fecha só com ação explícita (nunca Esc/fundo).
   const [userNotice, setUserNotice] = useState<UserNotice | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -199,11 +136,11 @@ const UsersManagement = () => {
     setLoadError(null);
     try {
       // `GET /profiles` e `GET /companies/me/users` exigem `usuarios.gerenciar`; sem ela, a
-      // listagem de logins recusa com 403 e a mensagem do backend aparece no banner de erro.
+      // listagem de logins recusa com 403 e a mensagem do backend aparece no aviso de erro.
       // `GET /employees` exige `funcionarios.ver` (e vem filtrada pelo alcance): sem ela a tela
       // continua funcionando, só sem os nomes dos funcionários vinculados. Os seletores de
       // funcionário (novo login, vincular) usam `linkable-employees`, que não depende desse alcance.
-      const [systemUsers, employeeItems, profileItems, linkableItems] = await Promise.all([
+      const [systemUsers, employeeItems, profileItems, linkableItems, myPlan] = await Promise.all([
         api.listSystemUsers(),
         api.listEmployees().catch(() => [] as EmployeeListItem[]),
         canManageUsers ? api.listProfiles() : Promise.resolve([] as api.Profile[]),
@@ -211,11 +148,14 @@ const UsersManagement = () => {
         canManageUsers && canLinkEmployees
           ? api.listLinkableEmployees().catch(() => [] as api.LinkableEmployee[])
           : Promise.resolve([] as api.LinkableEmployee[]),
+        // Só para a linha "Logins de funcionário: X de Y" — sem o plano, a linha some.
+        api.getMyPlan().catch(() => null),
       ]);
       setUsers(systemUsers);
       setEmployees(employeeItems);
       setProfiles(profileItems);
       setLinkableEmployees(linkableItems);
+      setPlan(myPlan);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os usuários.');
     } finally {
@@ -227,27 +167,6 @@ const UsersManagement = () => {
     loadData();
   }, [loadData]);
 
-  useEscapeKey(() => {
-    if (isModalOpen) setIsModalOpen(false);
-    if (editingUser) setEditingUser(null);
-    if (deletingUser) setDeletingUser(null);
-    if (linkingUser) setLinkingUser(null);
-    if (resettingPasswordUser) setResettingPasswordUser(null);
-    if (viewingModulesUser) setViewingModulesUser(null);
-    if (openActionsMenuUserId) closeActionsMenu();
-  });
-
-  useEffect(() => {
-    if (isModalOpen || editingUser || deletingUser || linkingUser || resettingPasswordUser || userNotice || viewingModulesUser) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [isModalOpen, editingUser, deletingUser, linkingUser, resettingPasswordUser, userNotice, viewingModulesUser]);
-
   // Nome por id: a lista de funcionários (filtrada pelo alcance de quem vê) mais os sem login, pra
   // um vínculo feito nesta tela já mostrar o nome mesmo sem `funcionarios.ver`.
   const employeeNameById = useMemo(() => {
@@ -256,6 +175,8 @@ const UsersManagement = () => {
     employees.forEach(e => map.set(e.id, e.fullName));
     return map;
   }, [employees, linkableEmployees]);
+
+  const profileNameById = useMemo(() => new Map(profiles.map((p) => [p.id, p.name])), [profiles]);
 
   // Perfis que cabem no perfil de quem está na tela: os únicos oferecidos nos seletores.
   const coveredProfileIds = useMemo(
@@ -269,10 +190,8 @@ const UsersManagement = () => {
     return !profile || coveredProfileIds.has(profile.id);
   };
 
-  // Funcionários que ainda não têm login vinculado — cruza a lista de
-  // funcionários com os employeeId já presentes em `users`. Filtro
-  // proativo de UX: o backend já rejeita com 400 criar um segundo login
-  // pro mesmo funcionário, isso só evita a pessoa escolher e bater no erro.
+  // Funcionários que ainda não têm login vinculado. Filtro de UX: o backend já rejeita com 400 um
+  // segundo login pro mesmo funcionário, isso só evita a pessoa escolher e bater no erro.
   const linkedEmployeeIds = useMemo(
     () => new Set(users.filter(u => u.employeeId).map(u => u.employeeId as string)),
     [users],
@@ -282,19 +201,28 @@ const UsersManagement = () => {
     [linkableEmployees, linkedEmployeeIds],
   );
 
+  const counts = useMemo(() => {
+    const c = { all: users.length, active: 0, invited: 0, blocked: 0 };
+    users.forEach((u) => { c[statusGroup(u.status)] += 1; });
+    return c;
+  }, [users]);
+
   const filteredUsers = useMemo(() => {
     const lowerQuery = searchQuery.toLowerCase().trim();
-    if (!lowerQuery) return users;
     return users.filter(u => {
+      if (statusFilter !== 'all' && statusGroup(u.status) !== statusFilter) return false;
+      if (!lowerQuery) return true;
       const employeeName = u.employeeId ? employeeNameById.get(u.employeeId) ?? '' : '';
       const roleLabel = u.role === 'admin' ? 'administrador' : 'funcionário';
+      const profileName = u.profileId ? profileNameById.get(u.profileId) ?? '' : '';
       return (
         u.email.toLowerCase().includes(lowerQuery) ||
         employeeName.toLowerCase().includes(lowerQuery) ||
+        profileName.toLowerCase().includes(lowerQuery) ||
         roleLabel.includes(lowerQuery)
       );
     });
-  }, [users, searchQuery, employeeNameById]);
+  }, [users, searchQuery, statusFilter, employeeNameById, profileNameById]);
 
   const openNewModal = () => {
     setFormData(newUserForm);
@@ -316,14 +244,16 @@ const UsersManagement = () => {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSaving || !isFormValid) return;
+    if (isSaving) return;
+    if (!isFormValid) {
+      if (formData.email && !isValidEmail(formData.email)) setEmailError('E-mail inválido');
+      return;
+    }
     setIsSaving(true);
     setActionError(null);
     try {
-      // Sempre chama o endpoint real e deixa o backend ser a autoridade —
-      // o limite de logins do plano e a checagem de funcionário já vinculado
-      // são validados lá (com dados em tempo real, sem depender de uma
-      // contagem cacheada no cliente que outro admin pode ter invalidado).
+      // O backend é a autoridade: limite de logins do plano e funcionário já vinculado são checados
+      // lá, com dados em tempo real.
       const result = await api.createSystemUser({
         email: formData.email.trim(),
         role: formData.role,
@@ -334,17 +264,14 @@ const UsersManagement = () => {
       setUserNotice({ kind: 'invite', email: result.user.email, inviteUrl: result.inviteUrl, sent: result.sent });
       setIsModalOpen(false);
       setFormData(newUserForm);
+      // O uso do plano mudou (convite pendente já ocupa vaga).
+      api.getMyPlan().then(setPlan).catch(() => undefined);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível criar o acesso.');
     } finally {
       setIsSaving(false);
     }
   };
-
-  // `invited` conta como "bloqueável" (não como "já bloqueado") — sem isso, o toggle rotulava um
-  // convite pendente como "Desbloquear Acesso" (sobrava só binário active/não-active antes deste
-  // status existir) e chamava unblock() nele, um no-op (ver UsersService.unblock()).
-  const isBlockedStatus = (status: SystemUser['status']) => status === 'blocked' || status === 'locked';
 
   const handleToggleStatus = async (user: SystemUser) => {
     if (pendingUserId) return;
@@ -356,8 +283,8 @@ const UsersManagement = () => {
       } else {
         await api.blockSystemUser(user.id);
       }
-      // Recarrega em vez de adivinhar o novo status localmente: desbloquear um login que nunca
-      // aceitou o convite volta pra `invited` (não `active`) — ver UsersService.unblock().
+      // Recarrega em vez de adivinhar o novo status: desbloquear um login que nunca aceitou o
+      // convite volta pra `invited` (não `active`) — ver UsersService.unblock().
       await loadData();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível atualizar o status deste usuário.');
@@ -366,9 +293,7 @@ const UsersManagement = () => {
     }
   };
 
-  // Reenvia o convite de um login ainda `invited` (400 caso contrário, mas a ação só aparece pra
-  // esse status) — reaproveita o indicador de carregamento por linha já usado por
-  // handleToggleStatus (`pendingUserId`).
+  // Reenvia o convite de um login ainda `invited` (a ação só aparece pra esse status).
   const handleResendInvite = async (user: SystemUser) => {
     if (pendingUserId) return;
     setPendingUserId(user.id);
@@ -394,8 +319,7 @@ const UsersManagement = () => {
       await navigator.clipboard.writeText(userNotice.inviteUrl);
       setCopied(true);
     } catch {
-      // Sem acesso à área de transferência (navegador/permite) — o admin
-      // ainda pode selecionar e copiar manualmente o link exibido.
+      // Sem acesso à área de transferência — o link continua visível para copiar à mão.
     }
   };
 
@@ -412,7 +336,9 @@ const UsersManagement = () => {
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingUser || isSavingEdit) return;
+    // `!editProfileId` (revisão final da branch, 22/09/2026): um login sem perfil (FK `onDelete:
+    // SetNull`) abria com o seletor vazio e deixava submeter — o backend respondia com um erro confuso.
+    if (!editingUser || isSavingEdit || !editProfileId) return;
     setIsSavingEdit(true);
     setActionError(null);
     try {
@@ -433,11 +359,11 @@ const UsersManagement = () => {
     try {
       await api.deleteSystemUser(deletingUser.id);
       setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
-      setDeletingUser(null);
+      api.getMyPlan().then(setPlan).catch(() => undefined);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível excluir este login.');
-      setDeletingUser(null);
     } finally {
+      setDeletingUser(null);
       setIsDeleting(false);
     }
   };
@@ -476,12 +402,8 @@ const UsersManagement = () => {
     try {
       const result = await api.resetSystemUserPassword(resettingPasswordUser.id);
       const email = resettingPasswordUser.email;
-      setResettingPasswordUser(null);
       // Um login ainda `invited` não tem senha pra redefinir — o backend reenvia o convite em vez
-      // disso (`inviteUrl` presente); esta ação não fica visível pra esse status na UI (ver
-      // "Reenviar Convite"), mas o fallback continua correto se algo mudar do lado do backend.
-      // `inviteUrl` vem `null` (presente, mas sem link) quando quem chama não pode vincular fichas
-      // (ruling R-final, 29/09/2026) — ainda é um reenvio de convite, só sem link pra copiar.
+      // disso (`inviteUrl` presente, possivelmente `null` para quem não pode vincular fichas).
       if (result.inviteUrl !== undefined) {
         setUserNotice({ kind: 'invite', email, inviteUrl: result.inviteUrl, sent: result.sent });
       } else {
@@ -490,980 +412,394 @@ const UsersManagement = () => {
       await loadData();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível enviar a redefinição de senha deste usuário.');
-      setResettingPasswordUser(null);
     } finally {
+      setResettingPasswordUser(null);
       setIsResettingPassword(false);
     }
   };
 
-  return (
-    <div className="p-6 md:p-8 relative">
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-        className="max-w-6xl mx-auto"
-      >
-        {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shadow-sm">
-                <Shield size={20} />
-              </div>
-              <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Usuários e Acessos</h1>
-            </div>
-            <p className="text-muted mt-1 max-w-lg">
-              Gerencie quem tem acesso ao sistema, crie novos logins e defina os módulos que cada um pode visualizar.
-            </p>
-          </div>
-          {canManageUsers && !canCreateLogins && (
-            <p className="text-sm text-muted max-w-xs">{LINK_REQUIRES_FULL_SCOPE_HINT}</p>
-          )}
-          {canManageUsers && canCreateLogins && (
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={openNewModal}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
-            >
-              <UserPlus size={18} />
-              Novo Acesso
-            </motion.button>
-          )}
-        </div>
+  const menuItemsFor = (user: SystemUser): MenuItem[] => {
+    const items: MenuItem[] = [{ label: 'Trocar perfil', icon: Pencil, onSelect: () => openEditModal(user) }];
+    if (!user.employeeId && canLinkEmployees) {
+      items.push({ label: 'Vincular funcionário', icon: Link2, onSelect: () => openLinkModal(user) });
+    }
+    if (user.status === 'invited') {
+      if (callerIsAdmin || user.role !== 'admin') {
+        items.push({ label: 'Reenviar convite', icon: Send, onSelect: () => handleResendInvite(user), disabled: pendingUserId === user.id });
+      }
+    } else {
+      items.push({ label: 'Enviar redefinição de senha', icon: KeyRound, onSelect: () => setResettingPasswordUser(user) });
+    }
+    items.push(
+      isBlockedStatus(user.status)
+        ? { label: 'Desbloquear acesso', icon: ShieldCheck, onSelect: () => handleToggleStatus(user), disabled: pendingUserId === user.id }
+        : { label: 'Bloquear acesso', icon: ShieldOff, onSelect: () => handleToggleStatus(user), disabled: pendingUserId === user.id },
+      { label: 'Excluir login', icon: Trash2, onSelect: () => setDeletingUser(user), tone: 'danger', separated: true },
+    );
+    return items;
+  };
 
-        {/* Action Bar (Search) */}
-        <div className="glass-panel p-2 rounded-2xl border border-border/60 mb-8 flex items-center shadow-sm">
-          <div className="flex-1 flex items-center px-4">
-            <Search size={20} className="text-primary/70 shrink-0" />
-            <input
-              type="text"
+  const profileOptions = (current?: string | null) => profiles.filter(
+    (p) => (callerIsAdmin || !p.isProtected || p.id === current) && (coveredProfileIds.has(p.id) || p.id === current),
+  );
+
+  const loginLimit = plan?.current.limits.maxEmployeeLogins;
+  const planLine = plan && (
+    <p className="-mt-3 mb-6 text-[13px] text-muted">
+      Logins de funcionário:{' '}
+      <span className="text-foreground tabular">
+        {plan.usage.employeeLogins}{loginLimit == null ? '' : ` de ${loginLimit}`}
+      </span>
+      {loginLimit == null ? ` (sem limite no plano ${plan.current.label})` : ` no plano ${plan.current.label}`}
+      {loginLimit != null && plan.usage.employeeLogins >= loginLimit && ' — limite atingido'}
+      . Administradores não contam.
+    </p>
+  );
+
+  const emptyState = users.length === 0 ? (
+    <EmptyState title="Nenhum login ainda" description="Crie um acesso para alguém da sua equipe entrar no sistema." />
+  ) : (
+    <EmptyState
+      title="Nenhum login encontrado"
+      description={searchQuery ? `Nada corresponde a “${searchQuery}” neste filtro.` : 'Nenhum login nesta situação.'}
+      action={<Button variant="secondary" onClick={() => { setSearchQuery(''); setStatusFilter('all'); }}>Limpar busca e filtro</Button>}
+    />
+  );
+
+  const editingModules = editingUser?.modules ?? [];
+
+  return (
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-6xl mx-auto">
+        <PageHeader
+          title="Usuários e acessos"
+          description="Quem entra no sistema e com qual perfil de acesso."
+          actions={canManageUsers && canCreateLogins ? <Button icon={UserPlus} onClick={openNewModal}>Novo acesso</Button> : undefined}
+        />
+        {planLine}
+        {canManageUsers && !canCreateLogins && <Notice className="mb-4">{LINK_REQUIRES_FULL_SCOPE_HINT}</Notice>}
+
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="relative flex-1">
+            <Search size={16} strokeWidth={1.8} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" aria-hidden="true" />
+            <Input
+              type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar usuários por email, funcionário ou tipo de acesso..."
-              className="w-full bg-transparent border-none px-4 py-3 text-base text-foreground placeholder:text-muted focus:outline-none focus:ring-0"
+              placeholder="Buscar por e-mail, funcionário ou perfil"
+              aria-label="Buscar logins"
+              className="pl-9 pr-9"
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="p-1.5 rounded-full hover:bg-secondary/80 text-muted hover:text-foreground transition-colors shrink-0"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 inline-flex items-center justify-center rounded text-muted hover:text-foreground hover:bg-secondary"
+                aria-label="Limpar busca"
               >
-                <X size={16} />
+                <X size={15} strokeWidth={1.8} />
               </button>
             )}
           </div>
+          <div className="overflow-x-auto scrollbar-none -mx-4 px-4 md:mx-0 md:px-0">
+            <SegmentedControl<StatusFilter>
+              label="Filtrar por situação"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: 'all', label: `Todos ${counts.all}` },
+                { value: 'active', label: `Ativos ${counts.active}` },
+                { value: 'invited', label: `Convites ${counts.invited}` },
+                { value: 'blocked', label: `Bloqueados ${counts.blocked}` },
+              ]}
+            />
+          </div>
         </div>
 
-        {loadError && (
-          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm">
-            {loadError}
-          </div>
+        {loadError && <Notice tone="danger" className="mb-4">{loadError}</Notice>}
+        {!isModalOpen && !editingUser && !linkingUser && actionError && (
+          <Notice tone="danger" className="mb-4" onDismiss={() => setActionError(null)}>{actionError}</Notice>
         )}
 
-        {!isModalOpen && actionError && (
-          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm flex items-start justify-between gap-4">
-            <span>{actionError}</span>
-            <button
-              onClick={() => setActionError(null)}
-              className="p-1.5 rounded-full hover:bg-red-500/10 text-red-600 dark:text-red-400 transition-colors shrink-0"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
-
-        {/* Data Grid or Empty State */}
-        <div className="glass-panel rounded-3xl border border-border/60 overflow-hidden shadow-sm">
+        <div className="bg-panel border border-border rounded-lg shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="py-24 flex items-center justify-center text-muted">
-              <Loader2 className="animate-spin" size={28} />
+            <div className="divide-y divide-border" aria-label="Carregando logins" role="status">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-6 px-5 h-16">
+                  <span className="skeleton h-4 w-52" />
+                  <span className="skeleton h-4 w-28 hidden md:block" />
+                  <span className="skeleton h-4 w-28 hidden sm:block" />
+                  <span className="skeleton h-4 w-16 ml-auto" />
+                </div>
+              ))}
             </div>
-          ) : filteredUsers.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[900px]">
-                <thead>
-                  <tr className="border-b-2 border-border/60 bg-secondary/10">
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Login
-                    </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Vínculo
-                    </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Módulos
-                    </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Status
-                    </th>
-                    {canManageUsers && (
-                      <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">
-                        Ações
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  <AnimatePresence>
-                    {filteredUsers.map((user, index) => {
-                      const linkedEmployeeName = user.employeeId ? employeeNameById.get(user.employeeId) : undefined;
-                      const canAct = canManageUsers && canActOnUser(user);
-                      return (
-                        <motion.tr
-                          key={user.id}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, scale: 0.95 }}
-                          transition={{ duration: 0.2, delay: index * 0.03 }}
-                          onClick={() => canAct && openEditModal(user)}
-                          className={`hover:bg-secondary/40 transition-colors group ${canAct ? 'cursor-pointer' : ''}`}
-                        >
-                          <td className="px-8 py-5">
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary to-accent border-2 border-background shadow-sm flex items-center justify-center text-primary-foreground font-bold text-sm shrink-0">
-                                {user.email.charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <p className="text-base font-heading font-bold text-foreground">
-                                  {user.email}
-                                </p>
-                                <p className="text-sm text-muted">
-                                  {user.role === 'admin' ? 'Administrador' : 'Funcionário'}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-8 py-5 text-sm font-medium text-foreground/80">
-                            {user.role === 'employee'
-                              ? (user.employeeId ? linkedEmployeeName ?? 'Funcionário vinculado' : 'Sem funcionário vinculado')
-                              : 'Login administrativo'}
-                            {user.role === 'admin' && user.employeeId && (
-                              <p className="text-xs text-muted mt-0.5">{linkedEmployeeName ?? 'Funcionário vinculado'}</p>
-                            )}
-                          </td>
-                          <td className="px-8 py-5">
-                            <div className="flex flex-wrap items-center gap-1.5 max-w-xs mb-1.5">
-                              <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                                {profiles.find((p) => p.id === user.profileId)?.name ?? '—'}
-                              </span>
-                            </div>
-                            {user.modules.length > 0 ? (
-                              <div className="flex flex-wrap gap-1.5 max-w-xs">
-                                {user.modules.slice(0, MAX_VISIBLE_MODULE_PILLS).map(m => (
-                                  <span
-                                    key={m}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-accent/10 text-accent border border-accent/20"
-                                  >
-                                    {moduleLabel(m)}
-                                  </span>
-                                ))}
-                                {user.modules.length > MAX_VISIBLE_MODULE_PILLS && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); setViewingModulesUser(user); }}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-muted/20 text-muted border border-border/60 hover:bg-muted/30 hover:text-foreground transition-colors cursor-pointer"
-                                    title={user.modules.slice(MAX_VISIBLE_MODULE_PILLS).map(moduleLabel).join(', ')}
-                                  >
-                                    +{user.modules.length - MAX_VISIBLE_MODULE_PILLS}
-                                  </button>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-muted">Nenhum módulo</span>
-                            )}
-                          </td>
-                          <td className="px-8 py-5">
-                            {user.status === 'active' ? (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                Ativo
-                              </span>
-                            ) : user.status === 'invited' ? (
-                              <span
-                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-foreground/10 text-foreground border border-foreground/20"
-                                title="Aguardando a pessoa aceitar o convite e definir a própria senha"
-                              >
-                                <span className="w-1.5 h-1.5 rounded-full bg-foreground" />
-                                Convite pendente
-                              </span>
-                            ) : user.status === 'locked' ? (
-                              <span
-                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
-                                title="Travado automaticamente por excesso de tentativas de senha erradas"
-                              >
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                Travado (tentativas)
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
-                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                                Bloqueado
-                              </span>
-                            )}
-                          </td>
-                          {canManageUsers && (
-                            <td className="px-8 py-5 text-right">
-                              {!canAct ? (
-                                <span
-                                  title={LOGIN_ABOVE_CALLER_MESSAGE}
-                                  className="inline-flex items-center gap-1.5 text-xs text-muted"
-                                >
-                                  <Lock size={13} className="shrink-0" aria-hidden="true" />
-                                  <span className="sr-only">{LOGIN_ABOVE_CALLER_MESSAGE}</span>
-                                  <span aria-hidden="true">Sem ações</span>
-                                </span>
-                              ) : (
-                              <button
-                                type="button"
-                                data-actions-trigger
-                                onClick={(e) => { e.stopPropagation(); openActionsMenu(e, user.id); }}
-                                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
-                                  openActionsMenuUserId === user.id
-                                    ? 'border-primary/40 bg-primary/10 text-primary'
-                                    : 'border-border text-foreground hover:bg-secondary'
-                                }`}
-                              >
-                                Ações
-                                <ChevronDown size={14} />
-                              </button>
-                              )}
-                            </td>
+          ) : loadError ? null : filteredUsers.length > 0 ? (
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Login</TH>
+                  <TH className="hidden lg:table-cell">Vínculo</TH>
+                  <TH className="hidden md:table-cell">Perfil</TH>
+                  <TH className="hidden sm:table-cell">Situação</TH>
+                  {canManageUsers && <TH align="right"><span className="sr-only">Ações</span></TH>}
+                </tr>
+              </THead>
+              <TBody>
+                {filteredUsers.map((user) => {
+                  const linkedEmployeeName = user.employeeId ? employeeNameById.get(user.employeeId) : undefined;
+                  const canAct = canManageUsers && canActOnUser(user);
+                  const status = STATUS_BADGE[statusGroup(user.status)];
+                  const profileName = user.profileId ? profileNameById.get(user.profileId) : undefined;
+                  const visibleModules = user.modules.slice(0, MAX_INLINE_MODULES).map(moduleLabel).join(', ');
+                  const hiddenModules = user.modules.length - MAX_INLINE_MODULES;
+                  const vinculo = user.employeeId
+                    ? linkedEmployeeName ?? 'Funcionário vinculado'
+                    : user.role === 'employee' ? 'Sem funcionário vinculado' : 'Sem ficha';
+                  return (
+                    <TR key={user.id} interactive={canAct} onClick={() => canAct && openEditModal(user)}>
+                      <TD>
+                        <div className="max-w-[200px] sm:max-w-[280px] lg:max-w-none">
+                          <p className="font-medium text-foreground truncate">{user.email}</p>
+                          <p className="text-[12px] text-muted">
+                            {user.role === 'admin' ? 'Administrador' : 'Funcionário'}
+                            <span className="sm:hidden"> · {status.label}</span>
+                          </p>
+                        </div>
+                      </TD>
+                      <TD className="hidden lg:table-cell text-muted">{vinculo}</TD>
+                      <TD className="hidden md:table-cell">
+                        <p className="text-foreground">{profileName ?? <span className="text-muted">Sem perfil</span>}</p>
+                        <p className="text-[12px] text-muted" title={user.modules.map(moduleLabel).join(', ') || undefined}>
+                          {user.modules.length === 0 ? 'Nenhum módulo' : `${visibleModules}${hiddenModules > 0 ? ` +${hiddenModules}` : ''}`}
+                        </p>
+                      </TD>
+                      <TD className="hidden sm:table-cell"><StatusBadge tone={status.tone}>{status.label}</StatusBadge></TD>
+                      {canManageUsers && (
+                        <TD align="right" onClick={(e) => e.stopPropagation()}>
+                          {!canAct ? (
+                            <span title={LOGIN_ABOVE_CALLER_MESSAGE} className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+                              <Lock size={13} strokeWidth={1.8} className="shrink-0" aria-hidden="true" />
+                              <span className="sr-only">{LOGIN_ABOVE_CALLER_MESSAGE}</span>
+                              <span aria-hidden="true">Sem ações</span>
+                            </span>
+                          ) : (
+                            <Menu label="Ações" ariaLabel={`Ações de ${user.email}`} items={menuItemsFor(user)} />
                           )}
-                        </motion.tr>
-                      );
-                    })}
-                  </AnimatePresence>
-                </tbody>
-              </table>
-            </div>
+                        </TD>
+                      )}
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
           ) : (
-            /* Empty State */
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="py-24 px-6 text-center flex flex-col items-center justify-center"
-            >
-              <div className="w-20 h-20 bg-secondary/50 rounded-[2rem] flex items-center justify-center text-muted mb-6 rotate-12 shadow-sm border border-border/50">
-                <FileQuestion size={40} />
-              </div>
-              <h3 className="text-xl font-heading font-bold text-foreground mb-2">Nenhum usuário encontrado</h3>
-              <p className="text-muted max-w-md text-base">
-                Não encontramos resultados para a sua busca. Tente alterar os filtros ou cadastre um novo acesso.
-              </p>
-            </motion.div>
+            emptyState
           )}
         </div>
-      </motion.div>
+      </div>
 
-      {/* Menu de ações por linha (17/09/2026) — ver o comentário perto de openActionsMenuUserId
-          pra o raciocínio completo. Renderizado uma única vez fora da tabela, reposicionado a cada
-          abertura a partir do botão "Ações" clicado. */}
-      {openActionsMenuUserId && actionsMenuAnchor && (() => {
-        const menuUser = users.find(u => u.id === openActionsMenuUserId);
-        if (!menuUser) return null;
-        return createPortal(
-          <div
-            ref={actionsMenuRef}
-            style={{
-              position: 'fixed',
-              top: actionsMenuAnchor.bottom + 6,
-              right: window.innerWidth - actionsMenuAnchor.right,
-            }}
-            className="z-[150] w-64 bg-background border border-border/60 rounded-xl shadow-2xl overflow-hidden py-1.5"
-          >
-            <button
-              type="button"
-              onClick={() => { closeActionsMenu(); openEditModal(menuUser); }}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
-            >
-              <Pencil size={15} className="text-muted shrink-0" />
-              Editar Perfil
-            </button>
-            {!menuUser.employeeId && canLinkEmployees && (
-              <button
-                type="button"
-                onClick={() => { closeActionsMenu(); openLinkModal(menuUser); }}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
-              >
-                <Link2 size={15} className="text-muted shrink-0" />
-                Vincular funcionário
-              </button>
-            )}
-            {menuUser.status === 'invited' ? (
-              (callerIsAdmin || menuUser.role !== 'admin') && (
-              <button
-                type="button"
-                onClick={() => { closeActionsMenu(); handleResendInvite(menuUser); }}
-                disabled={pendingUserId === menuUser.id}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left disabled:opacity-50"
-              >
-                {pendingUserId === menuUser.id ? (
-                  <Loader2 size={15} className="animate-spin shrink-0" />
-                ) : (
-                  <Send size={15} className="text-muted shrink-0" />
-                )}
-                Reenviar Convite
-              </button>
-              )
+      {/* Novo acesso */}
+      <Modal
+        open={isModalOpen}
+        onClose={closeModal}
+        title="Novo acesso"
+        description="A pessoa recebe um convite por e-mail e cria a própria senha (o link vale 72 horas)."
+        dismissable={!isSaving}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeModal} disabled={isSaving}>Cancelar</Button>
+            <Button type="submit" form="new-login-form" loading={isSaving} disabled={!isFormValid}>Criar acesso</Button>
+          </>
+        }
+      >
+        {actionError && <Notice tone="danger" className="mb-4">{actionError}</Notice>}
+        <form id="new-login-form" onSubmit={handleCreateUser} className="space-y-4" noValidate>
+          <Field label="E-mail do login" required error={emailError} htmlFor="new-login-email">
+            <Input
+              id="new-login-email" type="email" value={formData.email} invalid={!!emailError} data-autofocus
+              onChange={(e) => { setFormData({ ...formData, email: e.target.value }); if (emailError) setEmailError(undefined); }}
+              onBlur={() => setEmailError(formData.email && !isValidEmail(formData.email) ? 'E-mail inválido' : undefined)}
+              placeholder="joao@empresa.com"
+            />
+          </Field>
+
+          {roleOptions.length > 1 ? (
+            <div>
+              <p className="mb-1.5 text-[13px] font-medium text-foreground">Tipo de acesso</p>
+              <SegmentedControl<UserFormState['role']>
+                label="Tipo de acesso"
+                value={formData.role}
+                onChange={(role) => setFormData({ ...formData, role, employeeId: '' })}
+                options={roleOptions}
+              />
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted">
+              Tipo de acesso: <span className="text-foreground">{roleOptions[0]?.label}</span>
+              {!canLinkEmployees && <span className="block mt-1">{LINK_REQUIRES_FULL_SCOPE_HINT}</span>}
+            </p>
+          )}
+
+          {formData.role === 'employee' && (
+            availableEmployees.length > 0 ? (
+              <Field label="Funcionário" required htmlFor="new-login-employee" hint="Só fichas ativas que ainda não têm login.">
+                <Select id="new-login-employee" value={formData.employeeId} onChange={(e) => setFormData({ ...formData, employeeId: e.target.value })}>
+                  <option value="">Selecione um funcionário</option>
+                  {availableEmployees.map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
+                </Select>
+              </Field>
             ) : (
-              <button
-                type="button"
-                onClick={() => { closeActionsMenu(); setResettingPasswordUser(menuUser); }}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
-              >
-                <KeyRound size={15} className="text-muted shrink-0" />
-                Enviar Redefinição de Senha
-              </button>
+              <Notice>Nenhum funcionário ativo sem login. Cadastre um funcionário primeiro.</Notice>
+            )
+          )}
+
+          <Field label="Perfil de acesso" required htmlFor="new-login-profile" hint="Define o que o login pode fazer. Os perfis ficam em Perfis de acesso.">
+            <Select id="new-login-profile" value={formData.profileId} onChange={(e) => setFormData({ ...formData, profileId: e.target.value })}>
+              <option value="">Selecione um perfil</option>
+              {profileOptions().map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </Field>
+        </form>
+      </Modal>
+
+      {/* Trocar perfil */}
+      <Modal
+        open={!!editingUser}
+        onClose={closeEditModal}
+        title="Trocar perfil"
+        description={editingUser?.email}
+        dismissable={!isSavingEdit}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeEditModal} disabled={isSavingEdit}>Cancelar</Button>
+            <Button type="submit" form="edit-profile-form" loading={isSavingEdit} disabled={!editProfileId}>Salvar perfil</Button>
+          </>
+        }
+      >
+        {actionError && <Notice tone="danger" className="mb-4">{actionError}</Notice>}
+        <div className="mb-4 rounded-md border border-border px-4 py-3">
+          <p className="text-[12px] text-muted">Módulos que este login acessa hoje</p>
+          <p className="mt-1 text-[14px] text-foreground">
+            {editingModules.length === 0 ? 'Nenhum módulo' : editingModules.map(moduleLabel).join(', ')}
+          </p>
+        </div>
+        <form id="edit-profile-form" onSubmit={handleSaveProfile}>
+          <Field label="Perfil de acesso" required htmlFor="edit-profile" hint="Muda na hora o que o login pode fazer e encerra as sessões abertas dele.">
+            <Select id="edit-profile" value={editProfileId} onChange={(e) => setEditProfileId(e.target.value)} data-autofocus>
+              {!editProfileId && <option value="">Selecione um perfil</option>}
+              {profileOptions(editingUser?.profileId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </Field>
+        </form>
+      </Modal>
+
+      {/* Vincular funcionário */}
+      <Modal
+        open={!!linkingUser}
+        onClose={closeLinkModal}
+        title="Vincular funcionário"
+        description={linkingUser?.email}
+        dismissable={!isLinking}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeLinkModal} disabled={isLinking}>Cancelar</Button>
+            <Button type="submit" form="link-employee-form" loading={isLinking} disabled={!linkEmployeeId}>Vincular</Button>
+          </>
+        }
+      >
+        {actionError && <Notice tone="danger" className="mb-4">{actionError}</Notice>}
+        <form id="link-employee-form" onSubmit={handleConfirmLink}>
+          {availableEmployees.length > 0 ? (
+            <Field
+              label="Funcionário" required htmlFor="link-employee"
+              hint="O alcance deste login (próprio cadastro, equipe ou departamento) passa a ser calculado a partir desta ficha."
+            >
+              <Select id="link-employee" value={linkEmployeeId} onChange={(e) => setLinkEmployeeId(e.target.value)} data-autofocus>
+                <option value="">Selecione um funcionário</option>
+                {availableEmployees.map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
+              </Select>
+            </Field>
+          ) : (
+            <Notice>Nenhum funcionário ativo sem login. Cadastre um funcionário primeiro.</Notice>
+          )}
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deletingUser}
+        onClose={() => !isDeleting && setDeletingUser(null)}
+        onConfirm={handleConfirmDelete}
+        title="Excluir este login?"
+        description={deletingUser ? `${deletingUser.email} será excluído de vez. Diferente de bloquear, não dá para desfazer.` : undefined}
+        confirmLabel="Excluir login"
+        tone="danger"
+        busy={isDeleting}
+      />
+
+      <ConfirmDialog
+        open={!!resettingPasswordUser}
+        onClose={() => !isResettingPassword && setResettingPasswordUser(null)}
+        onConfirm={handleConfirmResetPassword}
+        title="Enviar redefinição de senha?"
+        description={resettingPasswordUser ? `Um link será enviado para ${resettingPasswordUser.email}.` : undefined}
+        confirmLabel="Enviar link"
+        busy={isResettingPassword}
+      >
+        <p className="text-[14px] text-muted">
+          Nada muda até a pessoa usar o link. Ao redefinir, a senha atual deixa de funcionar e as sessões abertas desse login são encerradas.
+        </p>
+      </ConfirmDialog>
+
+      {/* Aviso de convite/redefinição — fecha só por ação explícita (sem Esc nem clique fora). */}
+      <Modal
+        open={!!userNotice}
+        onClose={closeUserNotice}
+        dismissable={false}
+        size="sm"
+        title={userNotice?.kind === 'reset' ? 'Redefinição de senha enviada' : 'Convite enviado'}
+        footer={
+          <Button onClick={closeUserNotice}>
+            {userNotice?.kind === 'invite' && userNotice.inviteUrl ? 'Já copiei, fechar' : 'Fechar'}
+          </Button>
+        }
+      >
+        {userNotice?.kind === 'invite' ? (
+          <>
+            <p className="text-[14px] text-muted">
+              {userNotice.sent && !userNotice.inviteUrl ? (
+                // Ruling R-final (29/09/2026): quem não pode vincular fichas nunca recebe o link cru
+                // do convite, só a confirmação de que o e-mail saiu.
+                <>Convite enviado por e-mail para <span className="text-foreground break-all">{userNotice.email}</span>. A pessoa cria a própria senha pelo link recebido (válido por 72 horas).</>
+              ) : userNotice.sent ? (
+                <>Convite enviado para <span className="text-foreground break-all">{userNotice.email}</span>. A pessoa cria a própria senha pelo link (válido por 72 horas).</>
+              ) : userNotice.inviteUrl ? (
+                <>Não conseguimos confirmar o envio do e-mail para <span className="text-foreground break-all">{userNotice.email}</span>. Copie o link abaixo e envie você mesmo (vale 72 horas).</>
+              ) : (
+                <>Não conseguimos enviar o convite para <span className="text-foreground break-all">{userNotice.email}</span>. Tente “Reenviar convite” na lista em instantes.</>
+              )}
+            </p>
+            {userNotice.inviteUrl && (
+              <div className="mt-4">
+                <p className="mb-1.5 text-[12px] text-muted">Link do convite</p>
+                <code className="block break-all rounded-md border border-border bg-secondary px-3 py-2 text-[12px] text-foreground">
+                  {userNotice.inviteUrl}
+                </code>
+                <Button variant="secondary" className="mt-3 w-full" icon={copied ? Check : Copy} onClick={handleCopyInviteLink}>
+                  {copied ? 'Link copiado' : 'Copiar link do convite'}
+                </Button>
+              </div>
             )}
-            <button
-              type="button"
-              onClick={() => { closeActionsMenu(); handleToggleStatus(menuUser); }}
-              disabled={pendingUserId === menuUser.id}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left disabled:opacity-50"
-            >
-              {pendingUserId === menuUser.id ? (
-                <Loader2 size={15} className="animate-spin shrink-0" />
-              ) : isBlockedStatus(menuUser.status) ? (
-                <ShieldCheck size={15} className="text-muted shrink-0" />
-              ) : (
-                <ShieldOff size={15} className="text-muted shrink-0" />
-              )}
-              {isBlockedStatus(menuUser.status) ? 'Desbloquear Acesso' : 'Bloquear Acesso'}
-            </button>
-            <div className="my-1.5 border-t border-border/40" />
-            <button
-              type="button"
-              onClick={() => { closeActionsMenu(); setDeletingUser(menuUser); }}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors text-left"
-            >
-              <Trash2 size={15} className="shrink-0" />
-              Excluir Login
-            </button>
-          </div>,
-          document.body,
-        );
-      })()}
-
-      {/* Modal de Criação */}
-      {isModalOpen && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={closeModal}
-            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-              <div className="flex items-center justify-between mb-6 mt-2">
-                <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-                  <UserPlus size={24} className="text-primary"/>
-                  Novo Acesso
-                </h2>
-                <button
-                  onClick={closeModal}
-                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-
-              <form onSubmit={handleCreateUser} className="space-y-6">
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      E-mail (Login) <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      autoFocus
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      onBlur={() => setEmailError(formData.email && !isValidEmail(formData.email) ? 'E-mail inválido' : undefined)}
-                      className={`w-full bg-background border ${inputBorderClass(!!emailError)} rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 transition-all shadow-sm`}
-                      placeholder="joao@empresa.com"
-                    />
-                    {emailError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{emailError}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      Tipo de Acesso <span className="text-red-500">*</span>
-                    </label>
-                    <CustomSelect
-                      value={formData.role}
-                      onChange={(val) => setFormData({ ...formData, role: val as UserFormState['role'], employeeId: '' })}
-                      options={roleOptions}
-                    />
-                    {!canLinkEmployees && (
-                      <p className="text-xs text-muted mt-1.5">{LINK_REQUIRES_FULL_SCOPE_HINT}</p>
-                    )}
-                  </div>
-
-                  {formData.role === 'employee' && (
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                        Funcionário <span className="text-red-500">*</span>
-                      </label>
-                      {availableEmployees.length > 0 ? (
-                        <CustomSelect
-                          value={formData.employeeId}
-                          onChange={(val) => setFormData({ ...formData, employeeId: val })}
-                          options={availableEmployees.map(e => ({ value: e.id, label: e.fullName }))}
-                          placeholder="Selecione um funcionário sem login..."
-                        />
-                      ) : (
-                        <p className="text-sm text-muted bg-secondary/30 border border-border/40 rounded-xl px-4 py-3">
-                          Nenhum funcionário ativo sem login. Cadastre um novo funcionário primeiro.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-2 border-t border-border/40 mt-4">
-                  <label className="block text-xs font-bold text-foreground/80 mb-3 uppercase tracking-wider mt-4 flex items-center gap-2">
-                    <Shield size={14} className="text-primary" />
-                    Perfil de Acesso
-                  </label>
-                  <p className="text-xs text-muted mb-4">
-                    O que este login pode fazer é definido pelo Perfil escolhido — configure perfis em "Perfis de Acesso".
-                  </p>
-                  <CustomSelect
-                    value={formData.profileId}
-                    onChange={(val) => setFormData({ ...formData, profileId: val })}
-                    options={profiles
-                      .filter((p) => (callerIsAdmin || !p.isProtected) && coveredProfileIds.has(p.id))
-                      .map((p) => ({ value: p.id, label: p.name }))}
-                    placeholder="Selecione um perfil..."
-                  />
-                </div>
-
-                <p className="text-xs text-muted bg-secondary/20 border border-border/40 rounded-xl px-4 py-3 flex items-center gap-2">
-                  <Mail size={14} className="shrink-0" />
-                  Um convite será enviado por e-mail — a pessoa cria a própria senha pelo link (válido por 72 horas).
-                </p>
-
-                <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    type="submit"
-                    disabled={!isFormValid || isSaving}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
-                  >
-                    {isSaving && <Loader2 size={16} className="animate-spin" />}
-                    {isSaving ? 'Criando...' : 'Criar Acesso'}
-                  </motion.button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Modal de Edição de Módulos (17/09/2026) — mesmo seletor da criação, sem os campos de
-          e-mail/tipo/funcionário (imutáveis depois de criado, ver CLAUDE.md/DECISOES-TECNICAS). */}
-      {editingUser && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={closeEditModal}
-            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-              <div className="flex items-center justify-between mb-6 mt-2">
-                <div>
-                  <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-                    <Pencil size={22} className="text-primary"/>
-                    Editar Perfil
-                  </h2>
-                  <p className="text-sm text-muted mt-1 break-all">{editingUser.email}</p>
-                </div>
-                <button
-                  onClick={closeEditModal}
-                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors shrink-0"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-
-              <form onSubmit={handleSaveProfile} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-3 uppercase tracking-wider flex items-center gap-2">
-                    <Shield size={14} className="text-primary" />
-                    Perfil de Acesso
-                  </label>
-                  <p className="text-xs text-muted mb-4">
-                    Troca imediatamente o que este login pode fazer, e revoga as sessões ativas dele.
-                  </p>
-                  <CustomSelect
-                    value={editProfileId}
-                    onChange={setEditProfileId}
-                    options={profiles
-                      .filter(
-                        (p) =>
-                          (callerIsAdmin || !p.isProtected || p.id === editingUser?.profileId) &&
-                          (coveredProfileIds.has(p.id) || p.id === editingUser?.profileId),
-                      )
-                      .map((p) => ({ value: p.id, label: p.name }))}
-                  />
-                </div>
-
-                <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
-                  <button
-                    type="button"
-                    onClick={closeEditModal}
-                    className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    type="submit"
-                    // `!editProfileId` além de `isSavingEdit` (revisão final da branch, 22/09/2026):
-                    // o modal abre semeado com `user.profileId ?? ''`, e um login sem perfil (o FK é
-                    // `onDelete: SetNull`) deixava submeter vazio — o backend respondia com um erro
-                    // de nome em branco, confuso. O formulário de criação já gatilhava assim.
-                    disabled={isSavingEdit || !editProfileId}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
-                  >
-                    {isSavingEdit && <Loader2 size={16} className="animate-spin" />}
-                    {isSavingEdit ? 'Salvando...' : 'Salvar Perfil'}
-                  </motion.button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Vincular funcionário (27/09/2026): liga um login ainda sem ficha a um funcionário ativo sem
-          login. Mesmo visual do modal de edição de perfil. */}
-      {linkingUser && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={closeLinkModal}
-            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-lg shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-              <div className="flex items-center justify-between mb-6 mt-2">
-                <div>
-                  <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-                    <Link2 size={22} className="text-primary"/>
-                    Vincular funcionário
-                  </h2>
-                  <p className="text-sm text-muted mt-1 break-all">{linkingUser.email}</p>
-                </div>
-                <button
-                  onClick={closeLinkModal}
-                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors shrink-0"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-
-              <form onSubmit={handleConfirmLink} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                    Funcionário <span className="text-red-500">*</span>
-                  </label>
-                  <p className="text-xs text-muted mb-4">
-                    O alcance deste login (próprio cadastro, equipe ou departamento) passa a ser calculado a partir desta ficha.
-                  </p>
-                  {availableEmployees.length > 0 ? (
-                    <CustomSelect
-                      value={linkEmployeeId}
-                      onChange={setLinkEmployeeId}
-                      options={availableEmployees.map(e => ({ value: e.id, label: e.fullName }))}
-                      placeholder="Selecione um funcionário sem login..."
-                    />
-                  ) : (
-                    <p className="text-sm text-muted bg-secondary/30 border border-border/40 rounded-xl px-4 py-3">
-                      Nenhum funcionário ativo sem login. Cadastre um novo funcionário primeiro.
-                    </p>
-                  )}
-                </div>
-
-                <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
-                  <button
-                    type="button"
-                    onClick={closeLinkModal}
-                    className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    type="submit"
-                    disabled={isLinking || !linkEmployeeId}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
-                  >
-                    {isLinking && <Loader2 size={16} className="animate-spin" />}
-                    {isLinking ? 'Vinculando...' : 'Vincular'}
-                  </motion.button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Ver todos os módulos de um login (17/09/2026) — aberto clicando no badge "+N" da tabela.
-          Só leitura (sem onToggle) — quem quiser editar usa "Editar Módulos", ação separada de admin. */}
-      {viewingModulesUser && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setViewingModulesUser(null)}
-            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h2 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
-                    <Shield size={20} className="text-primary"/>
-                    Módulos Autorizados
-                  </h2>
-                  <p className="text-sm text-muted mt-1 break-all">{viewingModulesUser.email}</p>
-                </div>
-                <button
-                  onClick={() => setViewingModulesUser(null)}
-                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors shrink-0"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {viewingModulesUser.modules.map(m => (
-                  <span
-                    key={m}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold bg-accent/10 text-accent border border-accent/20"
-                  >
-                    {moduleLabel(m)}
-                  </span>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setViewingModulesUser(null)}
-                className="w-full mt-6 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-              >
-                Fechar
-              </button>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Confirmação de exclusão (17/09/2026) — sempre explica o efeito antes de agir, nunca
-          window.confirm(). Diferente de bloquear: some de vez, não é reversível. */}
-      {deletingUser && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => !isDeleting && setDeletingUser(null)}
-            className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-red-500/30 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center text-red-600 dark:text-red-400 shrink-0">
-                  <AlertTriangle size={20} />
-                </div>
-                <h2 className="text-xl font-heading font-bold text-foreground">Excluir este login?</h2>
-              </div>
-              <p className="text-sm text-muted mb-2">
-                <span className="font-medium text-foreground break-all">{deletingUser.email}</span> vai ser excluído
-                permanentemente — diferente de bloquear, essa ação não pode ser desfeita e o login some de vez da
-                lista.
-              </p>
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-4 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-              <div className="flex gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setDeletingUser(null)}
-                  disabled={isDeleting}
-                  className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmDelete}
-                  disabled={isDeleting}
-                  className="flex-1 py-3 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
-                >
-                  {isDeleting && <Loader2 size={16} className="animate-spin" />}
-                  {isDeleting ? 'Excluindo...' : 'Excluir Definitivamente'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Confirmação de envio de redefinição de senha ("Acesso e sessões", 26/09/2026 — antes gerava
-          uma senha temporária nova; agora manda um link por e-mail) — explica o efeito antes de
-          enviar. */}
-      {resettingPasswordUser && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => !isResettingPassword && setResettingPasswordUser(null)}
-            className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-primary/30 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                  <KeyRound size={20} />
-                </div>
-                <h2 className="text-xl font-heading font-bold text-foreground">Enviar redefinição de senha para este login?</h2>
-              </div>
-              <p className="text-sm text-muted mb-2">
-                Um link de redefinição de senha vai ser enviado para{' '}
-                <span className="font-medium text-foreground break-all">{resettingPasswordUser.email}</span>. Nada muda
-                até a pessoa usar o link — ao redefinir, a senha atual deixa de funcionar e todas as sessões ativas
-                desse login são encerradas. Use isso se o usuário esqueceu a senha ou teve o login travado por
-                excesso de tentativas.
-              </p>
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-4 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-              <div className="flex gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setResettingPasswordUser(null)}
-                  disabled={isResettingPassword}
-                  className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmResetPassword}
-                  disabled={isResettingPassword}
-                  className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
-                >
-                  {isResettingPassword && <Loader2 size={16} className="animate-spin" />}
-                  {isResettingPassword ? 'Enviando...' : 'Enviar Redefinição de Senha'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Aviso de convite/redefinição de senha ("Acesso e sessões", 26/09/2026 — substitui o antigo
-          banner de senha temporária), uma única exibição, fecha só por ação explícita. Reaproveitado
-          pela criação de um login, "Reenviar Convite" e "Enviar Redefinição de Senha". */}
-      {userNotice && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="bg-background border border-primary/30 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-              <div className="flex items-center gap-3 mb-4 mt-2">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                  {userNotice.kind === 'invite' ? <Mail size={20} /> : <KeyRound size={20} />}
-                </div>
-                <h2 className="text-xl font-heading font-bold text-foreground">
-                  {userNotice.kind === 'invite' ? 'Convite enviado' : 'Redefinição de senha enviada'}
-                </h2>
-              </div>
-
-              {userNotice.kind === 'invite' ? (
-                <>
-                  {userNotice.sent && !userNotice.inviteUrl ? (
-                    // Ruling R-final (29/09/2026): quem não pode vincular fichas nunca recebe o link
-                    // cru do convite, só a confirmação de que o e-mail saiu.
-                    <p className="text-sm text-muted mb-4">
-                      Convite enviado por e-mail. Destinatário:{' '}
-                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. A pessoa cria a
-                      própria senha pelo link recebido (válido por 72 horas).
-                    </p>
-                  ) : userNotice.sent ? (
-                    <p className="text-sm text-muted mb-4">
-                      Convite enviado para <span className="font-medium text-foreground break-all">{userNotice.email}</span>.
-                      A pessoa cria a própria senha pelo link (válido por 72 horas).
-                    </p>
-                  ) : userNotice.inviteUrl ? (
-                    <p className="text-sm text-muted mb-4">
-                      Não conseguimos confirmar o envio do e-mail para{' '}
-                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Copie o link
-                      abaixo e envie manualmente — ele é válido por 72 horas.
-                    </p>
-                  ) : !canLinkEmployees ? (
-                    <p className="text-sm text-muted mb-4">
-                      Não conseguimos confirmar o envio do e-mail de convite para{' '}
-                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Tente
-                      "Reenviar Convite" na lista em instantes.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-muted mb-4">
-                      Não foi possível gerar o convite agora para{' '}
-                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Tente
-                      "Reenviar Convite" na lista em instantes.
-                    </p>
-                  )}
-
-                  {userNotice.inviteUrl && (
-                    <div className="bg-secondary/20 border border-border/40 rounded-xl p-4 mb-4">
-                      <p className="text-[10px] text-muted uppercase font-bold tracking-wider mb-1">Link do convite</p>
-                      <code className="block text-xs font-medium text-foreground bg-background border border-border/60 rounded-lg px-3 py-2 break-all mb-3">
-                        {userNotice.inviteUrl}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={handleCopyInviteLink}
-                        className={`w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm font-bold transition-colors ${
-                          copied
-                            ? 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400'
-                            : 'border-border/60 text-foreground hover:text-primary hover:border-primary/40'
-                        }`}
-                      >
-                        {copied ? <Check size={16} /> : <Copy size={16} />}
-                        {copied ? 'Link copiado!' : 'Copiar link do convite'}
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-sm text-muted mb-4">
-                  {userNotice.sent ? (
-                    <>Enviamos um link de redefinição para <span className="font-medium text-foreground break-all">{userNotice.email}</span>.</>
-                  ) : (
-                    <>
-                      Não conseguimos confirmar o envio do e-mail de redefinição para{' '}
-                      <span className="font-medium text-foreground break-all">{userNotice.email}</span>. Tente novamente
-                      em instantes.
-                    </>
-                  )}
-                </p>
-              )}
-
-              <button
-                type="button"
-                onClick={closeUserNotice}
-                className="w-full py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm"
-              >
-                {userNotice.kind === 'invite' && userNotice.inviteUrl ? 'Já copiei, fechar' : 'Fechar'}
-              </button>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
+          </>
+        ) : userNotice && (
+          <p className="text-[14px] text-muted">
+            {userNotice.sent ? (
+              <>Enviamos um link de redefinição para <span className="text-foreground break-all">{userNotice.email}</span>.</>
+            ) : (
+              <>Não conseguimos confirmar o envio do e-mail de redefinição para <span className="text-foreground break-all">{userNotice.email}</span>. Tente de novo em instantes.</>
+            )}
+          </p>
+        )}
+      </Modal>
     </div>
   );
 };

@@ -290,7 +290,7 @@ const ClientsList = () => {
             )}
           </div>
           {canViewFinance && (
-            <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+            <div className="overflow-x-auto scrollbar-none -mx-4 px-4 md:mx-0 md:px-0">
               <SegmentedControl<HealthFilter>
                 label="Filtrar por situação financeira"
                 value={healthFilter}
