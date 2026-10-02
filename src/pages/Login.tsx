@@ -99,20 +99,25 @@ const Login = () => {
       className="theme-light min-h-screen flex flex-col overflow-x-hidden bg-[#f4f4f3] bg-[radial-gradient(#dcdcda_1px,transparent_1px)] bg-[length:22px_22px] px-4 py-7 sm:px-10 font-sans text-[#111]"
       onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
     >
-      <header className="flex items-center justify-between gap-4">
+      <header className="flex items-center">
         <Link to="/" aria-label={`${BRAND_NAME} — página inicial`} className={linkClass}>
-          <SteeraLogo size="text-[26px]" className="text-[#111]" />
-        </Link>
-        <Link to="/" className={`${linkClass} inline-flex items-center gap-1.5 text-[13px] font-medium text-[#666] hover:text-[#111]`}>
-          <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
-          Voltar para o site
+          <SteeraLogo size="text-[34px]" className="text-[#111]" />
         </Link>
       </header>
 
       <main className="flex flex-1 items-center justify-center py-8">
         {/* Dois lados, como o cadastro (02/10/2026, pedido do usuário): o Stee na faixa creme à
             esquerda, as credenciais à direita. No celular a faixa vai para cima. */}
-        <div className="w-full max-w-[400px] overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:max-w-[820px] md:min-h-[500px] md:grid-cols-[340px_1fr]">
+        <div className="w-full max-w-[400px] md:max-w-[820px]">
+        {/* Botão de voltar logo acima do cartão, bem visível (pedido do usuário, 02/10/2026). */}
+        <Link
+          to="/"
+          className={`${linkClass} mb-3 inline-flex items-center gap-2 rounded-full border border-[#e4e4e2] bg-white px-4 py-2 text-[14px] font-medium text-[#111] shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-[#c9c9c6] hover:bg-[#fafaf9]`}
+        >
+          <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
+          Voltar para o site
+        </Link>
+        <div className="w-full overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:min-h-[500px] md:grid-cols-[340px_1fr]">
           <aside className="flex flex-col items-center border-b border-[#EFE4D2] bg-[#FDF8F0] px-6 pt-6 md:justify-center md:border-b-0 md:border-r md:pb-4 md:pt-4">
             {/* Balão acima do Stee, ponta para baixo, altura fixa (o Stee não sobe e desce com o texto). */}
             <p
@@ -226,6 +231,7 @@ const Login = () => {
               <Link to="/register" className={`${linkClass} font-semibold text-[#111] hover:text-brand`}>Criar conta grátis</Link>
             </p>
           </form>
+        </div>
         </div>
       </main>
 
