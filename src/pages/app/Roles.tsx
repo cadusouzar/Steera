@@ -1,41 +1,48 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, X, FileQuestion, Briefcase, ChevronRight, Check, Ban, RotateCcw, Loader2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { Ban, ChevronRight, Plus, RotateCcw, Search, X } from 'lucide-react';
+import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
+import RoleColorPicker from '../../components/RoleColorPicker';
+import {
+  Button, ButtonLink, ConfirmDialog, Drawer, EmptyState, Field, Input, Notice, PageHeader, SegmentedControl,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea,
+} from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import type { Role } from '../../lib/api';
-import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
+import { isValidRoleColor, validateRoleFields, type RoleFieldErrors } from '../../lib/roleFields';
+import { NAME_MAX_LENGTH, TEXT_MAX_LENGTH } from '../../lib/validation';
 
-const COLOR_SWATCHES = [
-  '#3B82F6', '#A855F7', '#EC4899', '#EF4444',
-  '#F97316', '#EAB308', '#22C55E', '#14B8A6', '#2563EB',
-];
+// Cargos (redesenho no kit, etapa 8 do polimento — 02/10/2026). Mudanças aprovadas: uso de cargos
+// ativos do plano abaixo do título; filtro Todos/Ativos/Inativos; nome e departamento passam a ser
+// editáveis na ficha (antes só descrição, cor e campos personalizados); inativar confirma numa janela.
+
+type StatusFilter = 'all' | 'active' | 'inactive';
 
 const Roles = () => {
-  const navigate = useNavigate();
-  // Sem `cargos.gerenciar`: sem "Novo Cargo", e o drawer abre só pra consulta (campos travados,
-  // sem Inativar/Reativar/Salvar).
+  // Sem `cargos.gerenciar`: sem "Novo cargo", e a ficha abre só para consulta.
   const canManageRoles = useCan()('cargos.gerenciar');
   const [roles, setRoles] = useState<Role[]>([]);
+  const [plan, setPlan] = useState<api.MyPlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Drawer state
-  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
-  const [isConfirmingDeactivate, setIsConfirmingDeactivate] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
+  // Ficha: `draft` é a cópia editável do cargo aberto.
+  const [draft, setDraft] = useState<Role | null>(null);
+  const [errors, setErrors] = useState<RoleFieldErrors>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   const loadRoles = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      setRoles(await api.listRoles());
+      const [items, myPlan] = await Promise.all([api.listRoles(), api.getMyPlan().catch(() => null)]);
+      setRoles(items);
+      setPlan(myPlan);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Não foi possível carregar os cargos.');
     } finally {
@@ -47,48 +54,52 @@ const Roles = () => {
     loadRoles();
   }, [loadRoles]);
 
-  useEscapeKey(() => {
-    setSelectedRole(null);
-  });
+  const refreshPlan = () => api.getMyPlan().then(setPlan).catch(() => undefined);
 
-  // Prevent background scrolling when Drawer is open
-  useEffect(() => {
-    if (selectedRole) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [selectedRole]);
-
-  // Reset deactivate confirmation when drawer changes
-  useEffect(() => {
-    setIsConfirmingDeactivate(false);
-  }, [selectedRole]);
+  const counts = useMemo(() => ({
+    all: roles.length,
+    active: roles.filter((r) => r.active).length,
+    inactive: roles.filter((r) => !r.active).length,
+  }), [roles]);
 
   const filteredRoles = useMemo(() => {
     const lowerQuery = searchQuery.toLowerCase().trim();
-    if (!lowerQuery) return roles;
-    return roles.filter(
-      role =>
-        role.name.toLowerCase().includes(lowerQuery) ||
-        role.department.toLowerCase().includes(lowerQuery)
-    );
-  }, [roles, searchQuery]);
+    return roles.filter((role) => {
+      if (statusFilter === 'active' && !role.active) return false;
+      if (statusFilter === 'inactive' && role.active) return false;
+      if (!lowerQuery) return true;
+      return role.name.toLowerCase().includes(lowerQuery) || role.department.toLowerCase().includes(lowerQuery);
+    });
+  }, [roles, searchQuery, statusFilter]);
 
-  const handleUpdateRole = async (updatedRole: Role) => {
+  const openRole = (role: Role) => {
+    setActionError(null);
+    setErrors({});
+    setDraft({ ...role });
+  };
+
+  const closeDrawer = () => {
+    if (isSaving) return;
+    setDraft(null);
+  };
+
+  const handleSave = async () => {
+    if (!draft || isSaving) return;
+    const nextErrors = validateRoleFields({ name: draft.name, department: draft.department, description: draft.description ?? '' });
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0 || !isValidRoleColor(draft.colorHex)) return;
     setIsSaving(true);
     setActionError(null);
     try {
-      const saved = await api.updateRole(updatedRole.id, {
-        name: updatedRole.name, department: updatedRole.department,
-        colorHex: updatedRole.colorHex, description: updatedRole.description,
-        customFields: updatedRole.customFields,
+      const saved = await api.updateRole(draft.id, {
+        name: draft.name.trim(),
+        department: draft.department.trim(),
+        colorHex: draft.colorHex.toUpperCase(),
+        description: draft.description ?? '',
+        customFields: draft.customFields,
       });
-      setRoles(prev => prev.map(r => r.id === saved.id ? saved : r));
-      setSelectedRole(null);
+      setRoles((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
+      setDraft(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível salvar o cargo.');
     } finally {
@@ -96,355 +107,239 @@ const Roles = () => {
     }
   };
 
-  const handleDeactivateRole = async (id: string) => {
+  const handleDeactivate = async () => {
+    if (!draft) return;
     setIsSaving(true);
     setActionError(null);
     try {
-      const updated = await api.deactivateRole(id);
-      setRoles(prev => prev.map(r => r.id === id ? updated : r));
-      setSelectedRole(null);
+      const updated = await api.deactivateRole(draft.id);
+      setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      setDraft(null);
+      refreshPlan();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível inativar o cargo.');
     } finally {
       setIsSaving(false);
+      setConfirmDeactivate(false);
     }
   };
 
-  const handleReactivateRole = async (id: string) => {
+  const handleReactivate = async () => {
+    if (!draft) return;
     setIsSaving(true);
     setActionError(null);
     try {
-      const updated = await api.reactivateRole(id);
-      setRoles(prev => prev.map(r => r.id === id ? updated : r));
-      setSelectedRole(updated);
+      const updated = await api.reactivateRole(draft.id);
+      setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      setDraft((prev) => (prev ? { ...prev, active: updated.active } : prev));
+      refreshPlan();
     } catch (err) {
+      // Ex.: limite de cargos ativos do plano — a mensagem do backend explica.
       setActionError(err instanceof Error ? err.message : 'Não foi possível reativar o cargo.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  return (
-    <div className="p-6 md:p-8 relative">
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-        className="max-w-6xl mx-auto"
-      >
-        {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Gestão de Cargos</h1>
-            <p className="text-muted mt-2 max-w-lg">
-              Estruture a hierarquia da sua empresa. Os cargos definidos aqui serão utilizados no cadastro de funcionários.
-            </p>
-          </div>
-          {canManageRoles && (
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => navigate('/app/cargos/novo')}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
-          >
-            <Plus size={18} />
-            Novo Cargo
-          </motion.button>
-          )}
-        </div>
+  const roleLimit = plan?.current.limits.maxRoles;
+  const atLimit = roleLimit != null && plan != null && plan.usage.roles >= roleLimit;
+  const planLine = plan && roleLimit != null && (
+    <p className="-mt-3 mb-6 text-[13px] text-muted">
+      Cargos ativos: <span className="text-foreground tabular">{plan.usage.roles} de {roleLimit}</span> no plano {plan.current.label}
+      {atLimit && ' — limite atingido. Inative um cargo para criar outro.'}
+    </p>
+  );
 
-        {/* Action Bar (Search) */}
-        <div className="glass-panel p-2 rounded-2xl border border-border/60 mb-8 flex items-center shadow-sm">
-          <div className="flex-1 flex items-center px-4">
-            <Search size={20} className="text-primary/70 shrink-0" />
-            <input
-              type="text"
+  const emptyState = roles.length === 0 ? (
+    <EmptyState
+      title="Nenhum cargo ainda"
+      description="Crie os cargos da empresa para usá-los no cadastro de funcionários."
+      action={canManageRoles ? <ButtonLink to="/app/cargos/novo" icon={Plus}>Novo cargo</ButtonLink> : undefined}
+    />
+  ) : (
+    <EmptyState
+      title="Nenhum cargo encontrado"
+      description={searchQuery ? `Nada corresponde a “${searchQuery}” neste filtro.` : 'Nenhum cargo neste filtro.'}
+      action={<Button variant="secondary" onClick={() => { setSearchQuery(''); setStatusFilter('all'); }}>Limpar busca e filtro</Button>}
+    />
+  );
+
+  const readOnly = !canManageRoles;
+  const drawerFooter = !draft ? undefined : readOnly ? (
+    <Button variant="secondary" onClick={closeDrawer}>Fechar</Button>
+  ) : (
+    <>
+      {draft.active ? (
+        <Button variant="ghost" icon={Ban} onClick={() => setConfirmDeactivate(true)} disabled={isSaving} className="mr-auto">Inativar</Button>
+      ) : (
+        <Button variant="secondary" icon={RotateCcw} onClick={handleReactivate} loading={isSaving} className="mr-auto">Reativar</Button>
+      )}
+      <Button variant="secondary" onClick={closeDrawer} disabled={isSaving}>Cancelar</Button>
+      <Button onClick={handleSave} loading={isSaving}>Salvar alterações</Button>
+    </>
+  );
+
+  return (
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-6xl mx-auto">
+        <PageHeader
+          title="Cargos"
+          description="Os cargos da empresa. Eles aparecem no cadastro de funcionários."
+          actions={canManageRoles ? <ButtonLink to="/app/cargos/novo" icon={Plus}>Novo cargo</ButtonLink> : undefined}
+        />
+        {planLine}
+
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search size={16} strokeWidth={1.8} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" aria-hidden="true" />
+            <Input
+              type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar cargos por nome ou departamento..."
-              className="w-full bg-transparent border-none px-4 py-3 text-base text-foreground placeholder:text-muted focus:outline-none focus:ring-0"
+              placeholder="Buscar por nome ou departamento"
+              aria-label="Buscar cargos"
+              className="pl-9 pr-9"
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="p-1.5 rounded-full hover:bg-secondary/80 text-muted hover:text-foreground transition-colors shrink-0"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 inline-flex items-center justify-center rounded text-muted hover:text-foreground hover:bg-secondary"
+                aria-label="Limpar busca"
               >
-                <X size={16} />
+                <X size={15} strokeWidth={1.8} />
               </button>
             )}
           </div>
+          <SegmentedControl<StatusFilter>
+            label="Filtrar por situação"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: 'all', label: `Todos ${counts.all}` },
+              { value: 'active', label: `Ativos ${counts.active}` },
+              { value: 'inactive', label: `Inativos ${counts.inactive}` },
+            ]}
+          />
         </div>
 
-        {/* Data Grid or Empty State */}
-        {loadError && (
-          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm">
-            {loadError}
-          </div>
-        )}
+        {loadError && <Notice tone="danger" className="mb-4">{loadError}</Notice>}
 
-        <div className="glass-panel rounded-3xl border border-border/60 overflow-hidden shadow-sm">
+        <div className="bg-panel border border-border rounded-lg shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="py-24 flex items-center justify-center text-muted">
-              <Loader2 className="animate-spin" size={28} />
+            <div className="divide-y divide-border" aria-label="Carregando cargos" role="status">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-6 px-5 h-14">
+                  <span className="skeleton h-4 w-44" />
+                  <span className="skeleton h-4 w-28 hidden sm:block" />
+                  <span className="skeleton h-4 w-16 ml-auto" />
+                </div>
+              ))}
             </div>
-          ) : filteredRoles.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b-2 border-border/60 bg-secondary/10">
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Cargo
-                    </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Departamento
-                    </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">
-                      Ações
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  <AnimatePresence>
-                    {filteredRoles.map((role, index) => (
-                      <motion.tr
-                        key={role.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.2, delay: index * 0.03 }}
-                        onClick={() => { setActionError(null); setSelectedRole(role); }}
-                        className="hover:bg-secondary/40 transition-colors group cursor-pointer"
-                      >
-                        <td className="px-8 py-6">
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-xl bg-secondary border border-border/50 flex items-center justify-center text-muted group-hover:text-primary group-hover:border-primary/30 group-hover:bg-primary/5 transition-all shadow-sm shrink-0">
-                              <Briefcase size={18} />
-                            </div>
-                            <span className="text-base font-heading font-medium text-foreground group-hover:text-primary transition-colors">
-                              {role.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-8 py-6">
-                          <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium bg-secondary/60 text-foreground/80 border border-border/60 shadow-sm">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: role.colorHex }} />
-                            {role.department}
-                          </span>
-                        </td>
-                        <td className="px-8 py-6">
-                          {role.active ? (
-                            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
-                              <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> ATIVO
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-secondary text-foreground/60 border border-border/60">
-                              <div className="w-1.5 h-1.5 rounded-full bg-foreground/40" /> INATIVO
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-8 py-6 text-right">
-                          <button
-                            onClick={() => { setActionError(null); setSelectedRole(role); }}
-                            className="inline-flex items-center gap-1 text-sm font-medium text-muted group-hover:text-primary transition-colors hover:bg-secondary px-4 py-2 rounded-xl"
-                          >
-                            Detalhes
-                            <ChevronRight size={16} />
-                          </button>
-                        </td>
-                      </motion.tr>
-                    ))}
-                  </AnimatePresence>
-                </tbody>
-              </table>
-            </div>
+          ) : loadError ? null : filteredRoles.length > 0 ? (
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Cargo</TH>
+                  <TH className="hidden sm:table-cell">Departamento</TH>
+                  <TH>Situação</TH>
+                  <TH align="right"><span className="sr-only">Abrir</span></TH>
+                </tr>
+              </THead>
+              <TBody>
+                {filteredRoles.map((role) => (
+                  <TR key={role.id} interactive onClick={() => openRole(role)}>
+                    <TD>
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: role.colorHex }} aria-hidden="true" />
+                        {/* Botão real com o nome: acesso por teclado à ficha (a linha é só atalho de mouse). */}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openRole(role); }}
+                          className="font-medium text-foreground text-left hover:underline underline-offset-4 outline-none focus-visible:underline truncate"
+                        >
+                          {role.name}
+                        </button>
+                      </div>
+                      <span className="block pl-5 text-[12px] text-muted sm:hidden">{role.department}</span>
+                    </TD>
+                    <TD className="hidden sm:table-cell text-muted">{role.department}</TD>
+                    <TD>
+                      <StatusBadge tone={role.active ? 'success' : 'neutral'}>{role.active ? 'Ativo' : 'Inativo'}</StatusBadge>
+                    </TD>
+                    <TD align="right" className="w-8">
+                      <ChevronRight size={16} strokeWidth={1.6} className="text-muted inline" aria-hidden="true" />
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
           ) : (
-            /* Empty State */
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="py-24 px-6 text-center flex flex-col items-center justify-center"
-            >
-              <div className="w-20 h-20 bg-secondary/50 rounded-[2rem] flex items-center justify-center text-muted mb-6 rotate-12 shadow-sm border border-border/50">
-                <FileQuestion size={40} />
-              </div>
-              <h3 className="text-xl font-heading font-bold text-foreground mb-2">Nenhum cargo encontrado</h3>
-              <p className="text-muted max-w-md text-base">
-                Não encontramos resultados para "{searchQuery}". Tente buscar por outros termos ou crie um novo cargo.
-              </p>
-              <button
-                onClick={() => setSearchQuery('')}
-                className="mt-8 text-primary font-medium hover:bg-primary/10 px-6 py-2.5 rounded-full transition-colors"
-              >
-                Limpar filtros
-              </button>
-            </motion.div>
+            emptyState
           )}
         </div>
-      </motion.div>
+      </div>
 
-      {/* PORTALS FOR DRAWER */}
-
-      {/* Drawer: Detalhes do Cargo */}
-      {selectedRole && createPortal(
-        <AnimatePresence>
+      <Drawer
+        open={!!draft}
+        onClose={closeDrawer}
+        title={
+          <span className="flex items-center gap-2 min-w-0">
+            <span className="truncate">{draft ? (roles.find((r) => r.id === draft.id)?.name ?? draft.name) : ''}</span>
+            {draft && !draft.active && <StatusBadge tone="neutral">Inativo</StatusBadge>}
+          </span>
+        }
+        description={draft ? (roles.find((r) => r.id === draft.id)?.department ?? draft.department) : undefined}
+        size="lg"
+        dismissable={!isSaving}
+        footer={drawerFooter}
+      >
+        {draft && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedRole(null)}
-              className="fixed inset-0 z-[100] bg-background/60 backdrop-blur-sm"
-            />
-            <div className="fixed inset-0 z-[101] flex justify-end pointer-events-none">
-              <motion.div
-                initial={{ x: "100%", opacity: 0.5 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: "100%", opacity: 0.5 }}
-                transition={{ type: "spring", damping: 30, stiffness: 300 }}
-                className="bg-background border-l border-border/60 w-full max-w-lg h-full shadow-2xl pointer-events-auto flex flex-col"
-              >
-                {/* Drawer Header */}
-                <div className="p-6 md:p-8 border-b border-border/40 flex flex-col gap-2">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-secondary text-foreground/80 border border-border/40 mb-3">
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: selectedRole.colorHex }} />
-                        {selectedRole.department}
-                      </span>
-                      <h2 className="text-2xl font-heading font-bold text-foreground">
-                        {selectedRole.name}
-                      </h2>
-                    </div>
-                    <button
-                      onClick={() => setSelectedRole(null)}
-                      className="p-2 text-muted hover:text-foreground bg-secondary/30 hover:bg-secondary/80 rounded-full transition-colors"
-                    >
-                      <X size={20} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Drawer Body (Form) */}
-                <div className="p-6 md:p-8 flex-1 overflow-y-auto">
-                  {!canManageRoles && (
-                    <p className="mb-6 rounded-xl border border-border/60 bg-secondary/30 px-4 py-3 text-sm text-muted">
-                      Seu perfil permite só consultar este cargo.
-                    </p>
-                  )}
-                  <fieldset disabled={!canManageRoles} className="space-y-8">
-
-                    {/* Atribuições */}
-                    <div>
-                      <label className="block text-sm font-semibold text-foreground/90 mb-3">
-                        Descrição das Atribuições
-                      </label>
-                      <p className="text-sm text-muted mb-3">
-                        Defina o que este profissional faz no dia a dia. Isso ajuda no alinhamento de expectativas da equipe.
-                      </p>
-                      <textarea
-                        rows={5}
-                        value={selectedRole.description || ''}
-                        onChange={(e) => setSelectedRole({ ...selectedRole, description: e.target.value })}
-                        placeholder="Ex: Responsável por liderar as iniciativas de design da empresa, gerenciar o time de criação..."
-                        className="w-full bg-background border border-border/80 rounded-xl p-4 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm placeholder:text-muted/50 resize-none"
-                      />
-                    </div>
-
-                    {/* Cores */}
-                    <div>
-                      <label className="block text-sm font-semibold text-foreground/90 mb-3">
-                        Cor de Identificação
-                      </label>
-                      <p className="text-sm text-muted mb-4">
-                        Escolha uma cor para representar este cargo nos organogramas e tabelas.
-                      </p>
-                      <div className="flex flex-wrap gap-3">
-                        {COLOR_SWATCHES.map(hex => (
-                          <button
-                            key={hex}
-                            type="button"
-                            onClick={() => setSelectedRole({ ...selectedRole, colorHex: hex })}
-                            style={{ backgroundColor: hex }}
-                            className={`w-10 h-10 rounded-full transition-transform flex items-center justify-center ${selectedRole.colorHex === hex ? 'ring-4 ring-primary/30 scale-110 shadow-lg' : 'hover:scale-105 shadow-sm opacity-90'}`}
-                          >
-                            {selectedRole.colorHex === hex && <Check size={16} className="text-white" />}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <CustomFieldsFormSection
-                      entity="role"
-                      values={selectedRole.customFields ?? {}}
-                      onChange={(v) => setSelectedRole({ ...selectedRole, customFields: v })}
-                    />
-
-                  </fieldset>
-                </div>
-
-                {/* Drawer Footer */}
-                {actionError && (
-                  <div className="mx-6 md:mx-8 mb-4 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-red-600 dark:text-red-400 text-sm">
-                    {actionError}
-                  </div>
-                )}
-                <div className="p-6 md:p-8 border-t border-border/40 bg-secondary/10 flex items-center justify-between gap-4">
-                  {!canManageRoles ? null : selectedRole.active ? (
-                    isConfirmingDeactivate ? (
-                      <motion.button
-                        initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-                        onClick={() => handleDeactivateRole(selectedRole.id)}
-                        onMouseLeave={() => setIsConfirmingDeactivate(false)}
-                        disabled={isSaving}
-                        className="px-5 py-3.5 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20 text-sm flex items-center gap-2 disabled:opacity-60"
-                      >
-                        <Ban size={16} /> Confirmar Inativação
-                      </motion.button>
-                    ) : (
-                      <button
-                        onClick={() => setIsConfirmingDeactivate(true)}
-                        className="px-5 py-3.5 rounded-xl font-medium text-red-500 hover:bg-red-500/10 transition-colors text-sm flex items-center gap-2"
-                      >
-                        <Ban size={16} /> Inativar Cargo
-                      </button>
-                    )
-                  ) : (
-                    <button
-                      onClick={() => handleReactivateRole(selectedRole.id)}
-                      disabled={isSaving}
-                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm flex items-center gap-2 disabled:opacity-60"
-                    >
-                      <RotateCcw size={16} /> Reativar Cargo
-                    </button>
-                  )}
-
-                  <div className="flex gap-3 ml-auto">
-                    <button onClick={() => setSelectedRole(null)} className="px-5 py-3.5 rounded-xl font-medium border border-border text-foreground hover:bg-secondary transition-colors text-sm">
-                      {canManageRoles ? 'Cancelar' : 'Fechar'}
-                    </button>
-                    {canManageRoles && (
-                    <motion.button
-                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                      onClick={() => handleUpdateRole(selectedRole)}
-                      disabled={isSaving}
-                      className="px-5 py-3.5 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 text-sm disabled:opacity-60"
-                    >
-                      {isSaving ? 'Salvando...' : 'Salvar'}
-                    </motion.button>
-                    )}
-                  </div>
-                </div>
-
-              </motion.div>
-            </div>
+            {actionError && <Notice tone="danger" className="mb-5" onDismiss={() => setActionError(null)}>{actionError}</Notice>}
+            {readOnly && <Notice className="mb-5">Seu perfil permite só consultar este cargo.</Notice>}
+            <fieldset disabled={readOnly} className="space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Nome do cargo" htmlFor="role-name" required error={errors.name}>
+                  <Input
+                    id="role-name" value={draft.name} maxLength={NAME_MAX_LENGTH} invalid={!!errors.name}
+                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  />
+                </Field>
+                <Field label="Departamento" htmlFor="role-department" required error={errors.department}>
+                  <Input
+                    id="role-department" value={draft.department} maxLength={NAME_MAX_LENGTH} invalid={!!errors.department}
+                    onChange={(e) => setDraft({ ...draft, department: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <Field label="Atribuições" htmlFor="role-description" error={errors.description} hint="O que esta pessoa faz no dia a dia.">
+                <Textarea
+                  id="role-description" rows={5} value={draft.description ?? ''} maxLength={TEXT_MAX_LENGTH} invalid={!!errors.description}
+                  onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                />
+              </Field>
+              <RoleColorPicker value={draft.colorHex} onChange={(hex) => setDraft({ ...draft, colorHex: hex })} disabled={readOnly} />
+              <CustomFieldsFormSection
+                entity="role"
+                values={draft.customFields ?? {}}
+                onChange={(v) => setDraft({ ...draft, customFields: v })}
+              />
+            </fieldset>
           </>
-        </AnimatePresence>,
-        document.body
-      )}
+        )}
+      </Drawer>
 
+      <ConfirmDialog
+        open={confirmDeactivate}
+        onClose={() => !isSaving && setConfirmDeactivate(false)}
+        onConfirm={handleDeactivate}
+        title="Inativar este cargo?"
+        description={draft ? `“${draft.name}” deixa de aparecer no cadastro de funcionários. Quem já tem esse cargo continua com ele, e dá para reativar depois.` : undefined}
+        confirmLabel="Inativar cargo"
+        tone="danger"
+        busy={isSaving}
+      />
     </div>
   );
 };
