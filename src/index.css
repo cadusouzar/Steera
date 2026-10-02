@@ -4,8 +4,10 @@
 
 @layer base {
   /* Visual monocromático (01/10/2026, referência URBN): cinza/branco/preto, ação em preto; cor só
-     para status. Canais RGB — ver tailwind.config.js. Contrastes conferidos para AA. */
-  :root {
+     para status. Canais RGB — ver tailwind.config.js. Contrastes conferidos para AA.
+     `.theme-light` força o tema claro num trecho (ex.: tela de login, que só tem versão clara). */
+  :root,
+  .theme-light {
     --background: 237 237 237;       /* #EDEDED */
     --foreground: 20 20 20;          /* #141414 */
     --panel: 255 255 255;            /* #FFFFFF */

@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import Mascot from '../components/Mascot';
-import FlowBackground from '../components/FlowBackground';
+import SteeraLogo from '../components/brand/SteeraLogo';
 import { forgotPassword, login } from '../lib/auth';
 import { ApiError } from '../lib/apiError';
+import { BRAND_NAME } from '../lib/brand';
+
+// Login no modelo "Login v2" (02/10/2026): fundo pontilhado, cartão com o Stee numa faixa creme e um
+// balão que responde ao que a pessoa está fazendo. Só tem versão clara (`theme-light`), como o modelo.
+// Ficaram de fora do modelo, de propósito: "Manter conectado" (a sessão já dura 30 dias, a caixa não
+// faria nada) e os links Termos/Privacidade/Suporte (as páginas ainda não existem).
 
 // Depois de entrar, a pessoa vai pra página inicial do site (de lá entra no sistema pelo botão
 // "Entrar no sistema") — decisão de produto de 25/09/2026. Exceção: se ela foi mandada pro login ao
@@ -16,11 +21,19 @@ function safeRedirectPath(from: unknown): string {
   return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/';
 }
 
+type Focus = 'email' | 'password' | null;
+
+const inputClass =
+  'w-full h-[46px] rounded-[8px] border border-[#e1e1e1] bg-white px-3.5 text-[15px] text-[#111] placeholder:text-[#9a9a9a] outline-none transition-[border-color,box-shadow] duration-150 focus:border-[#111] focus:shadow-[0_0_0_3px_rgba(17,17,17,0.08)]';
+
+const linkClass = 'rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#111]';
+
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [isCovering, setIsCovering] = useState(false);
+  const [focus, setFocus] = useState<Focus>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -34,10 +47,20 @@ const Login = () => {
   // criada." de AcceptInvite.tsx) — só lido uma vez, do state de navegação.
   const [notice] = useState<string | null>((location.state as { notice?: string } | null)?.notice ?? null);
 
+  const isCoveringEyes = focus === 'password' && !showPassword;
+
+  const bubble = isSubmitting ? 'Abrindo seu painel…'
+    : error ? 'Opa, algo não bateu. Tenta de novo?'
+    : isCoveringEyes ? 'Pode digitar, não estou olhando!'
+    : focus === 'password' ? 'Hmm… prometo esquecer.'
+    : focus === 'email' ? 'Qual é o seu e-mail?'
+    : 'Oi! Bom te ver de novo.';
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setResetSentMessage(null);
+    setFocus(null);
     setIsSubmitting(true);
     try {
       await login(email, password);
@@ -67,112 +90,142 @@ const Login = () => {
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    setMousePos({ x: e.clientX, y: e.clientY });
+  const clearError = () => {
+    if (error) setError(null);
   };
 
   return (
     <div
-      className="relative min-h-screen bg-background overflow-hidden flex items-center justify-center transition-colors duration-300"
-      onMouseMove={handleMouseMove}
+      className="theme-light min-h-screen flex flex-col overflow-x-hidden bg-[#f4f4f3] bg-[radial-gradient(#dcdcda_1px,transparent_1px)] bg-[length:22px_22px] px-4 py-7 sm:px-10 font-sans text-[#111]"
+      onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
     >
-      <FlowBackground />
-
-      <div className="relative z-10 w-full max-w-md px-6 pointer-events-auto">
-        <Link to="/" className="inline-flex items-center text-foreground/60 hover:text-foreground mb-8 transition-colors">
-          <ArrowLeft size={16} className="mr-2" />
-          Voltar para Home
+      <header className="flex items-center justify-between gap-4">
+        <Link to="/" aria-label={`${BRAND_NAME} — página inicial`} className={linkClass}>
+          <SteeraLogo size="text-[26px]" className="text-[#111]" />
         </Link>
+        <Link to="/" className={`${linkClass} inline-flex items-center gap-1.5 text-[13px] font-medium text-[#666] hover:text-[#111]`}>
+          <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
+          Voltar para o site
+        </Link>
+      </header>
 
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, type: "spring", bounce: 0.4 }}
-          className="glass-panel p-10 rounded-3xl"
-        >
-          <Mascot mousePosition={mousePos} isCoveringEyes={isCovering} />
-
-          <div className="text-center mb-8 mt-8">
-            <h1 className="text-3xl font-heading font-bold mb-2 text-foreground">QuickFlow</h1>
-            <p className="text-foreground/60">Acesse sua conta para continuar.</p>
-          </div>
-
-          {notice && !error && (
-            <div role="status" className="rounded-xl border border-primary/30 bg-primary/5 p-4 mb-6 text-sm text-foreground">
-              {notice}
-            </div>
-          )}
-
-          {error && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-              {error}
-              {lockedOut && (
-                <button
-                  type="button"
-                  onClick={handleSendResetLink}
-                  disabled={isSendingReset}
-                  className="mt-3 w-full bg-red-600 hover:bg-red-600/90 text-white font-medium py-2 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed text-sm"
-                >
-                  {isSendingReset ? 'Enviando...' : 'Enviar link de redefinição'}
-                </button>
-              )}
-            </div>
-          )}
-
-          {resetSentMessage && (
-            <div role="status" className="rounded-xl border border-primary/30 bg-primary/5 p-4 mb-6 text-sm text-foreground">
-              {resetSentMessage}
-            </div>
-          )}
-
-          <form className="space-y-6" onSubmit={handleLogin}>
-            <div>
-              <label className="block text-sm font-medium text-foreground/80 mb-2">E-mail Corporativo</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                placeholder="nome@empresa.com"
-                onFocus={() => setIsCovering(false)}
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-foreground/80">Senha</label>
-                <Link
-                  to={{ pathname: '/esqueci-senha', search: email.trim() ? `?email=${encodeURIComponent(email.trim())}` : '' }}
-                  className="text-xs text-primary hover:underline"
-                >
-                  Esqueci minha senha
-                </Link>
+      <main className="flex flex-1 items-center justify-center py-8">
+        <div className="w-full max-w-[420px]">
+          <h1 className="sr-only">Entrar no {BRAND_NAME}</h1>
+          <form
+            onSubmit={handleLogin}
+            className="flex flex-col gap-[26px] overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white px-6 pb-8 sm:px-9 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)]"
+          >
+            {/* Faixa do Stee: ocupa a largura toda do cartão, por cima do padding. */}
+            <div className="relative -mx-6 sm:-mx-9 h-[220px] flex items-end justify-center border-b border-[#EFE4D2] bg-[#FDF8F0] bg-[radial-gradient(ellipse_60%_18%_at_50%_100%,rgba(62,39,34,0.07),transparent_70%)]">
+              {/* O componente do Stee tem tamanho fixo; aqui ele cresce para a área do modelo. */}
+              <div className="[&>div]:mb-0 [&>div]:h-[220px] [&>div]:w-[260px]">
+                <Mascot mousePosition={mousePos} isCoveringEyes={isCoveringEyes} />
               </div>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                placeholder="••••••••"
-                onFocus={() => setIsCovering(true)}
-                onBlur={() => setIsCovering(false)}
-              />
+              <p
+                aria-hidden="true"
+                className="absolute top-[22px] left-[calc(50%+66px)] w-fit max-w-[calc(50%-80px)] rounded-[14px] rounded-bl-[4px] bg-white px-3 py-[9px] font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)]"
+              >
+                {bubble}
+              </p>
             </div>
+
+            <div className="flex flex-col gap-[18px]">
+              <label className="flex flex-col gap-[7px]">
+                <span className="text-[13px] font-medium">E-mail</span>
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); clearError(); }}
+                  onFocus={() => setFocus('email')}
+                  onBlur={() => setFocus(null)}
+                  placeholder="voce@empresa.com.br"
+                  className={inputClass}
+                />
+              </label>
+
+              <div className="flex flex-col gap-[7px]">
+                <div className="flex items-baseline justify-between">
+                  <label htmlFor="login-password" className="text-[13px] font-medium">Senha</label>
+                  <Link
+                    to={{ pathname: '/esqueci-senha', search: email.trim() ? `?email=${encodeURIComponent(email.trim())}` : '' }}
+                    className={`${linkClass} text-[13px] font-medium text-[#666] hover:text-[#111]`}
+                  >
+                    Esqueci minha senha
+                  </Link>
+                </div>
+                <div className="relative">
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); clearError(); }}
+                    onFocus={() => setFocus('password')}
+                    onBlur={() => setFocus(null)}
+                    placeholder="••••••••"
+                    className={`${inputClass} pr-[46px]`}
+                  />
+                  <button
+                    type="button"
+                    // Mantém o foco no campo ao clicar (senão o Stee "piscaria" ao perder o foco).
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    aria-pressed={showPassword}
+                    className="absolute right-1 top-1 flex h-[38px] w-[38px] items-center justify-center rounded-md text-[#777] outline-none transition-colors hover:bg-[#f4f4f4] hover:text-[#111] focus-visible:ring-2 focus-visible:ring-[#111]"
+                  >
+                    {showPassword ? <EyeOff size={18} strokeWidth={1.8} /> : <Eye size={18} strokeWidth={1.8} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {notice && !error && (
+              <p role="status" className="rounded-lg bg-[#F4F4F3] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#333]">{notice}</p>
+            )}
+
+            {error && (
+              <div role="alert" className="rounded-lg bg-[#FBEDE8] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#8A3220]">
+                {error}
+                {lockedOut && (
+                  <button
+                    type="button"
+                    onClick={handleSendResetLink}
+                    disabled={isSendingReset}
+                    className="mt-2.5 block font-semibold underline underline-offset-4 outline-none hover:text-[#5f2116] focus-visible:ring-2 focus-visible:ring-[#8A3220] rounded disabled:opacity-60"
+                  >
+                    {isSendingReset ? 'Enviando…' : 'Enviar link de redefinição'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {resetSentMessage && (
+              <p role="status" className="rounded-lg bg-[#F4F4F3] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#333]">{resetSentMessage}</p>
+            )}
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+              aria-busy={isSubmitting || undefined}
+              className="flex h-12 items-center justify-center gap-2.5 rounded-[8px] bg-[#111] text-[15px] font-semibold text-white outline-none transition-colors hover:bg-[#2a2a2a] active:bg-black focus-visible:ring-2 focus-visible:ring-[#111] focus-visible:ring-offset-2 disabled:opacity-70"
             >
-              {isSubmitting ? 'Entrando...' : 'Entrar'}
+              {isSubmitting ? 'Entrando…' : 'Entrar'}
             </button>
-          </form>
 
-          <div className="mt-8 text-center text-sm text-foreground/60">
-            Ainda não tem uma conta? <Link to="/register" className="text-primary hover:underline">Criar conta</Link>
-          </div>
-        </motion.div>
-      </div>
+            <p className="text-center text-[14px] text-[#666]">
+              Ainda não tem conta?{' '}
+              <Link to="/register" className={`${linkClass} font-semibold text-[#111] hover:text-brand`}>Criar conta grátis</Link>
+            </p>
+          </form>
+        </div>
+      </main>
+
+      <footer className="text-[12px] text-[#666]">© 2026 {BRAND_NAME}</footer>
     </div>
   );
 };
