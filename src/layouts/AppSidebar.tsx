@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'framer-motion';
 import { ChevronDown, Lock, type LucideIcon } from 'lucide-react';
 import RollingCount from '../components/motion/RollingCount';
+import SteeraLogo from '../components/brand/SteeraLogo';
 
 // Modelo de dados da sidebar (01/10/2026): AppLayout decide QUAIS itens existem (módulo, plano,
 // permissão — mesmas regras de antes) e este componente só desenha. Ter a lista como dado é o que
@@ -233,8 +234,8 @@ const AppSidebar = ({ sections, isActive, openGroups, onToggleGroup, layoutId, b
   return (
     <div className="flex h-full flex-col">
       <div className="h-14 flex items-center px-6 shrink-0">
-        <Link to="/app" className="text-[15px] font-bold tracking-[0.08em] uppercase text-foreground">
-          {brand}
+        <Link to="/app" aria-label={`${brand} — visão geral`} className="rounded outline-none focus-visible:ring-2 focus-visible:ring-foreground">
+          <SteeraLogo variant="mono" centerClassName="fill-sidebar" size="text-[22px]" />
         </Link>
       </div>
       <LayoutGroup id={layoutId}>

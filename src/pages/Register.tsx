@@ -10,6 +10,7 @@ import { usePasswordStrength } from '../hooks/usePasswordStrength';
 import { buildPasswordUserInputs, isWeakPasswordError } from '../lib/passwordStrength';
 import { register, type RegisterPayload } from '../lib/auth';
 import { fetchAddressByCep, fetchCnpjData } from '../lib/brazilLookups';
+import SteeraLogo from '../components/brand/SteeraLogo';
 import {
   BRAZILIAN_STATES,
   formatCepInput,
@@ -340,7 +341,7 @@ const Register = () => {
           <Mascot mousePosition={mousePos} isCoveringEyes={isCovering} />
 
           <div className="text-center mb-6 mt-8">
-            <h1 className="text-3xl font-heading font-bold mb-2 text-foreground">QuickFlow</h1>
+            <h1 className="mb-2 flex justify-center"><SteeraLogo size="text-[34px]" /><span className="sr-only">Steera</span></h1>
             <p className="text-foreground/60">Crie sua conta para começar.</p>
 
             {planName && (

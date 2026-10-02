@@ -33,12 +33,20 @@ export default {
           DEFAULT: token('danger'),
           foreground: token('danger-foreground'),
         },
+        // Cores da marca Steera (02/10/2026): fixas, iguais nos dois temas. Só no logo e em detalhes —
+        // a interface continua monocromática.
+        brand: {
+          DEFAULT: '#C4553A',
+          honey: '#E9A93F',
+        },
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         // Uma família só (Inter) no sistema inteiro — `font-heading` continua existindo pra não
         // tocar nas ~200 ocorrências, mas aponta pra mesma fonte.
         heading: ['Inter', 'sans-serif'],
+        // Só a palavra do logo Steera usa Outfit SemiBold.
+        brand: ['Outfit', 'Inter', 'sans-serif'],
       },
       // Visual monocromático: cantos quase retos. Remapear a escala (em vez de editar as ~190
       // ocorrências de rounded-xl/2xl/3xl) muda o sistema inteiro de uma vez.

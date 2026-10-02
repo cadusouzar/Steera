@@ -17,6 +17,8 @@ import { PLAN_ITEM_LABELS } from '../lib/planCatalog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePontoPendingCount } from '../hooks/usePontoPendingCount';
 import AppSidebar, { type NavEntry, type NavGroup, type NavLink, type NavSection } from './AppSidebar';
+import SteeraLogo from '../components/brand/SteeraLogo';
+import { BRAND_NAME } from '../lib/brand';
 
 // Mapa de prefixo de rota → item de plano (módulo/recurso) que a protege — checado do mais
 // específico pro mais genérico (ex.: /app/ponto-administracao antes de /app/ponto, que também
@@ -55,7 +57,7 @@ type AppModule =
   | 'DASHBOARD' | 'CLIENTES' | 'RH' | 'RH_CARGOS' | 'RH_FUNCIONARIOS'
   | 'PONTO_REGISTRO' | 'PONTO_ADMINISTRACAO' | 'COMERCIAL' | 'OPERACOES' | 'FINANCAS';
 
-const BRAND = 'QuickFlow';
+const BRAND = BRAND_NAME;
 
 const AppLayout = () => {
   const { theme, toggleTheme } = useTheme();
@@ -270,7 +272,7 @@ const AppLayout = () => {
             >
               <Menu size={18} strokeWidth={1.6} />
             </button>
-            <span className="md:hidden text-[15px] font-bold tracking-[0.08em] uppercase text-foreground">{BRAND}</span>
+            <span className="md:hidden" aria-label={BRAND}><SteeraLogo variant="mono" centerClassName="fill-background" size="text-[20px]" /></span>
           </div>
 
           <div className="flex items-center gap-2">

@@ -5,6 +5,8 @@ import { useTheme } from './ThemeProvider';
 import ThemeToggle from './ThemeToggle';
 import SiteAccountMenu from './SiteAccountMenu';
 import { getCurrentUser, restoreSession, subscribeCurrentUser, type CurrentUser } from '../lib/auth';
+import SteeraLogo, { SteeraMark } from './brand/SteeraLogo';
+import { BRAND_NAME } from '../lib/brand';
 
 const Navbar = () => {
   const { theme, toggleTheme } = useTheme();
@@ -43,13 +45,11 @@ const Navbar = () => {
   return (
     <nav className="absolute top-0 w-full z-50">
       <div className="container mx-auto px-4 sm:px-6 py-6 flex items-center justify-between gap-2">
-        <Link to="/" className="flex items-center gap-2 shrink-0" aria-label="QuickFlow — página inicial">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center font-heading font-bold text-primary-foreground shadow-lg shadow-primary/20">
-            Q
-          </div>
-          {/* Nome some abaixo de `sm`: com tema + conta + botão principal, 360px não comporta o
-              nome inteiro sem rolagem horizontal. */}
-          <span className="hidden sm:inline font-heading font-bold text-xl tracking-tight text-foreground">QuickFlow</span>
+        <Link to="/" className="flex items-center shrink-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-foreground" aria-label={`${BRAND_NAME} — página inicial`}>
+          {/* Abaixo de `sm` fica só o símbolo: com tema + conta + botão principal, 360px não comporta a
+              palavra inteira sem rolagem horizontal. */}
+          <SteeraMark className="h-8 w-8 sm:hidden" />
+          <SteeraLogo className="hidden sm:inline-flex" size="text-[26px]" />
         </Link>
 
         {/* Links de seção como rota "/#secao" (não "#secao"): funcionam também fora da landing

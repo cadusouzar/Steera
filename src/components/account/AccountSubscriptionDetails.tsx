@@ -4,6 +4,7 @@ import type { CurrentUser } from '../../lib/auth';
 import { getMyPlan, type MyPlan } from '../../lib/api';
 import { PLAN_ITEM_LABELS, PLAN_ORDER, formatLimit } from '../../lib/planCatalog';
 import BillingContacts from './BillingContacts';
+import { BRAND_NAME } from '../../lib/brand';
 
 interface AccountSubscriptionDetailsProps {
   user: CurrentUser | null;
@@ -91,9 +92,9 @@ const AccountSubscriptionDetails: React.FC<AccountSubscriptionDetailsProps> = ({
             <span className="inline-block px-3 py-1 bg-primary/20 text-primary text-xs font-bold rounded-full uppercase tracking-wider mb-4 border border-primary/30">
               Plano Atual
             </span>
-            <h3 className="text-3xl font-heading font-bold text-foreground mb-2">QuickFlow {plan.current.label}</h3>
+            <h3 className="text-3xl font-heading font-bold text-foreground mb-2">{BRAND_NAME} {plan.current.label}</h3>
             <p className="text-muted font-medium max-w-sm">
-              Cobrança e faturas ainda não estão disponíveis nesta versão do QuickFlow.
+              Cobrança e faturas ainda não estão disponíveis nesta versão do {BRAND_NAME}.
             </p>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">

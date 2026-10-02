@@ -245,7 +245,7 @@ const LandingPage = () => {
       </section>
 
       <footer className="border-t border-border py-12 text-center text-muted text-sm">
-        <p>© 2026 QuickFlow. Todos os direitos reservados.</p>
+        <p>© 2026 Steera. Todos os direitos reservados.</p>
       </footer>
     </div>
   );
