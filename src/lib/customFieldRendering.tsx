@@ -61,7 +61,11 @@ export function renderTypedInput(
   options: string[] | undefined,
   value: unknown,
   onChange: (v: unknown) => void,
+  // Liga o controle ao rótulo de quem chama (etapa 9 do polimento, 02/10/2026): `id` vai no campo
+  // (o rótulo usa htmlFor); `labelId` nomeia o grupo de caixas da múltipla escolha.
+  a11y: { id?: string; labelId?: string } = {},
 ) {
+  const { id, labelId } = a11y;
   // Mesmo visual dos campos do kit (controlClass) — a borda/anel de erro vem de borderClass abaixo.
   const baseClass = '';
   // Só entra em jogo pros tipos com formato validável neste arquivo (CPF/CNPJ/PHONE) — o campo
@@ -71,33 +75,33 @@ export function renderTypedInput(
   switch (type) {
     case 'LONG_TEXT':
       return (
-        <textarea className={`${baseClass} ${borderClass(false)}`} rows={3} value={(value as string) ?? ''}
+        <textarea id={id} className={`${baseClass} ${borderClass(false)}`} rows={3} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
     case 'NUMBER':
     case 'CURRENCY':
       return (
-        <input type="number" step="0.01" className={`${baseClass} ${borderClass(false)}`} value={(value as number) ?? ''}
+        <input id={id} type="number" step="0.01" className={`${baseClass} ${borderClass(false)}`} value={(value as number) ?? ''}
           onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
       );
     case 'DATE':
       return (
-        <input type="date" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
+        <input id={id} type="date" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
     case 'DATETIME':
       return (
-        <input type="datetime-local" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
+        <input id={id} type="datetime-local" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
     case 'BOOLEAN':
       return (
-        <input type="checkbox" className="w-4 h-4 accent-foreground" checked={Boolean(value)}
+        <input id={id} type="checkbox" className="w-4 h-4 accent-foreground" checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)} />
       );
     case 'SELECT':
       return (
-        <select className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+        <select id={id} className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
           <option value="">Selecione...</option>
           {(options ?? []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
         </select>
@@ -105,7 +109,7 @@ export function renderTypedInput(
     case 'MULTI_SELECT': {
       const selected = Array.isArray(value) ? (value as string[]) : [];
       return (
-        <div className="flex flex-wrap gap-2">
+        <div role="group" aria-labelledby={labelId} className="flex flex-wrap gap-2">
           {(options ?? []).map((opt) => (
             <label key={opt} className="flex items-center gap-1.5 text-[13px] h-8 px-2.5 rounded-md border border-border cursor-pointer hover:bg-secondary">
               <input type="checkbox" checked={selected.includes(opt)}
@@ -118,14 +122,14 @@ export function renderTypedInput(
     }
     case 'EMAIL':
       return (
-        <input type="email" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
+        <input id={id} type="email" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
     case 'PHONE': {
       const str = (value as string) ?? '';
       const invalid = str.length > 0 && !isValidPhone(str);
       return (
-        <input type="tel" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={15}
+        <input id={id} type="tel" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={15}
           placeholder="(00) 00000-0000" onChange={(e) => onChange(formatPhoneInput(e.target.value))} />
       );
     }
@@ -133,7 +137,7 @@ export function renderTypedInput(
       const str = (value as string) ?? '';
       const invalid = str.length > 0 && !isValidCpf(str);
       return (
-        <input type="text" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={14}
+        <input id={id} type="text" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={14}
           placeholder="000.000.000-00" onChange={(e) => onChange(formatCpfInput(e.target.value))} />
       );
     }
@@ -141,13 +145,13 @@ export function renderTypedInput(
       const str = (value as string) ?? '';
       const invalid = str.length > 0 && !isValidCnpj(str);
       return (
-        <input type="text" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={18}
+        <input id={id} type="text" className={`${baseClass} ${borderClass(invalid)}`} value={str} maxLength={18}
           placeholder="00.000.000/0000-00" onChange={(e) => onChange(formatCnpjInput(e.target.value))} />
       );
     }
     default:
       return (
-        <input type="text" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
+        <input id={id} type="text" className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)} />
       );
   }

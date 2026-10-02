@@ -1,50 +1,55 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-  Settings, Plus, X, FileQuestion, Loader2, Pencil, Ban, RotateCcw, Trash2, AlertTriangle,
-  HeartHandshake, Briefcase, User, ChevronDown,
+  AlignLeft, Ban, Banknote, Briefcase, Building2, Calendar, CalendarClock, Hash, HeartHandshake, List, ListChecks,
+  Mail, Pencil, Phone, Plus, RotateCcw, SquareUser, ToggleLeft, Trash2, Type, Users, X, type LucideIcon,
 } from 'lucide-react';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
+import {
+  Button, ConfirmDialog, EmptyState, Field, Input, Menu, Modal, Notice, PageHeader, SegmentedControl, Switch,
+  Table, TBody, TD, TH, THead, TR, Tabs, Textarea, type MenuItem,
+} from '../../components/ui';
 import { can, useCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
 import type { CustomFieldDefinition, CustomFieldEntity, CustomFieldType } from '../../lib/api';
 import { TYPE_LABELS, renderTypedInput, parseDefaultForDisplay, serializeDefaultValue } from '../../lib/customFieldRendering';
-import { inputBorderClass, NAME_MAX_LENGTH } from '../../lib/validation';
+import { NAME_MAX_LENGTH } from '../../lib/validation';
 
-const ENTITY_OPTIONS: { value: CustomFieldEntity; label: string; icon: typeof User }[] = [
-  { value: 'client', label: 'Clientes', icon: HeartHandshake },
-  { value: 'role', label: 'Cargos', icon: Briefcase },
-  { value: 'employee', label: 'Funcionários', icon: User },
+// Campos personalizados (redesenho no kit, etapa 9 do polimento — 02/10/2026). Mudanças aprovadas:
+// cadastro em abas; Ativos/Desativados com contagem; sai a coluna Status (repetia o filtro); emojis
+// dos tipos viraram ícones do sistema (nomes e exemplos combinados em 17/09 mantidos); renomear e
+// remover opção em uso confirmam juntos (antes renomear pulava o aviso de opção em uso).
+
+const ENTITY_TABS: { id: CustomFieldEntity; label: string; icon: LucideIcon }[] = [
+  { id: 'client', label: 'Clientes', icon: HeartHandshake },
+  { id: 'role', label: 'Cargos', icon: Briefcase },
+  { id: 'employee', label: 'Funcionários', icon: Users },
 ];
 
-// Ícone + rótulo exatos combinados com o dono do produto para o seletor de
-// tipo (cartões clicáveis do modal "Novo campo"). A ordem/conjunto de tipos
-// vem de `TYPE_LABELS` — este mapa só refina o texto exibido,
-// já que `TYPE_LABELS` tem rótulos mais genéricos (ex.: "Texto" pra TEXT e
-// LONG_TEXT ao mesmo tempo) do que o combinado aqui.
-const TYPE_PICKER: Record<CustomFieldType, { icon: string; label: string; example?: string }> = {
-  TEXT: { icon: '📝', label: 'Texto curto', example: 'Ex.: código interno, apelido' },
-  LONG_TEXT: { icon: '📄', label: 'Texto longo', example: 'Ex.: observações, anotações' },
-  NUMBER: { icon: '🔢', label: 'Número', example: 'Ex.: quantidade, idade' },
-  CURRENCY: { icon: '💰', label: 'Valor em dinheiro', example: 'Ex.: comissão, valor extra' },
-  DATE: { icon: '📅', label: 'Data', example: 'Ex.: aniversário, vencimento' },
-  DATETIME: { icon: '🕐', label: 'Data e hora', example: 'Ex.: horário de um evento' },
-  BOOLEAN: { icon: '✅', label: 'Sim ou não', example: 'Ex.: recebe comissão?' },
-  SELECT: { icon: '📋', label: 'Lista de opções', example: 'Ex.: Segmento: Pequeno, Médio, Grande' },
-  MULTI_SELECT: { icon: '☑️', label: 'Lista de opções (múltipla escolha)', example: 'Ex.: Interesses: Financeiro, RH, Vendas' },
-  EMAIL: { icon: '📧', label: 'E-mail' },
-  PHONE: { icon: '📞', label: 'Telefone' },
-  CPF: { icon: '🪪', label: 'CPF', example: 'Ex.: CPF do cliente pessoa física' },
-  CNPJ: { icon: '🏢', label: 'CNPJ', example: 'Ex.: CNPJ do cliente pessoa jurídica' },
+const entityLabel = (entity: CustomFieldEntity) => ENTITY_TABS.find((t) => t.id === entity)?.label ?? '';
+
+// Ícone + rótulo + exemplo de cada tipo (rótulos e exemplos combinados com o dono do produto).
+const TYPE_PICKER: Record<CustomFieldType, { icon: LucideIcon; label: string; example?: string }> = {
+  TEXT: { icon: Type, label: 'Texto curto', example: 'Ex.: código interno, apelido' },
+  LONG_TEXT: { icon: AlignLeft, label: 'Texto longo', example: 'Ex.: observações, anotações' },
+  NUMBER: { icon: Hash, label: 'Número', example: 'Ex.: quantidade, idade' },
+  CURRENCY: { icon: Banknote, label: 'Valor em dinheiro', example: 'Ex.: comissão, valor extra' },
+  DATE: { icon: Calendar, label: 'Data', example: 'Ex.: aniversário, vencimento' },
+  DATETIME: { icon: CalendarClock, label: 'Data e hora', example: 'Ex.: horário de um evento' },
+  BOOLEAN: { icon: ToggleLeft, label: 'Sim ou não', example: 'Ex.: recebe comissão?' },
+  SELECT: { icon: List, label: 'Lista de opções', example: 'Ex.: Segmento: Pequeno, Médio, Grande' },
+  MULTI_SELECT: { icon: ListChecks, label: 'Lista de opções (múltipla escolha)', example: 'Ex.: Interesses: Financeiro, RH, Vendas' },
+  EMAIL: { icon: Mail, label: 'E-mail' },
+  PHONE: { icon: Phone, label: 'Telefone' },
+  CPF: { icon: SquareUser, label: 'CPF', example: 'Ex.: CPF do cliente pessoa física' },
+  CNPJ: { icon: Building2, label: 'CNPJ', example: 'Ex.: CNPJ do cliente pessoa jurídica' },
 };
 
 const CUSTOM_FIELD_TYPES = Object.keys(TYPE_LABELS) as CustomFieldType[];
 
 const hasOptions = (type: CustomFieldType | null) => type === 'SELECT' || type === 'MULTI_SELECT';
 
-const parseOptions = (text: string): string[] =>
-  text.split(',').map(s => s.trim()).filter(Boolean);
+const parseOptions = (text: string): string[] => text.split(',').map((s) => s.trim()).filter(Boolean);
+
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 interface CreateFormState {
   type: CustomFieldType | null;
@@ -66,20 +71,37 @@ interface EditFormState {
 }
 
 type ConfirmAction =
-  | { kind: 'rename'; field: CustomFieldDefinition; newName: string }
+  // Salvar uma edição que renomeia e/ou remove opções em uso (as duas checagens numa confirmação só).
+  | { kind: 'save-edit'; field: CustomFieldDefinition; form: EditFormState; newName?: string; removedOptions: { option: string; count: number }[] }
   | { kind: 'deactivate'; field: CustomFieldDefinition }
   | { kind: 'reactivate'; field: CustomFieldDefinition }
-  | { kind: 'delete'; field: CustomFieldDefinition; filledCount: number }
-  | {
-      kind: 'options-removed';
-      field: CustomFieldDefinition;
-      removedOptions: { option: string; count: number }[];
-      pendingForm: EditFormState;
-    };
+  | { kind: 'delete'; field: CustomFieldDefinition; filledCount: number };
+
+/** "Valor padrão" com o widget do próprio tipo e um "Remover" explícito (nem todo widget sabe ficar vazio). */
+const DefaultValueField = ({
+  type, options, value, onChange, hint,
+}: { type: CustomFieldType; options?: string[]; value: string; onChange: (v: string) => void; hint: string }) => (
+  <div>
+    <div className="mb-1.5 flex items-center justify-between">
+      <label id="cf-default-label" htmlFor="cf-default" className="text-[13px] font-medium text-foreground">Valor padrão</label>
+      {value && (
+        <Button variant="ghost" size="sm" icon={X} onClick={() => onChange('')} className="-mr-2 h-7">Remover</Button>
+      )}
+    </div>
+    {renderTypedInput(
+      type,
+      options,
+      parseDefaultForDisplay({ type, defaultValue: value || null }),
+      (v) => onChange(serializeDefaultValue(type, v)),
+      { id: 'cf-default', labelId: 'cf-default-label' },
+    )}
+    <p className="mt-1.5 text-[12px] text-muted">{hint}</p>
+  </div>
+);
 
 const CustomFieldsSettings = () => {
   // Permissões por ação (27/09/2026): criar/editar/desativar/excluir definições segue
-  // `campos-personalizados.gerenciar` do perfil, não mais o papel ADMIN (mesma regra do backend).
+  // `campos-personalizados.gerenciar` do perfil (mesma regra do backend).
   const currentUser = useCurrentUser();
   const canManageFields = can('campos-personalizados.gerenciar', currentUser);
 
@@ -97,49 +119,11 @@ const CustomFieldsSettings = () => {
   const [editingField, setEditingField] = useState<CustomFieldDefinition | null>(null);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isCheckingOptionUsage, setIsCheckingOptionUsage] = useState(false);
 
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [isConfirmBusy, setIsConfirmBusy] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [countLoadingId, setCountLoadingId] = useState<string | null>(null);
-  const [isCheckingOptionUsage, setIsCheckingOptionUsage] = useState(false);
-
-  // Menu de ações por linha (18/09/2026) — mesmo padrão de [[UsersManagement]]: um único botão
-  // "Ações" (sempre a mesma largura) abrindo um menu com cada ação por extenso, em vez de vários
-  // botões só de ícone lado a lado. Renderizado via portal, posicionado a partir do botão clicado,
-  // pra nunca ser cortado pelo `overflow-hidden` do painel da tabela.
-  const [openActionsMenuFieldId, setOpenActionsMenuFieldId] = useState<string | null>(null);
-  const [actionsMenuAnchor, setActionsMenuAnchor] = useState<DOMRect | null>(null);
-  const actionsMenuRef = useRef<HTMLDivElement>(null);
-
-  const closeActionsMenu = useCallback(() => setOpenActionsMenuFieldId(null), []);
-
-  const openActionsMenu = (event: React.MouseEvent<HTMLButtonElement>, fieldId: string) => {
-    if (openActionsMenuFieldId === fieldId) {
-      closeActionsMenu();
-      return;
-    }
-    setActionsMenuAnchor(event.currentTarget.getBoundingClientRect());
-    setOpenActionsMenuFieldId(fieldId);
-  };
-
-  useEffect(() => {
-    if (!openActionsMenuFieldId) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (actionsMenuRef.current?.contains(target)) return;
-      if (target.closest('[data-actions-trigger]')) return;
-      closeActionsMenu();
-    };
-    window.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('scroll', closeActionsMenu, true);
-    window.addEventListener('resize', closeActionsMenu);
-    return () => {
-      window.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('scroll', closeActionsMenu, true);
-      window.removeEventListener('resize', closeActionsMenu);
-    };
-  }, [openActionsMenuFieldId, closeActionsMenu]);
 
   const loadDefinitions = useCallback(async () => {
     setIsLoading(true);
@@ -157,33 +141,14 @@ const CustomFieldsSettings = () => {
     loadDefinitions();
   }, [loadDefinitions]);
 
-  useEscapeKey(() => {
-    if (confirmAction) { setConfirmAction(null); return; }
-    if (editingField) { setEditingField(null); return; }
-    if (openActionsMenuFieldId) { closeActionsMenu(); return; }
-    if (isCreateModalOpen) setIsCreateModalOpen(false);
-  });
-
-  useEffect(() => {
-    if (isCreateModalOpen || editingField || confirmAction) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [isCreateModalOpen, editingField, confirmAction]);
-
-  useEffect(() => {
-    setDeleteConfirmText('');
-  }, [confirmAction]);
+  const counts = useMemo(() => ({
+    active: definitions.filter((d) => d.active).length,
+    inactive: definitions.filter((d) => !d.active).length,
+  }), [definitions]);
 
   const filteredDefinitions = useMemo(() => {
     const wantActive = statusFilter === 'active';
-    return definitions
-      .filter(d => d.active === wantActive)
-      .sort((a, b) => a.displayOrder - b.displayOrder);
+    return definitions.filter((d) => d.active === wantActive).sort((a, b) => a.displayOrder - b.displayOrder);
   }, [definitions, statusFilter]);
 
   // ---- Criar ----
@@ -195,14 +160,16 @@ const CustomFieldsSettings = () => {
   };
 
   const closeCreateModal = () => {
+    if (isSavingCreate) return;
     setIsCreateModalOpen(false);
     setActionError(null);
   };
 
+  const createNameTooLong = createForm.displayName.length > NAME_MAX_LENGTH;
   const isCreateFormValid =
     createForm.type !== null &&
     createForm.displayName.trim() !== '' &&
-    createForm.displayName.length <= NAME_MAX_LENGTH &&
+    !createNameTooLong &&
     (!hasOptions(createForm.type) || parseOptions(createForm.optionsText).length > 0);
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -219,7 +186,8 @@ const CustomFieldsSettings = () => {
         ...(hasOptions(createForm.type) ? { configuration: { options: parseOptions(createForm.optionsText) } } : {}),
         ...(createForm.defaultValue ? { defaultValue: createForm.defaultValue } : {}),
       });
-      setDefinitions(prev => [...prev, created]);
+      setDefinitions((prev) => [...prev, created]);
+      setStatusFilter('active');
       setIsCreateModalOpen(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível criar o campo.');
@@ -244,15 +212,17 @@ const CustomFieldsSettings = () => {
   };
 
   const closeEditModal = () => {
+    if (isSavingEdit || isCheckingOptionUsage) return;
     setEditingField(null);
     setEditForm(null);
     setActionError(null);
   };
 
+  const editNameTooLong = !!editForm && editForm.displayName.length > NAME_MAX_LENGTH;
   const isEditFormValid =
     !!editForm &&
     editForm.displayName.trim() !== '' &&
-    editForm.displayName.length <= NAME_MAX_LENGTH &&
+    !editNameTooLong &&
     (!editingField || !hasOptions(editingField.type) || parseOptions(editForm.optionsText).length > 0);
 
   const performEditSave = async (field: CustomFieldDefinition, form: EditFormState) => {
@@ -265,21 +235,17 @@ const CustomFieldsSettings = () => {
         required: form.required,
         displayOrder: form.displayOrder,
         ...(hasOptions(field.type) ? { configuration: { options: parseOptions(form.optionsText) } } : {}),
-        // Sempre enviado (nunca omitido) — string vazia vira `null` explícito, que o backend agora
-        // aceita pra limpar o valor padrão de volta pra "nenhum" (17/09/2026, a pedido do usuário:
-        // "acho justo poder adicionar o valor padrão, editar e removê-lo"). Ver o botão "Remover"
-        // ao lado do widget, que zera `form.defaultValue` direto pros tipos sem um jeito óbvio de
-        // esvaziar o próprio widget (ex.: BOOLEAN — desmarcar o checkbox é um padrão "não" válido,
-        // não "sem padrão").
+        // Sempre enviado: string vazia vira `null` explícito, que o backend aceita para remover o
+        // valor padrão (17/09/2026).
         defaultValue: form.defaultValue || null,
       });
-      setDefinitions(prev => prev.map(d => d.id === updated.id ? updated : d));
+      setDefinitions((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       setEditingField(null);
       setEditForm(null);
-      setConfirmAction(null);
+      return true;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível salvar as alterações deste campo.');
-      setConfirmAction(null);
+      return false;
     } finally {
       setIsSavingEdit(false);
     }
@@ -289,37 +255,21 @@ const CustomFieldsSettings = () => {
     e.preventDefault();
     if (!editingField || !editForm || isSavingEdit || isCheckingOptionUsage || !isEditFormValid) return;
     const trimmedName = editForm.displayName.trim();
-    if (trimmedName !== editingField.displayName) {
-      // Renomear tem confirmação própria (texto combinado com o dono do
-      // produto) — as demais mudanças (descrição/obrigatório/opções/ordem)
-      // salvam direto, sem esse passo extra.
-      setConfirmAction({ kind: 'rename', field: editingField, newName: trimmedName });
-      return;
-    }
+    const renamed = trimmedName !== editingField.displayName;
 
-    // Se o campo é uma lista de opções e alguma opção foi removida, precisamos saber ANTES de
-    // salvar se algum registro já usa essa opção — sem isso, o registro fica silenciosamente com
-    // o campo vazio, sem nenhum aviso. Achado da revisão final: essa checagem estava na spec
-    // original e nunca tinha sido implementada.
+    // Opções removidas que algum registro usa: sem o aviso, esses registros ficariam com o campo vazio.
+    let removedInUse: { option: string; count: number }[] = [];
     if (hasOptions(editingField.type)) {
-      const originalOptions = editingField.configuration?.options ?? [];
       const newOptions = parseOptions(editForm.optionsText);
-      const removed = originalOptions.filter(o => !newOptions.includes(o));
+      const removed = (editingField.configuration?.options ?? []).filter((o) => !newOptions.includes(o));
       if (removed.length > 0) {
         setIsCheckingOptionUsage(true);
         setActionError(null);
         try {
           const counted = await Promise.all(
-            removed.map(async option => ({
-              option,
-              count: await api.getCustomFieldOptionUsageCount(editingField.id, option),
-            })),
+            removed.map(async (option) => ({ option, count: await api.getCustomFieldOptionUsageCount(editingField.id, option) })),
           );
-          const inUse = counted.filter(c => c.count > 0);
-          if (inUse.length > 0) {
-            setConfirmAction({ kind: 'options-removed', field: editingField, removedOptions: inUse, pendingForm: editForm });
-            return;
-          }
+          removedInUse = counted.filter((c) => c.count > 0);
         } catch (err) {
           setActionError(err instanceof Error ? err.message : 'Não foi possível verificar o uso das opções removidas.');
           return;
@@ -329,20 +279,20 @@ const CustomFieldsSettings = () => {
       }
     }
 
+    if (renamed || removedInUse.length > 0) {
+      setConfirmAction({
+        kind: 'save-edit',
+        field: editingField,
+        form: editForm,
+        newName: renamed ? trimmedName : undefined,
+        removedOptions: removedInUse,
+      });
+      return;
+    }
     performEditSave(editingField, editForm);
   };
 
   // ---- Desativar / Reativar / Excluir ----
-
-  const handleDeactivateClick = (field: CustomFieldDefinition) => {
-    setActionError(null);
-    setConfirmAction({ kind: 'deactivate', field });
-  };
-
-  const handleReactivateClick = (field: CustomFieldDefinition) => {
-    setActionError(null);
-    setConfirmAction({ kind: 'reactivate', field });
-  };
 
   const handleDeleteClick = async (field: CustomFieldDefinition) => {
     if (countLoadingId) return;
@@ -358,806 +308,363 @@ const CustomFieldsSettings = () => {
     }
   };
 
-  const isDeleteConfirmValid =
-    !!confirmAction &&
-    confirmAction.kind === 'delete' &&
-    (confirmAction.filledCount === 0 || deleteConfirmText === confirmAction.field.displayName);
-
   const handleConfirm = async () => {
     if (!confirmAction || isConfirmBusy) return;
-
     setIsConfirmBusy(true);
     setActionError(null);
     try {
-      if (confirmAction.kind === 'rename') {
-        if (!editForm) return;
-        await performEditSave(confirmAction.field, editForm);
-        return;
-      } else if (confirmAction.kind === 'options-removed') {
-        await performEditSave(confirmAction.field, confirmAction.pendingForm);
-        return;
+      if (confirmAction.kind === 'save-edit') {
+        // Em erro a confirmação fecha e o aviso aparece na janela de edição, que continua aberta.
+        await performEditSave(confirmAction.field, confirmAction.form);
       } else if (confirmAction.kind === 'deactivate') {
         const updated = await api.deactivateCustomFieldDefinition(confirmAction.field.id);
-        setDefinitions(prev => prev.map(d => d.id === updated.id ? updated : d));
+        setDefinitions((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       } else if (confirmAction.kind === 'reactivate') {
         const updated = await api.activateCustomFieldDefinition(confirmAction.field.id);
-        setDefinitions(prev => prev.map(d => d.id === updated.id ? updated : d));
-      } else if (confirmAction.kind === 'delete') {
-        if (!isDeleteConfirmValid) return;
+        setDefinitions((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      } else {
         const deletedId = confirmAction.field.id;
         await api.deleteCustomFieldDefinition(deletedId);
-        setDefinitions(prev => prev.filter(d => d.id !== deletedId));
+        setDefinitions((prev) => prev.filter((d) => d.id !== deletedId));
       }
-      setConfirmAction(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível concluir esta ação.');
     } finally {
       setIsConfirmBusy(false);
+      setConfirmAction(null);
     }
   };
 
-  return (
-    <div className="p-6 md:p-8 relative">
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="max-w-6xl mx-auto"
-      >
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shadow-sm">
-                <Settings size={20} />
-              </div>
-              <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Campos Personalizados</h1>
+  const menuItemsFor = (field: CustomFieldDefinition): MenuItem[] => [
+    { label: 'Editar', icon: Pencil, onSelect: () => openEditModal(field) },
+    field.active
+      ? { label: 'Desativar', icon: Ban, onSelect: () => { setActionError(null); setConfirmAction({ kind: 'deactivate', field }); } }
+      : { label: 'Reativar', icon: RotateCcw, onSelect: () => { setActionError(null); setConfirmAction({ kind: 'reactivate', field }); } },
+    { label: 'Excluir', icon: Trash2, onSelect: () => handleDeleteClick(field), tone: 'danger', separated: true, disabled: countLoadingId === field.id },
+  ];
+
+  // ---- Textos da confirmação ----
+
+  const confirmCopy = (() => {
+    if (!confirmAction) return null;
+    const name = confirmAction.field.displayName;
+    switch (confirmAction.kind) {
+      case 'save-edit':
+        return {
+          title: confirmAction.removedOptions.length > 0 ? 'Opção em uso' : 'Renomear campo?',
+          confirmLabel: confirmAction.removedOptions.length > 0 ? 'Salvar mesmo assim' : 'Renomear',
+          tone: (confirmAction.removedOptions.length > 0 ? 'danger' : 'default') as 'danger' | 'default',
+          body: (
+            <div className="space-y-3 text-[14px]">
+              {confirmAction.newName && (
+                <p className="text-muted">O campo vai passar a se chamar “{confirmAction.newName}”. Os dados já preenchidos não mudam.</p>
+              )}
+              {confirmAction.removedOptions.length > 0 && (
+                <Notice tone="danger">
+                  <ul className="space-y-1">
+                    {confirmAction.removedOptions.map(({ option, count }) => (
+                      <li key={option}>
+                        {count} {plural(count, 'registro usa', 'registros usam')} a opção “{option}”. Ao remover, o campo {plural(count, 'desse registro fica', 'desses registros fica')} vazio.
+                      </li>
+                    ))}
+                  </ul>
+                </Notice>
+              )}
             </div>
-            <p className="text-muted mt-1 max-w-lg">
-              Adicione campos próprios aos cadastros de Clientes, Cargos e Funcionários, sem precisar de código novo.
-            </p>
-          </div>
-          {canManageFields && (
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={openCreateModal}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3.5 rounded-xl font-medium transition-colors shadow-lg shadow-primary/20 flex items-center gap-2 w-full md:w-auto justify-center whitespace-nowrap"
-            >
-              <Plus size={18} />
-              Novo Campo
-            </motion.button>
-          )}
+          ),
+        };
+      case 'deactivate':
+        return {
+          title: 'Desativar campo?',
+          confirmLabel: 'Desativar',
+          tone: 'default' as const,
+          body: <p className="text-[14px] text-muted">“{name}” deixa de aparecer nos formulários. Os dados já preenchidos continuam guardados e voltam se você reativar o campo.</p>,
+        };
+      case 'reactivate':
+        return {
+          title: 'Reativar campo?',
+          confirmLabel: 'Reativar',
+          tone: 'default' as const,
+          body: <p className="text-[14px] text-muted">“{name}” volta a aparecer nos formulários, com os dados que já estavam preenchidos.</p>,
+        };
+      case 'delete':
+        return {
+          title: 'Excluir campo?',
+          confirmLabel: 'Excluir definitivamente',
+          tone: 'danger' as const,
+          confirmText: confirmAction.filledCount > 0 ? name : undefined,
+          body: confirmAction.filledCount > 0 ? (
+            <Notice tone="danger">
+              Este campo tem dados preenchidos em {confirmAction.filledCount} {plural(confirmAction.filledCount, 'registro', 'registros')}. Excluir apaga esses dados para sempre.
+            </Notice>
+          ) : (
+            <p className="text-[14px] text-muted">“{name}” será excluído. Isso não pode ser desfeito.</p>
+          ),
+        };
+    }
+  })();
+
+  return (
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-6xl mx-auto">
+        <PageHeader
+          title="Campos personalizados"
+          description="Campos próprios da sua empresa nos cadastros de Clientes, Cargos e Funcionários."
+          actions={canManageFields ? <Button icon={Plus} onClick={openCreateModal}>Novo campo</Button> : undefined}
+        />
+
+        <Tabs<CustomFieldEntity>
+          label="Cadastro"
+          tabs={ENTITY_TABS}
+          value={entity}
+          onChange={setEntity}
+          className="mb-4"
+        />
+
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[13px] text-muted">Campos do cadastro de {entityLabel(entity)}.</p>
+          <SegmentedControl<'active' | 'inactive'>
+            label="Filtrar por situação"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: 'active', label: `Ativos ${counts.active}` },
+              { value: 'inactive', label: `Desativados ${counts.inactive}` },
+            ]}
+          />
         </div>
 
-        {/* Action Bar: entidade + status */}
-        <div className="glass-panel p-4 rounded-2xl border border-border/60 mb-8 flex flex-col md:flex-row md:items-center gap-4 shadow-sm">
-          <div className="w-full md:w-auto">
-            <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
-              Cadastro
-            </label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {ENTITY_OPTIONS.map(({ value, label, icon: Icon }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setEntity(value)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                    entity === value
-                      ? 'bg-primary/10 text-primary border border-primary/30'
-                      : 'text-muted border border-transparent hover:bg-secondary/50'
-                  }`}
-                >
-                  <Icon size={16} />
-                  {label}
-                </button>
+        {loadError && <Notice tone="danger" className="mb-4">{loadError}</Notice>}
+        {!isCreateModalOpen && !editingField && actionError && (
+          <Notice tone="danger" className="mb-4" onDismiss={() => setActionError(null)}>{actionError}</Notice>
+        )}
+
+        <div className="bg-panel border border-border rounded-lg shadow-sm overflow-hidden">
+          {isLoading ? (
+            <div className="divide-y divide-border" role="status" aria-label="Carregando campos">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-6 px-5 h-14">
+                  <span className="skeleton h-4 w-44" />
+                  <span className="skeleton h-4 w-28 hidden sm:block" />
+                  <span className="skeleton h-4 w-16 ml-auto" />
+                </div>
               ))}
             </div>
-          </div>
-          <div className="flex items-center gap-2 md:ml-auto">
-            <button
-              onClick={() => setStatusFilter('active')}
-              className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                statusFilter === 'active'
-                  ? 'bg-primary/10 text-primary border border-primary/30'
-                  : 'text-muted border border-transparent hover:bg-secondary/50'
-              }`}
-            >
-              Ativos
-            </button>
-            <button
-              onClick={() => setStatusFilter('inactive')}
-              className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                statusFilter === 'inactive'
-                  ? 'bg-primary/10 text-primary border border-primary/30'
-                  : 'text-muted border border-transparent hover:bg-secondary/50'
-              }`}
-            >
-              Desativados
-            </button>
-          </div>
-        </div>
-
-        {loadError && (
-          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm">
-            {loadError}
-          </div>
-        )}
-
-        {!isCreateModalOpen && !editingField && !confirmAction && actionError && (
-          <div className="glass-panel rounded-3xl border border-red-500/30 bg-red-500/5 p-6 mb-6 text-red-600 dark:text-red-400 text-sm flex items-start justify-between gap-4">
-            <span>{actionError}</span>
-            <button
-              onClick={() => setActionError(null)}
-              className="p-1.5 rounded-full hover:bg-red-500/10 text-red-600 dark:text-red-400 transition-colors shrink-0"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
-
-        {/* Tabela */}
-        <div className="glass-panel rounded-3xl border border-border/60 overflow-hidden shadow-sm">
-          {isLoading ? (
-            <div className="py-24 flex items-center justify-center text-muted">
-              <Loader2 className="animate-spin" size={28} />
-            </div>
-          ) : filteredDefinitions.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[800px]">
-                <thead>
-                  <tr className="border-b-2 border-border/60 bg-secondary/10">
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Nome</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Tipo</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Obrigatório</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Ordem</th>
-                    <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider">Status</th>
-                    {canManageFields && (
-                      <th className="px-8 py-5 text-sm font-heading font-semibold text-foreground/90 uppercase tracking-wider text-right">Ações</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  <AnimatePresence>
-                    {filteredDefinitions.map((field, index) => (
-                      <motion.tr
-                        key={field.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.2, delay: index * 0.03 }}
-                        onClick={() => canManageFields && openEditModal(field)}
-                        className={`hover:bg-secondary/40 transition-colors group ${canManageFields ? 'cursor-pointer' : ''}`}
-                      >
-                        <td className="px-8 py-5">
-                          <p className="text-base font-heading font-bold text-foreground">{field.displayName}</p>
-                          {field.description && (
-                            <p className="text-sm text-muted mt-0.5">{field.description}</p>
-                          )}
-                        </td>
-                        <td className="px-8 py-5">
-                          <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium bg-secondary/60 text-foreground/80 border border-border/60 shadow-sm">
-                            <span>{TYPE_PICKER[field.type].icon}</span>
-                            {TYPE_PICKER[field.type].label}
-                          </span>
-                        </td>
-                        <td className="px-8 py-5 text-sm font-medium text-foreground/80">
-                          {field.required ? 'Sim' : 'Não'}
-                        </td>
-                        <td className="px-8 py-5 text-sm font-medium text-foreground/80">
-                          {field.displayOrder}
-                        </td>
-                        <td className="px-8 py-5">
-                          {field.active ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
-                              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                              Ativo
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-secondary text-foreground/60 border border-border/60">
-                              <span className="w-1.5 h-1.5 rounded-full bg-foreground/40" />
-                              Inativo
-                            </span>
-                          )}
-                        </td>
-                        {canManageFields && (
-                          <td className="px-8 py-5 text-right">
-                            <button
-                              type="button"
-                              data-actions-trigger
-                              onClick={(e) => { e.stopPropagation(); openActionsMenu(e, field.id); }}
-                              disabled={countLoadingId === field.id}
-                              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 ${
-                                openActionsMenuFieldId === field.id
-                                  ? 'border-primary/40 bg-primary/10 text-primary'
-                                  : 'border-border text-foreground hover:bg-secondary'
-                              }`}
-                            >
-                              {countLoadingId === field.id ? <Loader2 size={14} className="animate-spin" /> : 'Ações'}
-                              {countLoadingId !== field.id && <ChevronDown size={14} />}
-                            </button>
-                          </td>
-                        )}
-                      </motion.tr>
-                    ))}
-                  </AnimatePresence>
-                </tbody>
-              </table>
-            </div>
+          ) : loadError ? null : filteredDefinitions.length > 0 ? (
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Campo</TH>
+                  <TH className="hidden sm:table-cell">Tipo</TH>
+                  <TH className="hidden md:table-cell">Obrigatório</TH>
+                  {canManageFields && <TH align="right"><span className="sr-only">Ações</span></TH>}
+                </tr>
+              </THead>
+              <TBody>
+                {filteredDefinitions.map((field) => {
+                  const type = TYPE_PICKER[field.type];
+                  const TypeIcon = type.icon;
+                  return (
+                    <TR key={field.id} interactive={canManageFields} onClick={() => canManageFields && openEditModal(field)}>
+                      <TD>
+                        <p className="font-medium text-foreground">{field.displayName}</p>
+                        {field.description && <p className="text-[12px] text-muted">{field.description}</p>}
+                        <p className="text-[12px] text-muted sm:hidden">{type.label}{field.required ? ' · obrigatório' : ''}</p>
+                      </TD>
+                      <TD className="hidden sm:table-cell">
+                        <span className="inline-flex items-center gap-2 text-muted">
+                          <TypeIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+                          {type.label}
+                        </span>
+                      </TD>
+                      <TD className="hidden md:table-cell text-muted">{field.required ? 'Sim' : 'Não'}</TD>
+                      {canManageFields && (
+                        <TD align="right" onClick={(e) => e.stopPropagation()}>
+                          <Menu label="Ações" ariaLabel={`Ações do campo ${field.displayName}`} items={menuItemsFor(field)} />
+                        </TD>
+                      )}
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
           ) : (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="py-24 px-6 text-center flex flex-col items-center justify-center"
-            >
-              <div className="w-20 h-20 bg-secondary/50 rounded-[2rem] flex items-center justify-center text-muted mb-6 rotate-12 shadow-sm border border-border/50">
-                <FileQuestion size={40} />
-              </div>
-              <h3 className="text-xl font-heading font-bold text-foreground mb-2">
-                {statusFilter === 'active' ? 'Nenhum campo ativo' : 'Nenhum campo desativado'}
-              </h3>
-              <p className="text-muted max-w-md text-base">
-                {statusFilter === 'active'
-                  ? 'Ainda não existe nenhum campo personalizado ativo para este cadastro. Crie o primeiro clicando em "Novo Campo".'
-                  : 'Nenhum campo personalizado deste cadastro está desativado no momento.'}
-              </p>
-            </motion.div>
+            <EmptyState
+              title={statusFilter === 'active' ? 'Nenhum campo ativo' : 'Nenhum campo desativado'}
+              description={statusFilter === 'active'
+                ? `O cadastro de ${entityLabel(entity)} ainda não tem campos personalizados.`
+                : `Nenhum campo do cadastro de ${entityLabel(entity)} está desativado.`}
+              action={statusFilter === 'active' && canManageFields ? <Button variant="secondary" icon={Plus} onClick={openCreateModal}>Novo campo</Button> : undefined}
+            />
           )}
         </div>
-      </motion.div>
+      </div>
 
-      {/* Menu de ações por linha (18/09/2026) — mesmo padrão de [[UsersManagement]], ver o
-          comentário perto de openActionsMenuFieldId pro raciocínio completo. */}
-      {openActionsMenuFieldId && actionsMenuAnchor && (() => {
-        const menuField = definitions.find(d => d.id === openActionsMenuFieldId);
-        if (!menuField) return null;
-        return createPortal(
-          <div
-            ref={actionsMenuRef}
-            style={{
-              position: 'fixed',
-              top: actionsMenuAnchor.bottom + 6,
-              right: window.innerWidth - actionsMenuAnchor.right,
-            }}
-            className="z-[150] w-56 bg-background border border-border/60 rounded-xl shadow-2xl overflow-hidden py-1.5"
-          >
-            <button
-              type="button"
-              onClick={() => { closeActionsMenu(); openEditModal(menuField); }}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
-            >
-              <Pencil size={15} className="text-muted shrink-0" />
-              Editar
-            </button>
-            {menuField.active ? (
-              <button
-                type="button"
-                onClick={() => { closeActionsMenu(); handleDeactivateClick(menuField); }}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
-              >
-                <Ban size={15} className="text-muted shrink-0" />
-                Desativar
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => { closeActionsMenu(); handleReactivateClick(menuField); }}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors text-left"
-              >
-                <RotateCcw size={15} className="text-muted shrink-0" />
-                Reativar
-              </button>
-            )}
-            <div className="my-1.5 border-t border-border/40" />
-            <button
-              type="button"
-              onClick={() => { closeActionsMenu(); handleDeleteClick(menuField); }}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors text-left"
-            >
-              <Trash2 size={15} className="shrink-0" />
-              Excluir
-            </button>
-          </div>,
-          document.body,
-        );
-      })()}
-
-      {/* Modal: Novo Campo */}
-      {isCreateModalOpen && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={closeCreateModal}
-            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-              <div className="flex items-center justify-between mb-6 mt-2">
-                <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-                  <Plus size={24} className="text-primary" />
-                  Novo Campo — {ENTITY_OPTIONS.find(o => o.value === entity)?.label}
-                </h2>
-                <button
-                  onClick={closeCreateModal}
-                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-
-              <form onSubmit={handleCreateSubmit} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-3 uppercase tracking-wider">
-                    Tipo de Campo <span className="text-red-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {CUSTOM_FIELD_TYPES.map(type => {
-                      const isSelected = createForm.type === type;
-                      return (
-                        <motion.button
-                          whileTap={{ scale: 0.97 }}
-                          type="button"
-                          key={type}
-                          onClick={() => setCreateForm(prev => prev.type === type ? prev : { ...prev, type, defaultValue: '' })}
-                          className={`flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all duration-200 ${
-                            isSelected
-                              ? 'border-primary bg-primary/5 shadow-sm'
-                              : 'border-border/60 bg-background hover:border-border hover:bg-secondary/30'
-                          }`}
-                        >
-                          <span className="text-2xl leading-none">{TYPE_PICKER[type].icon}</span>
-                          <span className={`text-sm font-bold leading-tight ${isSelected ? 'text-primary' : 'text-foreground/80'}`}>
-                            {TYPE_PICKER[type].label}
-                          </span>
-                          {TYPE_PICKER[type].example && (
-                            <span className="text-xs text-muted mt-0.5 leading-tight">
-                              {TYPE_PICKER[type].example}
-                            </span>
-                          )}
-                        </motion.button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                    Nome do Campo <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={NAME_MAX_LENGTH}
-                    value={createForm.displayName}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, displayName: e.target.value }))}
-                    className={`w-full bg-background border ${inputBorderClass(createForm.displayName.length > NAME_MAX_LENGTH)} rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 transition-all shadow-sm`}
-                    placeholder="Ex: Data de aniversário"
-                  />
-                  {createForm.displayName.length > NAME_MAX_LENGTH && (
-                    <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">Nome deve ter no máximo {NAME_MAX_LENGTH} caracteres</p>
-                  )}
-                </div>
-
-                {hasOptions(createForm.type) && (
-                  <div>
-                    <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      Opções (separadas por vírgula) <span className="text-red-500">*</span>
-                    </label>
+      {/* Novo campo */}
+      <Modal
+        open={isCreateModalOpen}
+        onClose={closeCreateModal}
+        title={`Novo campo em ${entityLabel(entity)}`}
+        description="Só esta empresa vê os campos que você cria."
+        size="lg"
+        dismissable={!isSavingCreate}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeCreateModal} disabled={isSavingCreate}>Cancelar</Button>
+            <Button type="submit" form="create-field-form" loading={isSavingCreate} disabled={!isCreateFormValid}>Criar campo</Button>
+          </>
+        }
+      >
+        {actionError && <Notice tone="danger" className="mb-4">{actionError}</Notice>}
+        <form id="create-field-form" onSubmit={handleCreateSubmit} className="space-y-5" noValidate>
+          <div role="radiogroup" aria-label="Tipo de campo">
+            <p className="mb-2 text-[13px] font-medium text-foreground">Tipo de campo <span className="text-danger">*</span></p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {CUSTOM_FIELD_TYPES.map((type) => {
+                const { icon: Icon, label, example } = TYPE_PICKER[type];
+                const checked = createForm.type === type;
+                return (
+                  <label
+                    key={type}
+                    className={`flex items-start gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-foreground ${
+                      checked ? 'border-primary bg-secondary' : 'border-border hover:bg-secondary/60'
+                    }`}
+                  >
                     <input
-                      type="text"
-                      value={createForm.optionsText}
-                      onChange={(e) => setCreateForm(prev => ({ ...prev, optionsText: e.target.value }))}
-                      className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
-                      placeholder="Ex: Ouro, Prata, Bronze"
+                      type="radio"
+                      name="custom-field-type"
+                      checked={checked}
+                      onChange={() => setCreateForm((prev) => (prev.type === type ? prev : { ...prev, type, defaultValue: '' }))}
+                      className="sr-only"
                     />
-                  </div>
-                )}
-
-                {createForm.type && (() => {
-                  const type = createForm.type as CustomFieldType;
-                  return (
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="block text-xs font-bold text-foreground/80 uppercase tracking-wider">
-                          Valor Padrão
-                        </label>
-                        {createForm.defaultValue && (
-                          <button
-                            type="button"
-                            onClick={() => setCreateForm(prev => ({ ...prev, defaultValue: '' }))}
-                            className="flex items-center gap-1 text-xs font-semibold text-muted hover:text-red-500 transition-colors"
-                          >
-                            <X size={12} />
-                            Remover
-                          </button>
-                        )}
-                      </div>
-                      {renderTypedInput(
-                        type,
-                        hasOptions(type) ? parseOptions(createForm.optionsText) : undefined,
-                        parseDefaultForDisplay({ type, defaultValue: createForm.defaultValue || null }),
-                        (v) => setCreateForm(prev => ({ ...prev, defaultValue: serializeDefaultValue(type, v) })),
-                      )}
-                      <p className="text-xs text-muted mt-1.5">
-                        Pré-preenche este campo ao criar um novo registro — quem estiver criando ainda pode mudar o valor.
-                      </p>
-                    </div>
-                  );
-                })()}
-
-                <label className="flex items-center gap-2.5 text-sm font-medium text-foreground/90 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={createForm.required}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, required: e.target.checked }))}
-                    className="w-4 h-4 rounded accent-primary"
-                  />
-                  Obrigatório
-                </label>
-
-                <p className="text-xs text-muted">
-                  {createForm.displayName.trim()
-                    ? <>Isso vai adicionar o campo <strong className="text-foreground/80">"{createForm.displayName.trim()}"</strong> ao cadastro de {ENTITY_OPTIONS.find(o => o.value === entity)?.label}. Só esta empresa vai ver esse campo.</>
-                    : <>O campo vai ser adicionado ao cadastro de {ENTITY_OPTIONS.find(o => o.value === entity)?.label}, visível só para esta empresa.</>}
-                </p>
-
-                <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
-                  <button
-                    type="button"
-                    onClick={closeCreateModal}
-                    className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    type="submit"
-                    disabled={!isCreateFormValid || isSavingCreate}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
-                  >
-                    {isSavingCreate && <Loader2 size={16} className="animate-spin" />}
-                    {isSavingCreate ? 'Criando...' : 'Criar Campo'}
-                  </motion.button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Modal: Editar Campo */}
-      {editingField && editForm && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={closeEditModal}
-            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-2xl shadow-2xl pointer-events-auto relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary via-accent to-primary opacity-80" />
-              <div className="flex items-center justify-between mb-6 mt-2">
-                <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-                  <Pencil size={22} className="text-primary" />
-                  Editar Campo
-                </h2>
-                <button
-                  onClick={closeEditModal}
-                  className="p-2 text-muted hover:text-foreground bg-secondary/50 hover:bg-secondary/80 rounded-full transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <p className="text-xs text-muted mb-6 flex items-center gap-2">
-                <span>{TYPE_PICKER[editingField.type].icon}</span>
-                {TYPE_PICKER[editingField.type].label} — o tipo não pode ser alterado depois de criado.
-              </p>
-
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-
-              <form onSubmit={handleEditSubmit} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                    Nome do Campo <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={NAME_MAX_LENGTH}
-                    value={editForm.displayName}
-                    onChange={(e) => setEditForm(prev => prev && { ...prev, displayName: e.target.value })}
-                    className={`w-full bg-background border ${inputBorderClass(editForm.displayName.length > NAME_MAX_LENGTH)} rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 transition-all shadow-sm`}
-                  />
-                  {editForm.displayName.length > NAME_MAX_LENGTH && (
-                    <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">Nome deve ter no máximo {NAME_MAX_LENGTH} caracteres</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                    Descrição
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={editForm.description}
-                    onChange={(e) => setEditForm(prev => prev && { ...prev, description: e.target.value })}
-                    className="w-full bg-background border border-border/80 rounded-xl p-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                    placeholder="Texto de ajuda exibido junto ao campo (opcional)"
-                  />
-                </div>
-
-                {hasOptions(editingField.type) && (
-                  <div>
-                    <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      Opções (separadas por vírgula) <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={editForm.optionsText}
-                      onChange={(e) => setEditForm(prev => prev && { ...prev, optionsText: e.target.value })}
-                      className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-bold text-foreground/80 uppercase tracking-wider">
-                      Valor Padrão
-                    </label>
-                    {editForm.defaultValue && (
-                      <button
-                        type="button"
-                        onClick={() => setEditForm(prev => prev && { ...prev, defaultValue: '' })}
-                        className="flex items-center gap-1 text-xs font-semibold text-muted hover:text-red-500 transition-colors"
-                      >
-                        <X size={12} />
-                        Remover
-                      </button>
-                    )}
-                  </div>
-                  {renderTypedInput(
-                    editingField.type,
-                    hasOptions(editingField.type) ? parseOptions(editForm.optionsText) : undefined,
-                    parseDefaultForDisplay({ type: editingField.type, defaultValue: editForm.defaultValue || null }),
-                    (v) => setEditForm(prev => prev && { ...prev, defaultValue: serializeDefaultValue(editingField.type, v) }),
-                  )}
-                  <p className="text-xs text-muted mt-1.5">
-                    Pré-preenche este campo ao criar um novo registro — não afeta registros já existentes.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                      Ordem de Exibição
-                    </label>
-                    <input
-                      type="number"
-                      value={editForm.displayOrder}
-                      onChange={(e) => setEditForm(prev => prev && { ...prev, displayOrder: Number(e.target.value) })}
-                      className="w-full bg-background border border-border/80 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="flex items-end pb-1">
-                    <label className="flex items-center gap-2.5 text-sm font-medium text-foreground/90 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={editForm.required}
-                        onChange={(e) => setEditForm(prev => prev && { ...prev, required: e.target.checked })}
-                        className="w-4 h-4 rounded accent-primary"
-                      />
-                      Obrigatório
-                    </label>
-                  </div>
-                </div>
-
-                <div className="pt-6 flex gap-3 border-t border-border/40 mt-6">
-                  <button
-                    type="button"
-                    onClick={closeEditModal}
-                    className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm"
-                  >
-                    Cancelar
-                  </button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    type="submit"
-                    disabled={!isEditFormValid || isSavingEdit || isCheckingOptionUsage}
-                    className="flex-1 py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2"
-                  >
-                    {(isSavingEdit || isCheckingOptionUsage) && <Loader2 size={16} className="animate-spin" />}
-                    {isSavingEdit ? 'Salvando...' : isCheckingOptionUsage ? 'Verificando...' : 'Salvar'}
-                  </motion.button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* Modal: Confirmações (renomear / desativar / reativar / excluir) */}
-      {confirmAction && createPortal(
-        <AnimatePresence>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => !isConfirmBusy && setConfirmAction(null)}
-            className="fixed inset-0 z-[110] bg-background/80 backdrop-blur-sm"
-          />
-          <div className="fixed inset-0 z-[111] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="bg-background border border-border/60 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl pointer-events-auto relative overflow-hidden"
-            >
-              <div className={`absolute top-0 left-0 right-0 h-1.5 opacity-80 ${
-                confirmAction.kind === 'delete' || confirmAction.kind === 'options-removed'
-                  ? 'bg-red-500'
-                  : confirmAction.kind === 'deactivate' ? 'bg-orange-500' : 'bg-gradient-to-r from-primary via-accent to-primary'
-              }`} />
-
-              <div className="flex items-center gap-3 mb-4 mt-2">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                  confirmAction.kind === 'delete' || confirmAction.kind === 'options-removed'
-                    ? 'bg-red-500/10 text-red-500'
-                    : confirmAction.kind === 'deactivate'
-                      ? 'bg-orange-500/10 text-orange-500'
-                      : 'bg-primary/10 text-primary'
-                }`}>
-                  {confirmAction.kind === 'delete' && <Trash2 size={20} />}
-                  {confirmAction.kind === 'options-removed' && <AlertTriangle size={20} />}
-                  {confirmAction.kind === 'deactivate' && <Ban size={20} />}
-                  {confirmAction.kind === 'reactivate' && <RotateCcw size={20} />}
-                  {confirmAction.kind === 'rename' && <Pencil size={20} />}
-                </div>
-                <h2 className="text-xl font-heading font-bold text-foreground">
-                  {confirmAction.kind === 'rename' && 'Confirmar renomeação'}
-                  {confirmAction.kind === 'deactivate' && 'Desativar campo'}
-                  {confirmAction.kind === 'reactivate' && 'Reativar campo'}
-                  {confirmAction.kind === 'delete' && 'Excluir campo'}
-                  {confirmAction.kind === 'options-removed' && 'Opção em uso'}
-                </h2>
-              </div>
-
-              {actionError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 dark:text-red-400 text-sm">
-                  {actionError}
-                </div>
-              )}
-
-              {confirmAction.kind === 'rename' && (
-                <p className="text-sm text-foreground/90 mb-6">
-                  O campo vai passar a se chamar '{confirmAction.newName}'. Os dados já preenchidos não mudam.
-                </p>
-              )}
-
-              {confirmAction.kind === 'options-removed' && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm flex items-start gap-2.5">
-                  <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-                  <div className="space-y-1.5">
-                    {confirmAction.removedOptions.map(({ option, count }) => (
-                      <p key={option}>
-                        {count} {count === 1 ? 'registro está usando' : 'registros estão usando'} a opção '{option}'.
-                        Se você remover, o campo {count === 1 ? 'desse registro fica' : 'desses registros fica'} vazio.
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {confirmAction.kind === 'deactivate' && (
-                <p className="text-sm text-foreground/90 mb-6">
-                  O campo '{confirmAction.field.displayName}' vai parar de aparecer em novos cadastros. Os dados que já
-                  existem continuam guardados e voltam a aparecer se você reativar este campo depois.
-                </p>
-              )}
-
-              {confirmAction.kind === 'reactivate' && (
-                <p className="text-sm text-foreground/90 mb-6">
-                  O campo '{confirmAction.field.displayName}' volta a aparecer nos formulários, com os dados que já
-                  estavam preenchidos.
-                </p>
-              )}
-
-              {confirmAction.kind === 'delete' && confirmAction.filledCount > 0 && (
-                <>
-                  <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-4 text-red-600 dark:text-red-400 text-sm flex items-start gap-2.5">
-                    <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-                    <span>
-                      Este campo tem dados preenchidos em {confirmAction.filledCount} registros. Excluir apaga esses
-                      dados PARA SEMPRE, sem volta.
+                    <Icon size={17} strokeWidth={1.8} className="mt-0.5 shrink-0 text-foreground" aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block text-[14px] font-medium text-foreground leading-tight">{label}</span>
+                      {example && <span className="block mt-0.5 text-[12px] text-muted leading-snug">{example}</span>}
                     </span>
-                  </div>
-                  <label className="block text-xs font-bold text-foreground/80 mb-1.5 uppercase tracking-wider">
-                    Digite <span className="font-mono normal-case">{confirmAction.field.displayName}</span> para confirmar
                   </label>
-                  <input
-                    type="text"
-                    autoFocus
-                    value={deleteConfirmText}
-                    onChange={(e) => setDeleteConfirmText(e.target.value)}
-                    className="w-full bg-background border border-red-500/40 rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-red-500/40 transition-all shadow-sm mb-6"
-                    placeholder={confirmAction.field.displayName}
-                  />
-                </>
-              )}
-
-              {confirmAction.kind === 'delete' && confirmAction.filledCount === 0 && (
-                <p className="text-sm text-foreground/90 mb-6">
-                  Tem certeza que deseja excluir o campo '{confirmAction.field.displayName}'? Esta ação não pode ser desfeita.
-                </p>
-              )}
-
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setConfirmAction(null)}
-                  disabled={isConfirmBusy}
-                  className="flex-1 py-3 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  type="button"
-                  onClick={handleConfirm}
-                  disabled={isConfirmBusy || (confirmAction.kind === 'delete' && !isDeleteConfirmValid)}
-                  className={`flex-1 py-3 rounded-xl font-bold transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2 ${
-                    confirmAction.kind === 'delete' || confirmAction.kind === 'options-removed'
-                      ? 'text-white bg-red-500 hover:bg-red-600 shadow-red-500/20'
-                      : 'text-primary-foreground bg-primary hover:bg-primary/90 shadow-primary/20'
-                  }`}
-                >
-                  {isConfirmBusy && <Loader2 size={16} className="animate-spin" />}
-                  {confirmAction.kind === 'rename' && (isConfirmBusy ? 'Salvando...' : 'Confirmar')}
-                  {confirmAction.kind === 'deactivate' && (isConfirmBusy ? 'Desativando...' : 'Confirmar Desativação')}
-                  {confirmAction.kind === 'reactivate' && (isConfirmBusy ? 'Reativando...' : 'Confirmar Reativação')}
-                  {confirmAction.kind === 'delete' && (isConfirmBusy ? 'Excluindo...' : 'Excluir Definitivamente')}
-                  {confirmAction.kind === 'options-removed' && (isConfirmBusy ? 'Salvando...' : 'Remover Mesmo Assim')}
-                </motion.button>
-              </div>
-            </motion.div>
+                );
+              })}
+            </div>
           </div>
-        </AnimatePresence>,
-        document.body
-      )}
+
+          <Field label="Nome do campo" htmlFor="cf-name" required error={createNameTooLong ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined}>
+            <Input
+              id="cf-name" value={createForm.displayName} maxLength={NAME_MAX_LENGTH} invalid={createNameTooLong}
+              onChange={(e) => setCreateForm((prev) => ({ ...prev, displayName: e.target.value }))}
+              placeholder="Ex.: Data de aniversário"
+            />
+          </Field>
+
+          {hasOptions(createForm.type) && (
+            <Field label="Opções" htmlFor="cf-options" required hint="Separe as opções por vírgula.">
+              <Input
+                id="cf-options" value={createForm.optionsText}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, optionsText: e.target.value }))}
+                placeholder="Ex.: Ouro, Prata, Bronze"
+              />
+            </Field>
+          )}
+
+          {createForm.type && (
+            <DefaultValueField
+              type={createForm.type}
+              options={hasOptions(createForm.type) ? parseOptions(createForm.optionsText) : undefined}
+              value={createForm.defaultValue}
+              onChange={(v) => setCreateForm((prev) => ({ ...prev, defaultValue: v }))}
+              hint="Já vem preenchido ao criar um novo registro; quem estiver cadastrando pode mudar."
+            />
+          )}
+
+          <Switch
+            checked={createForm.required}
+            onChange={(required) => setCreateForm((prev) => ({ ...prev, required }))}
+            label="Obrigatório"
+            description="O cadastro só salva com este campo preenchido."
+          />
+        </form>
+      </Modal>
+
+      {/* Editar campo */}
+      <Modal
+        open={!!editingField && !!editForm}
+        onClose={closeEditModal}
+        title="Editar campo"
+        description={editingField ? `${TYPE_PICKER[editingField.type].label}. O tipo não muda depois de criado.` : undefined}
+        size="lg"
+        dismissable={!isSavingEdit && !isCheckingOptionUsage}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeEditModal} disabled={isSavingEdit || isCheckingOptionUsage}>Cancelar</Button>
+            <Button type="submit" form="edit-field-form" loading={isSavingEdit || isCheckingOptionUsage} disabled={!isEditFormValid}>
+              Salvar alterações
+            </Button>
+          </>
+        }
+      >
+        {editingField && editForm && (
+          <>
+            {actionError && <Notice tone="danger" className="mb-4">{actionError}</Notice>}
+            <form id="edit-field-form" onSubmit={handleEditSubmit} className="space-y-5" noValidate>
+              <Field label="Nome do campo" htmlFor="cf-edit-name" required error={editNameTooLong ? `Nome deve ter no máximo ${NAME_MAX_LENGTH} caracteres` : undefined}>
+                <Input
+                  id="cf-edit-name" value={editForm.displayName} maxLength={NAME_MAX_LENGTH} invalid={editNameTooLong} data-autofocus
+                  onChange={(e) => setEditForm((prev) => prev && { ...prev, displayName: e.target.value })}
+                />
+              </Field>
+              <Field label="Descrição" htmlFor="cf-edit-description" hint="Texto de ajuda que aparece junto ao campo.">
+                <Textarea
+                  id="cf-edit-description" rows={2} value={editForm.description}
+                  onChange={(e) => setEditForm((prev) => prev && { ...prev, description: e.target.value })}
+                />
+              </Field>
+              {hasOptions(editingField.type) && (
+                <Field label="Opções" htmlFor="cf-edit-options" required hint="Separe as opções por vírgula.">
+                  <Input
+                    id="cf-edit-options" value={editForm.optionsText}
+                    onChange={(e) => setEditForm((prev) => prev && { ...prev, optionsText: e.target.value })}
+                  />
+                </Field>
+              )}
+              <DefaultValueField
+                type={editingField.type}
+                options={hasOptions(editingField.type) ? parseOptions(editForm.optionsText) : undefined}
+                value={editForm.defaultValue}
+                onChange={(v) => setEditForm((prev) => prev && { ...prev, defaultValue: v })}
+                hint="Vale para registros criados daqui em diante; os que já existem não mudam."
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+                <Field label="Ordem de exibição" htmlFor="cf-edit-order" hint="Menor aparece primeiro.">
+                  <Input
+                    id="cf-edit-order" type="number" inputMode="numeric" value={editForm.displayOrder}
+                    onChange={(e) => setEditForm((prev) => prev && { ...prev, displayOrder: Number(e.target.value) })}
+                  />
+                </Field>
+                <div className="sm:pt-6">
+                  <Switch
+                    checked={editForm.required}
+                    onChange={(required) => setEditForm((prev) => prev && { ...prev, required })}
+                    label="Obrigatório"
+                  />
+                </div>
+              </div>
+            </form>
+          </>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!confirmAction}
+        onClose={() => !isConfirmBusy && setConfirmAction(null)}
+        onConfirm={handleConfirm}
+        title={confirmCopy?.title ?? ''}
+        confirmLabel={confirmCopy?.confirmLabel ?? 'Confirmar'}
+        tone={confirmCopy?.tone}
+        confirmText={confirmCopy && 'confirmText' in confirmCopy ? confirmCopy.confirmText : undefined}
+        busy={isConfirmBusy}
+      >
+        {confirmCopy?.body}
+      </ConfirmDialog>
     </div>
   );
 };
