@@ -8,11 +8,11 @@ interface PasswordStrengthMeterProps {
 
 // Nota do zxcvbn (0-4) → rótulo + cor. Só "Forte" (>= MIN_PASSWORD_SCORE) libera o envio.
 const LEVELS = [
-  { label: 'Muito fraca', bar: 'bg-red-500', text: 'text-red-600 dark:text-red-400' },
-  { label: 'Fraca', bar: 'bg-red-500', text: 'text-red-600 dark:text-red-400' },
-  { label: 'Média', bar: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400' },
-  { label: 'Forte', bar: 'bg-green-500', text: 'text-green-600 dark:text-green-400' },
-  { label: 'Muito forte', bar: 'bg-green-500', text: 'text-green-600 dark:text-green-400' },
+  { label: 'Muito fraca', bar: 'bg-danger', text: 'text-danger' },
+  { label: 'Fraca', bar: 'bg-danger', text: 'text-danger' },
+  { label: 'Média', bar: 'bg-warning', text: 'text-warning' },
+  { label: 'Forte', bar: 'bg-success', text: 'text-success' },
+  { label: 'Muito forte', bar: 'bg-success', text: 'text-success' },
 ] as const;
 
 const PasswordStrengthMeter: React.FC<PasswordStrengthMeterProps> = ({ strength, isChecking }) => {

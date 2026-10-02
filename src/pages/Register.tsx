@@ -1,23 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import Mascot from '../components/Mascot';
-import FlowBackground from '../components/FlowBackground';
-import FormField from '../components/FormField';
+import { Field, SegmentedControl } from '../components/ui';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
 import { usePasswordStrength } from '../hooks/usePasswordStrength';
 import { buildPasswordUserInputs, isWeakPasswordError } from '../lib/passwordStrength';
 import { register, type RegisterPayload } from '../lib/auth';
 import { fetchAddressByCep, fetchCnpjData } from '../lib/brazilLookups';
 import SteeraLogo from '../components/brand/SteeraLogo';
+import { BRAND_NAME } from '../lib/brand';
 import {
   BRAZILIAN_STATES,
   formatCepInput,
   formatCnpjInput,
   formatCpfInput,
   formatPhoneInput,
-  inputBorderClass,
   isValidCnpj,
   isValidCpf,
   isValidEmail,
@@ -25,6 +23,17 @@ import {
   NAME_MAX_LENGTH,
   stripCnpj,
 } from '../lib/validation';
+
+// Cadastro no modelo do login (02/10/2026): mesma base (fundo pontilhado, logo Steera, sempre claro) e
+// um cartão largo em dois lados — o Stee, o título e as etapas à esquerda; os campos da etapa em duas
+// colunas à direita — para as três etapas caberem sem rolar a partir de 1366×768.
+
+const inputClass = (invalid: boolean) =>
+  `w-full h-11 rounded-[8px] border bg-white px-3.5 text-[15px] text-[#111] placeholder:text-[#9a9a9a] outline-none transition-[border-color,box-shadow] duration-150 ${
+    invalid ? 'border-danger focus:shadow-[0_0_0_3px_rgba(192,38,45,0.12)]' : 'border-[#e1e1e1] focus:border-[#111] focus:shadow-[0_0_0_3px_rgba(17,17,17,0.08)]'
+  }`;
+
+const linkClass = 'rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#111]';
 
 type Step = 0 | 1 | 2;
 type PersonType = 'PJ' | 'PF';
@@ -103,7 +112,9 @@ const Register = () => {
   const [planName, setPlanName] = useState<string>('');
 
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [isCovering, setIsCovering] = useState(false);
+  const [focusedPassword, setFocusedPassword] = useState(false);
+  // Balão "Achei! Já preenchi pra você." depois de um autopreenchimento por CNPJ/CEP.
+  const [justFilled, setJustFilled] = useState(false);
 
   const [step, setStep] = useState<Step>(0);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -165,6 +176,7 @@ const Register = () => {
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     autofilledKeys.current.delete(key);
+    setJustFilled(false);
     setForm((f) => ({ ...f, [key]: value }));
     clearFieldErrors([key]);
   };
@@ -174,6 +186,7 @@ const Register = () => {
   // o mousedown e o click, e o primeiro "Próximo" se perdia.
   const changeStep = (next: Step) => {
     setLookupNotice(null);
+    setJustFilled(false);
     setError(null);
     setStep(next);
   };
@@ -195,6 +208,7 @@ const Register = () => {
       return value !== '' && !current[k].trim();
     });
     if (keys.length === 0) return;
+    if (keys.some((k) => patch[k])) setJustFilled(true);
     for (const k of keys) {
       if (patch[k]) autofilledKeys.current.add(k);
       else autofilledKeys.current.delete(k);
@@ -313,333 +327,242 @@ const Register = () => {
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    setMousePos({ x: e.clientX, y: e.clientY });
-  };
-
   const isPJ = form.personType === 'PJ';
+
+  const isCoveringEyes = focusedPassword && !isSubmitting;
+  const bubble = isSubmitting ? 'Preparando tudo…'
+    : error ? 'Opa, algo não bateu. Dá uma olhada?'
+    : isCoveringEyes ? 'Pode digitar, não estou olhando!'
+    : justFilled ? 'Achei! Já preenchi pra você.'
+    : step === 0 ? 'Vamos começar pela sua empresa.'
+    : step === 1 ? 'Onde fica a empresa?'
+    : 'Agora é o seu acesso.';
+
+  const field = (key: keyof FormState) => ({
+    id: `reg-${key}`,
+    'aria-invalid': errors[key] ? true : undefined,
+    className: inputClass(!!errors[key]),
+    onFocus: () => setFocusedPassword(false),
+  });
 
   return (
     <div
-      className="relative min-h-screen bg-background overflow-hidden flex items-center justify-center transition-colors duration-300 py-12"
-      onMouseMove={handleMouseMove}
+      className="theme-light min-h-screen flex flex-col overflow-x-hidden bg-[#f4f4f3] bg-[radial-gradient(#dcdcda_1px,transparent_1px)] bg-[length:22px_22px] px-4 py-6 sm:px-10 font-sans text-[#111]"
+      onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
     >
-      <FlowBackground />
-
-      <div className="relative z-10 w-full max-w-lg px-6 pointer-events-auto">
-        <Link to="/" className="inline-flex items-center text-foreground/60 hover:text-foreground mb-8 transition-colors">
-          <ArrowLeft size={16} className="mr-2" />
-          Voltar para Home
+      <header className="flex items-center justify-between gap-4">
+        <Link to="/" aria-label={`${BRAND_NAME} — página inicial`} className={linkClass}>
+          <SteeraLogo size="text-[26px]" className="text-[#111]" />
         </Link>
+        <Link to="/" className={`${linkClass} inline-flex items-center gap-1.5 text-[13px] font-medium text-[#666] hover:text-[#111]`}>
+          <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
+          Voltar para o site
+        </Link>
+      </header>
 
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, type: "spring", bounce: 0.4 }}
-          className="glass-panel p-10 rounded-3xl"
-        >
-          <Mascot mousePosition={mousePos} isCoveringEyes={isCovering} />
-
-          <div className="text-center mb-6 mt-8">
-            <h1 className="mb-2 flex justify-center"><SteeraLogo size="text-[34px]" /><span className="sr-only">Steera</span></h1>
-            <p className="text-foreground/60">Crie sua conta para começar.</p>
-
+      <main className="flex flex-1 items-center justify-center py-5">
+        <div className="w-full max-w-[920px] overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:min-h-[540px] md:grid-cols-[300px_1fr]">
+          {/* Lado do Stee: título, plano, etapas e o mascote com o balão. */}
+          <aside className="relative flex flex-col border-b border-[#EFE4D2] bg-[#FDF8F0] bg-[radial-gradient(ellipse_70%_14%_at_50%_100%,rgba(62,39,34,0.07),transparent_70%)] px-6 pt-6 md:border-b-0 md:border-r">
+            <h1 className="font-brand text-[24px] font-semibold leading-tight tracking-[-0.03em] text-[#3E2722]">Criar conta grátis</h1>
+            <p className="mt-1 text-[13px] text-[#6b5a55]">Leva uns 2 minutos.</p>
             {planName && (
-              <div className="mt-4 bg-primary/10 border border-primary/20 text-primary text-sm font-medium py-2 px-4 rounded-lg inline-block">
-                Plano selecionado: {planName}
-              </div>
+              <p className="mt-3 w-fit rounded-full bg-white px-3 py-1 text-[12px] font-medium text-[#3E2722] shadow-[0_1px_3px_rgba(62,39,34,0.12)]">
+                Plano escolhido: {planName}
+              </p>
             )}
-          </div>
 
-          <div className="flex items-center justify-center gap-2 mb-6">
-            {STEP_TITLES.map((title, i) => (
-              <React.Fragment key={title}>
-                {i > 0 && <div className="h-px w-8 bg-border" />}
-                <div className="flex flex-col items-center gap-1">
-                  <div
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
-                      i <= step ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted'
-                    }`}
-                  >
-                    {i < step ? <Check size={14} /> : i + 1}
-                  </div>
-                  <span className={`text-[11px] ${i === step ? 'text-foreground font-medium' : 'text-muted'}`}>{title}</span>
-                </div>
-              </React.Fragment>
-            ))}
-          </div>
-          <p className="text-center text-xs text-muted mb-6">Etapa {step + 1} de 3</p>
+            <ol className="mt-5 flex gap-4 md:flex-col md:gap-2.5" aria-label="Etapas do cadastro">
+              {STEP_TITLES.map((title, i) => {
+                const done = i < step;
+                const current = i === step;
+                return (
+                  <li key={title} aria-current={current ? 'step' : undefined} className="flex items-center gap-2.5">
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold transition-colors ${
+                        current ? 'bg-[#111] text-white' : done ? 'bg-brand text-white' : 'border border-[#e2d6c3] bg-white text-[#8a7a72]'
+                      }`}
+                    >
+                      {done ? <Check size={14} strokeWidth={2.5} aria-hidden="true" /> : i + 1}
+                    </span>
+                    <span className={`text-[13px] ${current ? 'font-semibold text-[#111]' : 'text-[#6b5a55]'} ${current ? '' : 'hidden md:inline'}`}>
+                      {title}
+                      {done && <span className="sr-only"> (concluída)</span>}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
 
-          {error && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">
-              {error}
+            <div className="relative mt-auto flex justify-center pt-6 md:pt-3">
+              <div className="[&>div]:mb-0 [&>div]:h-[150px] [&>div]:w-[170px] md:[&>div]:h-[200px] md:[&>div]:w-[230px]">
+                <Mascot mousePosition={mousePos} isCoveringEyes={isCoveringEyes} />
+              </div>
+              <p
+                aria-hidden="true"
+                className="absolute right-0 top-0 max-w-[140px] rounded-[14px] rounded-bl-[4px] bg-white px-3 py-[9px] font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] md:-right-1"
+              >
+                {bubble}
+              </p>
             </div>
-          )}
+          </aside>
 
-          <form className="space-y-4" onSubmit={handleRegister}>
+          {/* Lado do formulário: a etapa atual em duas colunas. */}
+          <form onSubmit={handleRegister} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-[18px] font-semibold tracking-tight">{STEP_TITLES[step]}</h2>
+              <span className="text-[12px] text-[#666]">Etapa {step + 1} de 3</span>
+            </div>
+
+            {error && (
+              <div role="alert" className="rounded-[8px] bg-[#FBEDE8] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#8A3220]">{error}</div>
+            )}
+
             {step === 0 && (
-              <>
-                <div className="flex gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => handlePersonTypeChange('PJ')}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                      isPJ ? 'bg-primary text-primary-foreground' : 'bg-secondary/50 text-foreground/70'
-                    }`}
-                  >
-                    Pessoa Jurídica
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePersonTypeChange('PF')}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                      !isPJ ? 'bg-primary text-primary-foreground' : 'bg-secondary/50 text-foreground/70'
-                    }`}
-                  >
-                    Pessoa Física
-                  </button>
-                </div>
-
-                <FormField label={isPJ ? 'CNPJ' : 'CPF'} required error={errors.document}>
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2">
+                <SegmentedControl<PersonType>
+                  label="Tipo de cadastro"
+                  value={form.personType}
+                  onChange={handlePersonTypeChange}
+                  options={[{ value: 'PJ', label: 'Pessoa jurídica' }, { value: 'PF', label: 'Pessoa física' }]}
+                  className="sm:col-span-2 w-fit"
+                />
+                <Field label={isPJ ? 'CNPJ' : 'CPF'} htmlFor="reg-document" required error={errors.document}>
                   <div className="relative">
                     <input
-                      type="text"
+                      {...field('document')}
+                      inputMode={isPJ ? 'text' : 'numeric'}
                       value={form.document}
                       onChange={(e) => set('document', isPJ ? formatCnpjInput(e.target.value) : formatCpfInput(e.target.value))}
                       onBlur={handleDocumentBlur}
-                      className={`w-full bg-background border ${inputBorderClass(!!errors.document)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
                       placeholder={isPJ ? '00.000.000/0000-00' : '000.000.000-00'}
-                      onFocus={() => setIsCovering(false)}
                     />
                     {isLookingUp && isPJ && (
-                      <Loader2 size={16} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
+                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#777]" aria-label="Buscando dados do CNPJ" />
                     )}
                   </div>
-                </FormField>
-
-                <FormField label={isPJ ? 'Razão Social' : 'Nome Completo'} required error={errors.legalName}>
-                  <input
-                    type="text"
-                    maxLength={NAME_MAX_LENGTH}
-                    value={form.legalName}
-                    onChange={(e) => set('legalName', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.legalName)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder={isPJ ? 'Razão social da empresa' : 'Seu nome completo'}
-                    onFocus={() => setIsCovering(false)}
-                  />
-                </FormField>
-
-                <FormField label={`Nome Fantasia${!isPJ ? ' (opcional)' : ''}`} required={isPJ} error={errors.tradeName}>
-                  <input
-                    type="text"
-                    maxLength={NAME_MAX_LENGTH}
-                    value={form.tradeName}
-                    onChange={(e) => set('tradeName', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.tradeName)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder="Nome fantasia"
-                    onFocus={() => setIsCovering(false)}
-                  />
-                </FormField>
-
-                <FormField label="Telefone" required error={errors.phone}>
-                  <input
-                    type="text"
-                    value={form.phone}
-                    onChange={(e) => set('phone', formatPhoneInput(e.target.value))}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.phone)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder="(00) 00000-0000"
-                    onFocus={() => setIsCovering(false)}
-                  />
-                </FormField>
-              </>
+                </Field>
+                <Field label="Telefone" htmlFor="reg-phone" required error={errors.phone}>
+                  <input {...field('phone')} type="tel" value={form.phone} onChange={(e) => set('phone', formatPhoneInput(e.target.value))} placeholder="(00) 00000-0000" />
+                </Field>
+                <Field label={isPJ ? 'Razão social' : 'Nome completo'} htmlFor="reg-legalName" required error={errors.legalName} className="sm:col-span-2">
+                  <input {...field('legalName')} maxLength={NAME_MAX_LENGTH} value={form.legalName} onChange={(e) => set('legalName', e.target.value)} placeholder={isPJ ? 'Razão social da empresa' : 'Seu nome completo'} />
+                </Field>
+                <Field label={isPJ ? 'Nome fantasia' : 'Nome fantasia (opcional)'} htmlFor="reg-tradeName" required={isPJ} error={errors.tradeName} className="sm:col-span-2">
+                  <input {...field('tradeName')} maxLength={NAME_MAX_LENGTH} value={form.tradeName} onChange={(e) => set('tradeName', e.target.value)} placeholder="Como a empresa é conhecida" />
+                </Field>
+              </div>
             )}
 
             {step === 1 && (
-              <>
-                <FormField label="CEP" required error={errors.zipCode}>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3.5 sm:grid-cols-[1fr_1fr_120px]">
+                <Field label="CEP" htmlFor="reg-zipCode" required error={errors.zipCode}>
                   <div className="relative">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={form.zipCode}
-                      onChange={(e) => set('zipCode', formatCepInput(e.target.value))}
-                      onBlur={handleCepBlur}
-                      className={`w-full bg-background border ${inputBorderClass(!!errors.zipCode)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                      placeholder="00000-000"
-                      onFocus={() => setIsCovering(false)}
-                    />
+                    <input {...field('zipCode')} inputMode="numeric" value={form.zipCode} onChange={(e) => set('zipCode', formatCepInput(e.target.value))} onBlur={handleCepBlur} placeholder="00000-000" />
                     {isLookingUp && (
-                      <Loader2 size={16} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
+                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#777]" aria-label="Buscando endereço" />
                     )}
                   </div>
-                </FormField>
-
-                <FormField label="Logradouro" required error={errors.street}>
-                  <input
-                    type="text"
-                    maxLength={NAME_MAX_LENGTH}
-                    value={form.street}
-                    onChange={(e) => set('street', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.street)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder="Rua, avenida..."
-                    onFocus={() => setIsCovering(false)}
-                  />
-                </FormField>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField label="Número" required error={errors.number}>
-                    <input
-                      type="text"
-                      maxLength={20}
-                      value={form.number}
-                      onChange={(e) => set('number', e.target.value)}
-                      className={`w-full bg-background border ${inputBorderClass(!!errors.number)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                      placeholder="123"
-                      onFocus={() => setIsCovering(false)}
-                    />
-                  </FormField>
-                  <FormField label="Complemento" error={errors.complement}>
-                    <input
-                      type="text"
-                      maxLength={NAME_MAX_LENGTH}
-                      value={form.complement}
-                      onChange={(e) => set('complement', e.target.value)}
-                      className={`w-full bg-background border ${inputBorderClass(!!errors.complement)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                      placeholder="Sala, bloco..."
-                      onFocus={() => setIsCovering(false)}
-                    />
-                  </FormField>
-                </div>
-
-                <FormField label="Bairro" required error={errors.district}>
-                  <input
-                    type="text"
-                    maxLength={NAME_MAX_LENGTH}
-                    value={form.district}
-                    onChange={(e) => set('district', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.district)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder="Bairro"
-                    onFocus={() => setIsCovering(false)}
-                  />
-                </FormField>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField label="Cidade" required error={errors.city}>
-                    <input
-                      type="text"
-                      maxLength={NAME_MAX_LENGTH}
-                      value={form.city}
-                      onChange={(e) => set('city', e.target.value)}
-                      className={`w-full bg-background border ${inputBorderClass(!!errors.city)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                      placeholder="Cidade"
-                      onFocus={() => setIsCovering(false)}
-                    />
-                  </FormField>
-                  <FormField label="UF" required error={errors.state}>
-                    <select
-                      value={form.state}
-                      onChange={(e) => set('state', e.target.value)}
-                      onFocus={() => setIsCovering(false)}
-                      className={`w-full bg-background border ${inputBorderClass(!!errors.state)} rounded-xl px-4 py-3 text-foreground focus:outline-none focus:ring-2 transition-all`}
-                    >
-                      <option value="">Selecione</option>
-                      {BRAZILIAN_STATES.map((uf) => (
-                        <option key={uf} value={uf}>{uf}</option>
-                      ))}
-                    </select>
-                  </FormField>
-                </div>
-              </>
+                </Field>
+                <Field label="Número" htmlFor="reg-number" required error={errors.number}>
+                  <input {...field('number')} maxLength={20} value={form.number} onChange={(e) => set('number', e.target.value)} placeholder="123" />
+                </Field>
+                <Field label="UF" htmlFor="reg-state" required error={errors.state} className="col-span-2 sm:col-span-1">
+                  <select {...field('state')} value={form.state} onChange={(e) => set('state', e.target.value)}>
+                    <option value="">Selecione</option>
+                    {BRAZILIAN_STATES.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                  </select>
+                </Field>
+                <Field label="Logradouro" htmlFor="reg-street" required error={errors.street} className="col-span-2 sm:col-span-3">
+                  <input {...field('street')} maxLength={NAME_MAX_LENGTH} value={form.street} onChange={(e) => set('street', e.target.value)} placeholder="Rua, avenida…" />
+                </Field>
+                <Field label="Bairro" htmlFor="reg-district" required error={errors.district} className="col-span-2 sm:col-span-1">
+                  <input {...field('district')} maxLength={NAME_MAX_LENGTH} value={form.district} onChange={(e) => set('district', e.target.value)} placeholder="Bairro" />
+                </Field>
+                <Field label="Cidade" htmlFor="reg-city" required error={errors.city} className="col-span-2 sm:col-span-1">
+                  <input {...field('city')} maxLength={NAME_MAX_LENGTH} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Cidade" />
+                </Field>
+                <Field label="Complemento" htmlFor="reg-complement" error={errors.complement} className="col-span-2 sm:col-span-1">
+                  <input {...field('complement')} maxLength={NAME_MAX_LENGTH} value={form.complement} onChange={(e) => set('complement', e.target.value)} placeholder="Sala, bloco…" />
+                </Field>
+              </div>
             )}
 
             {step === 2 && (
-              <>
-                <FormField label="Seu Nome" required error={errors.name}>
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2">
+                <Field label="Seu nome" htmlFor="reg-name" required error={errors.name}>
+                  <input {...field('name')} maxLength={NAME_MAX_LENGTH} autoComplete="name" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Como devemos te chamar" />
+                </Field>
+                <Field label="E-mail" htmlFor="reg-email" required error={errors.email}>
+                  <input {...field('email')} type="email" autoComplete="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="voce@empresa.com.br" />
+                </Field>
+                <Field label="Senha" htmlFor="reg-password" required error={errors.password}>
                   <input
-                    type="text"
-                    maxLength={NAME_MAX_LENGTH}
-                    value={form.name}
-                    onChange={(e) => set('name', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.name)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder="Como devemos te chamar"
-                    onFocus={() => setIsCovering(false)}
-                  />
-                </FormField>
-
-                <FormField label="E-mail" required error={errors.email}>
-                  <input
-                    type="email"
-                    value={form.email}
-                    onChange={(e) => set('email', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.email)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
-                    placeholder="nome@empresa.com"
-                    onFocus={() => setIsCovering(false)}
-                  />
-                </FormField>
-
-                <FormField label="Senha" required error={errors.password}>
-                  <input
+                    {...field('password')}
                     type="password"
-                    minLength={8}
+                    autoComplete="new-password"
                     value={form.password}
                     onChange={(e) => set('password', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.password)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    onFocus={() => setFocusedPassword(true)}
+                    onBlur={() => setFocusedPassword(false)}
                     placeholder="Crie uma senha forte"
-                    autoComplete="new-password"
-                    onFocus={() => setIsCovering(true)}
-                    onBlurCapture={() => setIsCovering(false)}
                   />
-                  <PasswordStrengthMeter strength={passwordStrength.strength} isChecking={passwordStrength.isChecking} />
-                </FormField>
-
-                <FormField label="Confirmar senha" required error={errors.confirmPassword}>
+                </Field>
+                <Field label="Confirmar senha" htmlFor="reg-confirmPassword" required error={errors.confirmPassword}>
                   <input
+                    {...field('confirmPassword')}
                     type="password"
+                    autoComplete="new-password"
                     value={form.confirmPassword}
                     onChange={(e) => set('confirmPassword', e.target.value)}
-                    className={`w-full bg-background border ${inputBorderClass(!!errors.confirmPassword)} rounded-xl px-4 py-3 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 transition-all`}
+                    onFocus={() => setFocusedPassword(true)}
+                    onBlur={() => setFocusedPassword(false)}
                     placeholder="Repita a senha"
-                    autoComplete="new-password"
-                    onFocus={() => setIsCovering(true)}
-                    onBlurCapture={() => setIsCovering(false)}
                   />
-                </FormField>
-              </>
-            )}
-
-            <div className="flex items-center gap-3 mt-6">
-              {step > 0 && (
-                <button
-                  type="button"
-                  onClick={() => { setErrors({}); changeStep((step - 1) as Step); }}
-                  className="flex-1 bg-secondary/50 hover:bg-secondary text-foreground font-medium py-3 rounded-xl transition-colors"
-                >
-                  Voltar
-                </button>
-              )}
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-medium py-3 rounded-xl transition-colors shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {step < 2 ? 'Próximo' : isSubmitting ? 'Criando conta...' : 'Criar Conta'}
-              </button>
-            </div>
-
-            {/* Aviso de busca (CNPJ/CEP) fica ABAIXO dos botões: aparecer/sumir aqui nunca desloca
-                "Próximo"/"Voltar" no meio de um clique. */}
-            {lookupNotice && (
-              <div role="status" className="rounded-xl border border-border bg-secondary/30 text-sm text-foreground/70 p-3">
-                {lookupNotice}
+                </Field>
+                <div className="sm:col-span-2 -mt-1">
+                  <PasswordStrengthMeter strength={passwordStrength.strength} isChecking={passwordStrength.isChecking} />
+                </div>
               </div>
             )}
-          </form>
 
-          <div className="mt-6 text-center text-sm text-foreground/60">
-            Já tem uma conta? <Link to="/login" className="text-primary hover:underline">Faça login</Link>
-          </div>
-        </motion.div>
-      </div>
+            <div className="mt-auto flex flex-col gap-4 pt-1">
+              <div className="flex items-center gap-3">
+                {step > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { setErrors({}); changeStep((step - 1) as Step); }}
+                    className="h-12 rounded-[8px] border border-[#e1e1e1] bg-white px-5 text-[15px] font-medium text-[#111] outline-none transition-colors hover:bg-[#f4f4f4] focus-visible:ring-2 focus-visible:ring-[#111]"
+                  >
+                    Voltar
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  aria-busy={isSubmitting || undefined}
+                  className="h-12 flex-1 rounded-[8px] bg-[#111] text-[15px] font-semibold text-white outline-none transition-colors hover:bg-[#2a2a2a] active:bg-black focus-visible:ring-2 focus-visible:ring-[#111] focus-visible:ring-offset-2 disabled:opacity-70"
+                >
+                  {step < 2 ? 'Próximo' : isSubmitting ? 'Criando conta…' : 'Criar conta'}
+                </button>
+              </div>
+
+              {/* Aviso de busca (CNPJ/CEP) fica ABAIXO dos botões: aparecer/sumir aqui nunca desloca
+                  "Próximo"/"Voltar" no meio de um clique. */}
+              {lookupNotice && (
+                <p role="status" className="rounded-[8px] bg-[#F4F4F3] px-3.5 py-2.5 text-[13px] text-[#444]">{lookupNotice}</p>
+              )}
+
+              <p className="text-center text-[14px] text-[#666]">
+                Já tem conta?{' '}
+                <Link to="/login" className={`${linkClass} font-semibold text-[#111] hover:text-brand`}>Entrar</Link>
+              </p>
+            </div>
+          </form>
+        </div>
+      </main>
+
+      <footer className="text-[12px] text-[#666]">© 2026 {BRAND_NAME}</footer>
     </div>
   );
 };
