@@ -110,24 +110,27 @@ const Login = () => {
       </header>
 
       <main className="flex flex-1 items-center justify-center py-8">
-        <div className="w-full max-w-[420px]">
-          <h1 className="sr-only">Entrar no {BRAND_NAME}</h1>
-          <form
-            onSubmit={handleLogin}
-            className="flex flex-col gap-[26px] overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white px-6 pb-8 sm:px-9 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)]"
-          >
-            {/* Faixa do Stee: ocupa a largura toda do cartão, por cima do padding. */}
-            <div className="relative -mx-6 sm:-mx-9 h-[220px] flex items-end justify-center border-b border-[#EFE4D2] bg-[#FDF8F0] bg-[radial-gradient(ellipse_60%_18%_at_50%_100%,rgba(62,39,34,0.07),transparent_70%)]">
-              {/* O componente do Stee tem tamanho fixo; aqui ele cresce para a área do modelo. */}
-              <div className="[&>div]:mb-0 [&>div]:h-[220px] [&>div]:w-[260px]">
-                <Mascot mousePosition={mousePos} isCoveringEyes={isCoveringEyes} />
-              </div>
-              <p
-                aria-hidden="true"
-                className="absolute top-[22px] left-[calc(50%+66px)] w-fit max-w-[calc(50%-80px)] rounded-[14px] rounded-bl-[4px] bg-white px-3 py-[9px] font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)]"
-              >
-                {bubble}
-              </p>
+        {/* Dois lados, como o cadastro (02/10/2026, pedido do usuário): o Stee na faixa creme à
+            esquerda, as credenciais à direita. No celular a faixa vai para cima. */}
+        <div className="w-full max-w-[400px] overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:max-w-[820px] md:min-h-[500px] md:grid-cols-[340px_1fr]">
+          <aside className="flex flex-col items-center border-b border-[#EFE4D2] bg-[#FDF8F0] bg-[radial-gradient(ellipse_70%_14%_at_50%_100%,rgba(62,39,34,0.07),transparent_70%)] px-6 pt-6 md:border-b-0 md:border-r md:pt-9">
+            {/* Balão acima do Stee, ponta para baixo, altura fixa (o Stee não sobe e desce com o texto). */}
+            <p
+              aria-hidden="true"
+              className="relative flex h-[56px] w-full max-w-[260px] items-center justify-center rounded-[14px] bg-white px-3.5 text-center font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-[8px] after:border-t-[8px] after:border-x-transparent after:border-t-white after:content-['']"
+            >
+              {bubble}
+            </p>
+            {/* O componente do Stee tem tamanho fixo; o contêiner o faz ocupar o espaço livre. */}
+            <div className="relative mt-3 w-full [&>div]:mb-0 [&>div]:h-[170px] [&>div]:w-[200px] md:-mx-6 md:w-[calc(100%+3rem)] md:flex-1 md:[&>div]:absolute md:[&>div]:inset-0 md:[&>div]:h-full md:[&>div]:w-full">
+              <Mascot mousePosition={mousePos} isCoveringEyes={isCoveringEyes} />
+            </div>
+          </aside>
+
+          <form onSubmit={handleLogin} className="flex flex-col justify-center gap-[22px] px-6 py-8 sm:px-10 md:py-10">
+            <div>
+              <h1 className="text-[24px] font-semibold tracking-tight">Bem-vindo de volta</h1>
+              <p className="mt-1 text-[14px] text-[#666]">Entre para acessar o painel da sua empresa.</p>
             </div>
 
             <div className="flex flex-col gap-[18px]">
