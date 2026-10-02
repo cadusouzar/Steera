@@ -113,7 +113,7 @@ const Login = () => {
         {/* Dois lados, como o cadastro (02/10/2026, pedido do usuário): o Stee na faixa creme à
             esquerda, as credenciais à direita. No celular a faixa vai para cima. */}
         <div className="w-full max-w-[400px] overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:max-w-[820px] md:min-h-[500px] md:grid-cols-[340px_1fr]">
-          <aside className="flex flex-col items-center border-b border-[#EFE4D2] bg-[#FDF8F0] bg-[radial-gradient(ellipse_70%_14%_at_50%_100%,rgba(62,39,34,0.07),transparent_70%)] px-6 pt-6 md:justify-center md:border-b-0 md:border-r md:pb-4 md:pt-4">
+          <aside className="flex flex-col items-center border-b border-[#EFE4D2] bg-[#FDF8F0] px-6 pt-6 md:justify-center md:border-b-0 md:border-r md:pb-4 md:pt-4">
             {/* Balão acima do Stee, ponta para baixo, altura fixa (o Stee não sobe e desce com o texto). */}
             <p
               aria-hidden="true"
