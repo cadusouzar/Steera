@@ -394,13 +394,15 @@ const Register = () => {
               })}
             </ol>
 
-            <div className="relative mt-auto flex justify-center pt-6 md:pt-3">
-              <div className="[&>div]:mb-0 [&>div]:h-[150px] [&>div]:w-[170px] md:[&>div]:h-[200px] md:[&>div]:w-[230px]">
+            {/* No computador o Stee ocupa todo o espaço livre abaixo das etapas (até a borda do cartão);
+                no celular fica num tamanho fixo. O componente tem tamanho próprio — o contêiner sobrescreve. */}
+            <div className="relative mt-auto flex justify-center pt-6 md:-mx-6 md:mt-4 md:min-h-[240px] md:flex-1 md:pt-0">
+              <div className="[&>div]:mb-0 [&>div]:h-[150px] [&>div]:w-[170px] md:absolute md:inset-x-0 md:bottom-0 md:top-6 md:[&>div]:h-full md:[&>div]:w-full">
                 <Mascot mousePosition={mousePos} isCoveringEyes={isCoveringEyes} />
               </div>
               <p
                 aria-hidden="true"
-                className="absolute right-0 top-0 max-w-[140px] rounded-[14px] rounded-bl-[4px] bg-white px-3 py-[9px] font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] md:-right-1"
+                className="absolute right-0 top-0 max-w-[140px] rounded-[14px] rounded-bl-[4px] bg-white px-3 py-[9px] font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] md:right-4 md:top-0 md:z-10"
               >
                 {bubble}
               </p>
