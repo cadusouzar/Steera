@@ -48,8 +48,8 @@ const Navbar = () => {
         <Link to="/" className="flex items-center shrink-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-foreground" aria-label={`${BRAND_NAME} — página inicial`}>
           {/* Abaixo de `sm` fica só o símbolo: com tema + conta + botão principal, 360px não comporta a
               palavra inteira sem rolagem horizontal. */}
-          <SteeraMark className="h-8 w-8 sm:hidden" />
-          <SteeraLogo className="hidden sm:inline-flex" size="text-[26px]" />
+          <SteeraMark className="h-10 w-10 sm:hidden" />
+          <SteeraLogo className="hidden sm:inline-flex" size="text-[32px]" />
         </Link>
 
         {/* Links de seção como rota "/#secao" (não "#secao"): funcionam também fora da landing

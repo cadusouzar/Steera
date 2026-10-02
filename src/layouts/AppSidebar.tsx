@@ -235,7 +235,7 @@ const AppSidebar = ({ sections, isActive, openGroups, onToggleGroup, layoutId, b
     <div className="flex h-full flex-col">
       <div className="h-14 flex items-center px-6 shrink-0">
         <Link to="/app" aria-label={`${brand} — visão geral`} className="rounded outline-none focus-visible:ring-2 focus-visible:ring-foreground">
-          <SteeraLogo variant="mono" centerClassName="fill-sidebar" size="text-[22px]" />
+          <SteeraLogo variant="mono" centerClassName="fill-sidebar" size="text-[28px]" />
         </Link>
       </div>
       <LayoutGroup id={layoutId}>

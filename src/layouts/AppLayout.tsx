@@ -272,7 +272,7 @@ const AppLayout = () => {
             >
               <Menu size={18} strokeWidth={1.6} />
             </button>
-            <span className="md:hidden" aria-label={BRAND}><SteeraLogo variant="mono" centerClassName="fill-background" size="text-[20px]" /></span>
+            <span className="md:hidden" aria-label={BRAND}><SteeraLogo variant="mono" centerClassName="fill-background" size="text-[24px]" /></span>
           </div>
 
           <div className="flex items-center gap-2">

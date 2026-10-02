@@ -382,7 +382,7 @@ const Register = () => {
     >
       <header className="flex items-center justify-between gap-4">
         <Link to="/" aria-label={`${BRAND_NAME} — página inicial`} className={linkClass}>
-          <SteeraLogo size="text-[26px]" className="text-[#111]" />
+          <SteeraLogo size="text-[34px]" className="text-[#111]" />
         </Link>
         <Link to="/" className={`${linkClass} inline-flex items-center gap-1.5 text-[13px] font-medium text-[#666] hover:text-[#111]`}>
           <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
