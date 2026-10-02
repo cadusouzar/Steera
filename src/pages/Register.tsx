@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Check, Loader2 } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import { Field, SegmentedControl } from '../components/ui';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
@@ -9,6 +9,9 @@ import { buildPasswordUserInputs, isWeakPasswordError } from '../lib/passwordStr
 import { register, type RegisterPayload } from '../lib/auth';
 import { fetchAddressByCep, fetchCnpjData } from '../lib/brazilLookups';
 import SteeraLogo from '../components/brand/SteeraLogo';
+import AuthBackLink from '../components/auth/AuthBackLink';
+import ThemeToggle from '../components/ThemeToggle';
+import { useTheme } from '../components/ThemeProvider';
 import { BRAND_NAME } from '../lib/brand';
 import {
   BRAZILIAN_STATES,
@@ -24,16 +27,16 @@ import {
   stripCnpj,
 } from '../lib/validation';
 
-// Cadastro no modelo do login (02/10/2026): mesma base (fundo pontilhado, logo Steera, sempre claro) e
+// Cadastro no modelo do login (02/10/2026): mesma base (fundo pontilhado, logo Steera, tema claro ou escuro) e
 // um cartão largo em dois lados — o Stee, o título e as etapas à esquerda; os campos da etapa em duas
 // colunas à direita — para as três etapas caberem sem rolar a partir de 1366×768.
 
 const inputClass = (invalid: boolean) =>
-  `w-full h-11 rounded-[8px] border bg-white px-3.5 text-[15px] text-[#111] placeholder:text-[#9a9a9a] outline-none transition-[border-color,box-shadow] duration-150 ${
-    invalid ? 'border-danger focus:shadow-[0_0_0_3px_rgba(192,38,45,0.12)]' : 'border-[#e1e1e1] focus:border-[#111] focus:shadow-[0_0_0_3px_rgba(17,17,17,0.08)]'
+  `w-full h-11 rounded-[8px] border bg-[var(--a-card)] px-3.5 text-[15px] text-[var(--a-ink)] placeholder:text-[var(--a-faint)] outline-none transition-[border-color,box-shadow] duration-150 ${
+    invalid ? 'border-danger focus:shadow-[0_0_0_3px_rgba(192,38,45,0.12)]' : 'border-[var(--a-input-border)] focus:border-[var(--a-ink)] focus:shadow-[0_0_0_3px_var(--a-ring)]'
   }`;
 
-const linkClass = 'rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#111]';
+const linkClass = 'rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--a-ink)]';
 
 type Step = 0 | 1 | 2;
 type PersonType = 'PJ' | 'PF';
@@ -107,6 +110,7 @@ function validateStep(step: Step, f: FormState, password = { isStrong: false, is
 }
 
 const Register = () => {
+  const { theme, toggleTheme } = useTheme();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [planName, setPlanName] = useState<string>('');
@@ -377,27 +381,26 @@ const Register = () => {
 
   return (
     <div
-      className="theme-light min-h-screen flex flex-col overflow-x-hidden bg-[#f4f4f3] bg-[radial-gradient(#dcdcda_1px,transparent_1px)] bg-[length:22px_22px] px-4 py-6 sm:px-10 font-sans text-[#111]"
+      className="auth-page min-h-screen flex flex-col overflow-x-hidden bg-[var(--a-bg)] bg-[radial-gradient(var(--a-dot)_1px,transparent_1px)] bg-[length:22px_22px] px-4 py-6 sm:px-10 font-sans text-[var(--a-ink)]"
       onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
     >
       <header className="flex items-center justify-between gap-4">
         <Link to="/" aria-label={`${BRAND_NAME} — página inicial`} className={linkClass}>
-          <SteeraLogo size="text-[34px]" className="text-[#111]" />
+          <SteeraLogo size="text-[34px]" className="text-[var(--a-ink)]" />
         </Link>
-        <Link to="/" className={`${linkClass} inline-flex items-center gap-1.5 text-[13px] font-medium text-[#666] hover:text-[#111]`}>
-          <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
-          Voltar para o site
-        </Link>
+        <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
       </header>
 
-      <main className="flex flex-1 items-center justify-center py-5">
-        <div className="w-full max-w-[920px] overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:min-h-[540px] md:grid-cols-[300px_1fr]">
+      <main className="flex flex-1 items-center justify-center py-3">
+        <div className="w-full max-w-[920px]">
+        <AuthBackLink />
+        <div className="w-full overflow-hidden rounded-[16px] border border-[var(--a-border)] bg-[var(--a-card)] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:min-h-[540px] md:grid-cols-[300px_1fr]">
           {/* Lado do Stee: título, plano, etapas e o mascote com o balão. */}
-          <aside className="relative flex flex-col border-b border-[#EFE4D2] bg-[#FDF8F0] bg-[radial-gradient(ellipse_70%_14%_at_50%_100%,rgba(62,39,34,0.07),transparent_70%)] px-6 pt-6 md:border-b-0 md:border-r">
-            <h1 className="font-brand text-[24px] font-semibold leading-tight tracking-[-0.03em] text-[#3E2722]">Criar conta grátis</h1>
-            <p className="mt-1 text-[13px] text-[#6b5a55]">Leva uns 2 minutos.</p>
+          <aside className="relative flex flex-col border-b border-[var(--a-cream-border)] bg-[var(--a-cream)] bg-[radial-gradient(ellipse_70%_14%_at_50%_100%,rgba(62,39,34,0.07),transparent_70%)] px-6 pt-6 md:border-b-0 md:border-r">
+            <h1 className="font-brand text-[24px] font-semibold leading-tight tracking-[-0.03em] text-[var(--a-bubble-ink)]">Criar conta grátis</h1>
+            <p className="mt-1 text-[13px] text-[var(--a-warm-muted)]">Leva uns 2 minutos.</p>
             {planName && (
-              <p className="mt-3 w-fit rounded-full bg-white px-3 py-1 text-[12px] font-medium text-[#3E2722] shadow-[0_1px_3px_rgba(62,39,34,0.12)]">
+              <p className="mt-3 w-fit rounded-full bg-[var(--a-card)] px-3 py-1 text-[12px] font-medium text-[var(--a-bubble-ink)] shadow-[0_1px_3px_rgba(62,39,34,0.12)]">
                 Plano escolhido: {planName}
               </p>
             )}
@@ -410,12 +413,12 @@ const Register = () => {
                   <li key={title} aria-current={current ? 'step' : undefined} className="flex items-center gap-2.5">
                     <span
                       className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold transition-colors ${
-                        current ? 'bg-[#111] text-white' : done ? 'bg-brand text-white' : 'border border-[#e2d6c3] bg-white text-[#8a7a72]'
+                        current ? 'bg-[var(--a-ink)] text-[var(--a-on-ink)]' : done ? 'bg-brand text-white' : 'border border-[var(--a-cream-border-2)] bg-[var(--a-card)] text-[var(--a-warm-faint)]'
                       }`}
                     >
                       {done ? <Check size={14} strokeWidth={2.5} aria-hidden="true" /> : i + 1}
                     </span>
-                    <span className={`text-[13px] ${current ? 'font-semibold text-[#111]' : 'text-[#6b5a55]'} ${current ? '' : 'hidden md:inline'}`}>
+                    <span className={`text-[13px] ${current ? 'font-semibold text-[var(--a-ink)]' : 'text-[var(--a-warm-muted)]'} ${current ? '' : 'hidden md:inline'}`}>
                       {title}
                       {done && <span className="sr-only"> (concluída)</span>}
                     </span>
@@ -431,7 +434,7 @@ const Register = () => {
                   Altura fixa: o texto muda a cada campo e o Stee não pode ficar subindo e descendo. */}
               <p
                 aria-hidden="true"
-                className="relative flex h-[62px] w-full max-w-[250px] items-center justify-center rounded-[14px] bg-white px-3.5 text-center font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-[8px] after:border-t-[8px] after:border-x-transparent after:border-t-white after:content-['']"
+                className="relative flex h-[62px] w-full max-w-[250px] items-center justify-center rounded-[14px] bg-[var(--a-bubble)] px-3.5 text-center font-brand text-[13px] font-semibold leading-[1.3] text-[var(--a-bubble-ink)] shadow-[0_4px_14px_rgba(62,39,34,0.1)] after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-[8px] after:border-t-[8px] after:border-x-transparent after:border-t-[var(--a-bubble)] after:content-['']"
               >
                 {bubble}
               </p>
@@ -445,11 +448,11 @@ const Register = () => {
           <form onSubmit={handleRegister} onFocus={trackFocus} onBlur={() => setFocusedField(null)} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="text-[18px] font-semibold tracking-tight">{STEP_TITLES[step]}</h2>
-              <span className="text-[12px] text-[#666]">Etapa {step + 1} de 3</span>
+              <span className="text-[12px] text-[var(--a-muted)]">Etapa {step + 1} de 3</span>
             </div>
 
             {error && (
-              <div role="alert" className="rounded-[8px] bg-[#FBEDE8] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#8A3220]">{error}</div>
+              <div role="alert" className="rounded-[8px] bg-[var(--a-err-bg)] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[var(--a-err)]">{error}</div>
             )}
 
             {step === 0 && (
@@ -472,7 +475,7 @@ const Register = () => {
                       placeholder={isPJ ? '00.000.000/0000-00' : '000.000.000-00'}
                     />
                     {isLookingUp && isPJ && (
-                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#777]" aria-label="Buscando dados do CNPJ" />
+                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[var(--a-muted-2)]" aria-label="Buscando dados do CNPJ" />
                     )}
                   </div>
                 </Field>
@@ -494,7 +497,7 @@ const Register = () => {
                   <div className="relative">
                     <input {...field('zipCode')} inputMode="numeric" value={form.zipCode} onChange={(e) => set('zipCode', formatCepInput(e.target.value))} onBlur={handleCepBlur} placeholder="00000-000" />
                     {isLookingUp && (
-                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#777]" aria-label="Buscando endereço" />
+                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[var(--a-muted-2)]" aria-label="Buscando endereço" />
                     )}
                   </div>
                 </Field>
@@ -562,7 +565,7 @@ const Register = () => {
                   <button
                     type="button"
                     onClick={() => { setErrors({}); changeStep((step - 1) as Step); }}
-                    className="h-12 rounded-[8px] border border-[#e1e1e1] bg-white px-5 text-[15px] font-medium text-[#111] outline-none transition-colors hover:bg-[#f4f4f4] focus-visible:ring-2 focus-visible:ring-[#111]"
+                    className="h-12 rounded-[8px] border border-[var(--a-input-border)] bg-[var(--a-card)] px-5 text-[15px] font-medium text-[var(--a-ink)] outline-none transition-colors hover:bg-[var(--a-subtle-2)] focus-visible:ring-2 focus-visible:ring-[var(--a-ink)]"
                   >
                     Voltar
                   </button>
@@ -571,7 +574,7 @@ const Register = () => {
                   type="submit"
                   disabled={isSubmitting}
                   aria-busy={isSubmitting || undefined}
-                  className="h-12 flex-1 rounded-[8px] bg-[#111] text-[15px] font-semibold text-white outline-none transition-colors hover:bg-[#2a2a2a] active:bg-black focus-visible:ring-2 focus-visible:ring-[#111] focus-visible:ring-offset-2 disabled:opacity-70"
+                  className="h-12 flex-1 rounded-[8px] bg-[var(--a-ink)] text-[15px] font-semibold text-[var(--a-on-ink)] outline-none transition-colors hover:bg-[var(--a-ink-hover)] active:bg-[var(--a-ink-active)] focus-visible:ring-2 focus-visible:ring-[var(--a-ink)] focus-visible:ring-offset-2 disabled:opacity-70"
                 >
                   {step < 2 ? 'Próximo' : isSubmitting ? 'Criando conta…' : 'Criar conta'}
                 </button>
@@ -580,19 +583,20 @@ const Register = () => {
               {/* Aviso de busca (CNPJ/CEP) fica ABAIXO dos botões: aparecer/sumir aqui nunca desloca
                   "Próximo"/"Voltar" no meio de um clique. */}
               {lookupNotice && (
-                <p role="status" className="rounded-[8px] bg-[#F4F4F3] px-3.5 py-2.5 text-[13px] text-[#444]">{lookupNotice}</p>
+                <p role="status" className="rounded-[8px] bg-[var(--a-subtle)] px-3.5 py-2.5 text-[13px] text-[var(--a-ink-3)]">{lookupNotice}</p>
               )}
 
-              <p className="text-center text-[14px] text-[#666]">
+              <p className="text-center text-[14px] text-[var(--a-muted)]">
                 Já tem conta?{' '}
-                <Link to="/login" className={`${linkClass} font-semibold text-[#111] hover:text-brand`}>Entrar</Link>
+                <Link to="/login" className={`${linkClass} font-semibold text-[var(--a-ink)] hover:text-brand`}>Entrar</Link>
               </p>
             </div>
           </form>
         </div>
+        </div>
       </main>
 
-      <footer className="text-[12px] text-[#666]">© 2026 {BRAND_NAME}</footer>
+      <footer className="text-[12px] text-[var(--a-muted)]">© 2026 {BRAND_NAME}</footer>
     </div>
   );
 };

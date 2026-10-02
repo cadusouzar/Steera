@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import Mascot from '../components/Mascot';
 import SteeraLogo from '../components/brand/SteeraLogo';
+import AuthBackLink from '../components/auth/AuthBackLink';
+import ThemeToggle from '../components/ThemeToggle';
+import { useTheme } from '../components/ThemeProvider';
 import { forgotPassword, login } from '../lib/auth';
 import { ApiError } from '../lib/apiError';
 import { BRAND_NAME } from '../lib/brand';
 
 // Login no modelo "Login v2" (02/10/2026): fundo pontilhado, cartão com o Stee numa faixa creme e um
-// balão que responde ao que a pessoa está fazendo. Só tem versão clara (`theme-light`), como o modelo.
+// balão que responde ao que a pessoa está fazendo. Clara ou escura, conforme o tema (paleta `.auth-page` em index.css).
 // Ficaram de fora do modelo, de propósito: "Manter conectado" (a sessão já dura 30 dias, a caixa não
 // faria nada) e os links Termos/Privacidade/Suporte (as páginas ainda não existem).
 
@@ -24,11 +27,12 @@ function safeRedirectPath(from: unknown): string {
 type Focus = 'email' | 'password' | null;
 
 const inputClass =
-  'w-full h-[46px] rounded-[8px] border border-[#e1e1e1] bg-white px-3.5 text-[15px] text-[#111] placeholder:text-[#9a9a9a] outline-none transition-[border-color,box-shadow] duration-150 focus:border-[#111] focus:shadow-[0_0_0_3px_rgba(17,17,17,0.08)]';
+  'w-full h-[46px] rounded-[8px] border border-[var(--a-input-border)] bg-[var(--a-card)] px-3.5 text-[15px] text-[var(--a-ink)] placeholder:text-[var(--a-faint)] outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--a-ink)] focus:shadow-[0_0_0_3px_var(--a-ring)]';
 
-const linkClass = 'rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#111]';
+const linkClass = 'rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--a-ink)]';
 
 const Login = () => {
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -96,33 +100,27 @@ const Login = () => {
 
   return (
     <div
-      className="theme-light min-h-screen flex flex-col overflow-x-hidden bg-[#f4f4f3] bg-[radial-gradient(#dcdcda_1px,transparent_1px)] bg-[length:22px_22px] px-4 py-7 sm:px-10 font-sans text-[#111]"
+      className="auth-page min-h-screen flex flex-col overflow-x-hidden bg-[var(--a-bg)] bg-[radial-gradient(var(--a-dot)_1px,transparent_1px)] bg-[length:22px_22px] px-4 py-7 sm:px-10 font-sans text-[var(--a-ink)]"
       onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
     >
-      <header className="flex items-center">
+      <header className="flex items-center justify-between gap-4">
         <Link to="/" aria-label={`${BRAND_NAME} — página inicial`} className={linkClass}>
-          <SteeraLogo size="text-[34px]" className="text-[#111]" />
+          <SteeraLogo size="text-[34px]" className="text-[var(--a-ink)]" />
         </Link>
+        <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
       </header>
 
       <main className="flex flex-1 items-center justify-center py-8">
         {/* Dois lados, como o cadastro (02/10/2026, pedido do usuário): o Stee na faixa creme à
             esquerda, as credenciais à direita. No celular a faixa vai para cima. */}
         <div className="w-full max-w-[400px] md:max-w-[820px]">
-        {/* Botão de voltar logo acima do cartão, bem visível (pedido do usuário, 02/10/2026). */}
-        <Link
-          to="/"
-          className={`${linkClass} mb-3 inline-flex items-center gap-2 rounded-full border border-[#e4e4e2] bg-white px-4 py-2 text-[14px] font-medium text-[#111] shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-[#c9c9c6] hover:bg-[#fafaf9]`}
-        >
-          <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
-          Voltar para o site
-        </Link>
-        <div className="w-full overflow-hidden rounded-[16px] border border-[#e4e4e2] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:min-h-[500px] md:grid-cols-[340px_1fr]">
-          <aside className="flex flex-col items-center border-b border-[#EFE4D2] bg-[#FDF8F0] px-6 pt-6 md:justify-center md:border-b-0 md:border-r md:pb-4 md:pt-4">
+        <AuthBackLink />
+        <div className="w-full overflow-hidden rounded-[16px] border border-[var(--a-border)] bg-[var(--a-card)] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_40px_rgba(0,0,0,0.06)] md:grid md:min-h-[500px] md:grid-cols-[340px_1fr]">
+          <aside className="flex flex-col items-center border-b border-[var(--a-cream-border)] bg-[var(--a-cream)] px-6 pt-6 md:justify-center md:border-b-0 md:border-r md:pb-4 md:pt-4">
             {/* Balão acima do Stee, ponta para baixo, altura fixa (o Stee não sobe e desce com o texto). */}
             <p
               aria-hidden="true"
-              className="relative flex h-[56px] w-full max-w-[260px] items-center justify-center rounded-[14px] bg-white px-3.5 text-center font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-[8px] after:border-t-[8px] after:border-x-transparent after:border-t-white after:content-['']"
+              className="relative flex h-[56px] w-full max-w-[260px] items-center justify-center rounded-[14px] bg-[var(--a-bubble)] px-3.5 text-center font-brand text-[13px] font-semibold leading-[1.3] text-[var(--a-bubble-ink)] shadow-[0_4px_14px_rgba(62,39,34,0.1)] after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-[8px] after:border-t-[8px] after:border-x-transparent after:border-t-[var(--a-bubble)] after:content-['']"
             >
               {bubble}
             </p>
@@ -136,7 +134,7 @@ const Login = () => {
           <form onSubmit={handleLogin} className="flex flex-col justify-center gap-[22px] px-6 py-8 sm:px-10 md:py-10">
             <div>
               <h1 className="text-[24px] font-semibold tracking-tight">Bem-vindo de volta</h1>
-              <p className="mt-1 text-[14px] text-[#666]">Entre para acessar o painel da sua empresa.</p>
+              <p className="mt-1 text-[14px] text-[var(--a-muted)]">Entre para acessar o painel da sua empresa.</p>
             </div>
 
             <div className="flex flex-col gap-[18px]">
@@ -160,7 +158,7 @@ const Login = () => {
                   <label htmlFor="login-password" className="text-[13px] font-medium">Senha</label>
                   <Link
                     to={{ pathname: '/esqueci-senha', search: email.trim() ? `?email=${encodeURIComponent(email.trim())}` : '' }}
-                    className={`${linkClass} text-[13px] font-medium text-[#666] hover:text-[#111]`}
+                    className={`${linkClass} text-[13px] font-medium text-[var(--a-muted)] hover:text-[var(--a-ink)]`}
                   >
                     Esqueci minha senha
                   </Link>
@@ -185,7 +183,7 @@ const Login = () => {
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                     aria-pressed={showPassword}
-                    className="absolute right-1 top-1 flex h-[38px] w-[38px] items-center justify-center rounded-md text-[#777] outline-none transition-colors hover:bg-[#f4f4f4] hover:text-[#111] focus-visible:ring-2 focus-visible:ring-[#111]"
+                    className="absolute right-1 top-1 flex h-[38px] w-[38px] items-center justify-center rounded-md text-[var(--a-muted-2)] outline-none transition-colors hover:bg-[var(--a-subtle-2)] hover:text-[var(--a-ink)] focus-visible:ring-2 focus-visible:ring-[var(--a-ink)]"
                   >
                     {showPassword ? <EyeOff size={18} strokeWidth={1.8} /> : <Eye size={18} strokeWidth={1.8} />}
                   </button>
@@ -194,18 +192,18 @@ const Login = () => {
             </div>
 
             {notice && !error && (
-              <p role="status" className="rounded-lg bg-[#F4F4F3] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#333]">{notice}</p>
+              <p role="status" className="rounded-lg bg-[var(--a-subtle)] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[var(--a-ink-2)]">{notice}</p>
             )}
 
             {error && (
-              <div role="alert" className="rounded-lg bg-[#FBEDE8] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#8A3220]">
+              <div role="alert" className="rounded-lg bg-[var(--a-err-bg)] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[var(--a-err)]">
                 {error}
                 {lockedOut && (
                   <button
                     type="button"
                     onClick={handleSendResetLink}
                     disabled={isSendingReset}
-                    className="mt-2.5 block font-semibold underline underline-offset-4 outline-none hover:text-[#5f2116] focus-visible:ring-2 focus-visible:ring-[#8A3220] rounded disabled:opacity-60"
+                    className="mt-2.5 block font-semibold underline underline-offset-4 outline-none hover:text-[var(--a-err-hover)] focus-visible:ring-2 focus-visible:ring-[var(--a-err)] rounded disabled:opacity-60"
                   >
                     {isSendingReset ? 'Enviando…' : 'Enviar link de redefinição'}
                   </button>
@@ -214,28 +212,28 @@ const Login = () => {
             )}
 
             {resetSentMessage && (
-              <p role="status" className="rounded-lg bg-[#F4F4F3] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[#333]">{resetSentMessage}</p>
+              <p role="status" className="rounded-lg bg-[var(--a-subtle)] px-3.5 py-[11px] text-[13px] font-medium leading-[1.4] text-[var(--a-ink-2)]">{resetSentMessage}</p>
             )}
 
             <button
               type="submit"
               disabled={isSubmitting}
               aria-busy={isSubmitting || undefined}
-              className="flex h-12 items-center justify-center gap-2.5 rounded-[8px] bg-[#111] text-[15px] font-semibold text-white outline-none transition-colors hover:bg-[#2a2a2a] active:bg-black focus-visible:ring-2 focus-visible:ring-[#111] focus-visible:ring-offset-2 disabled:opacity-70"
+              className="flex h-12 items-center justify-center gap-2.5 rounded-[8px] bg-[var(--a-ink)] text-[15px] font-semibold text-[var(--a-on-ink)] outline-none transition-colors hover:bg-[var(--a-ink-hover)] active:bg-[var(--a-ink-active)] focus-visible:ring-2 focus-visible:ring-[var(--a-ink)] focus-visible:ring-offset-2 disabled:opacity-70"
             >
               {isSubmitting ? 'Entrando…' : 'Entrar'}
             </button>
 
-            <p className="text-center text-[14px] text-[#666]">
+            <p className="text-center text-[14px] text-[var(--a-muted)]">
               Ainda não tem conta?{' '}
-              <Link to="/register" className={`${linkClass} font-semibold text-[#111] hover:text-brand`}>Criar conta grátis</Link>
+              <Link to="/register" className={`${linkClass} font-semibold text-[var(--a-ink)] hover:text-brand`}>Criar conta grátis</Link>
             </p>
           </form>
         </div>
         </div>
       </main>
 
-      <footer className="text-[12px] text-[#666]">© 2026 {BRAND_NAME}</footer>
+      <footer className="text-[12px] text-[var(--a-muted)]">© 2026 {BRAND_NAME}</footer>
     </div>
   );
 };

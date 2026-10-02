@@ -5,7 +5,7 @@
 @layer base {
   /* Visual monocromático (01/10/2026, referência URBN): cinza/branco/preto, ação em preto; cor só
      para status. Canais RGB — ver tailwind.config.js. Contrastes conferidos para AA.
-     `.theme-light` força o tema claro num trecho (ex.: tela de login, que só tem versão clara). */
+     `.theme-light` força o tema claro num trecho, se algum dia for preciso. */
   :root,
   .theme-light {
     --background: 237 237 237;       /* #EDEDED */
@@ -24,6 +24,29 @@
     --danger: 192 38 45;             /* #C0262D */
     --danger-foreground: 255 255 255;
     color-scheme: light;
+  }
+
+  /* Telas de entrada (login e cadastro): paleta própria, quente, com versão clara e escura
+     (02/10/2026 — antes eram sempre claras). Usadas como `bg-[var(--a-bg)]` etc. */
+  .auth-page {
+    --a-bg: #f4f4f3; --a-dot: #dcdcda; --a-card: #ffffff; --a-border: #e4e4e2;
+    --a-input-border: #e1e1e1; --a-border-strong: #c9c9c6; --a-hover: #fafaf9; --a-subtle: #f4f4f3;
+    --a-subtle-2: #f4f4f4; --a-ink: #111111; --a-ink-hover: #2a2a2a; --a-ink-active: #000000;
+    --a-on-ink: #ffffff; --a-ink-2: #333333; --a-ink-3: #444444; --a-muted: #666666;
+    --a-muted-2: #777777; --a-faint: #9a9a9a; --a-ring: rgba(17,17,17,0.08);
+    --a-cream: #FDF8F0; --a-cream-border: #EFE4D2; --a-cream-border-2: #e2d6c3;
+    --a-bubble: #ffffff; --a-bubble-ink: #3E2722; --a-warm-muted: #6b5a55; --a-warm-faint: #8a7a72;
+    --a-err-bg: #FBEDE8; --a-err: #8A3220; --a-err-hover: #5f2116;
+  }
+  .dark .auth-page {
+    --a-bg: #0e0e0e; --a-dot: #262626; --a-card: #181818; --a-border: #2a2a2a;
+    --a-input-border: #333333; --a-border-strong: #4a4a4a; --a-hover: #222222; --a-subtle: #222222;
+    --a-subtle-2: #262626; --a-ink: #f2f2f2; --a-ink-hover: #d9d9d9; --a-ink-active: #ffffff;
+    --a-on-ink: #141414; --a-ink-2: #d4d4d4; --a-ink-3: #c4c4c4; --a-muted: #a3a3a3;
+    --a-muted-2: #8f8f8f; --a-faint: #707070; --a-ring: rgba(242,242,242,0.12);
+    --a-cream: #1f1a16; --a-cream-border: #33291f; --a-cream-border-2: #4a3d30;
+    --a-bubble: #2b241e; --a-bubble-ink: #f3e6da; --a-warm-muted: #bfaea4; --a-warm-faint: #9c8a80;
+    --a-err-bg: #3a211b; --a-err: #f0a08a; --a-err-hover: #f6c2b3;
   }
 
   .dark {
