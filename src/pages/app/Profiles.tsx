@@ -1,6 +1,8 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, ChevronRight, Eye, Loader2, Lock, Pencil, Plus, Shield, Trash2, X } from 'lucide-react';
-import CustomSelect from '../../components/CustomSelect';
+import { ArrowLeft, Check, ChevronRight, Eye, Lock, Pencil, Plus, Trash2, X } from 'lucide-react';
+import {
+  Button, EmptyState, Field, Input, Modal, Notice, PageHeader, Select, StatusBadge, Table, TBody, TD, TH, THead, TR,
+} from '../../components/ui';
 import * as api from '../../lib/api';
 import type { PermissionCatalogEntry, Profile } from '../../lib/api';
 import {
@@ -57,16 +59,18 @@ import {
 // escolha num grupo de rádio, espaço marca/desmarca a caixa.
 // ---------------------------------------------------------------------------------------------
 
+// Redesenho no kit (etapa 7 do polimento, 01/10/2026): mesmas linhas de escolha, no visual monocromático
+// (borda fina; marcada = borda e marcador na cor de ação, fundo cinza).
 const optionRowClass = (checked: boolean, disabled = false) =>
-  `flex items-start gap-3 min-h-[44px] px-3.5 py-3 rounded-xl border transition-colors focus-within:ring-2 focus-within:ring-primary/40 ${
+  `flex items-start gap-3 min-h-[44px] px-3.5 py-3 rounded-md border transition-colors focus-within:ring-2 focus-within:ring-foreground ${
     disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-  } ${checked ? 'border-primary bg-primary/5' : `border-border/40 ${disabled ? '' : 'hover:bg-secondary/40'}`}`;
+  } ${checked ? 'border-primary bg-secondary' : `border-border ${disabled ? '' : 'hover:bg-secondary/60'}`}`;
 
 const OptionText = ({ title, description, hint, hintId }: { title: string; description?: string; hint?: string; hintId?: string }) => (
   <span className="min-w-0">
-    <span className="block text-sm font-medium text-foreground">{title}</span>
-    {description && <span className="block text-sm text-muted mt-0.5">{description}</span>}
-    {hint && <span id={hintId} className="block text-xs text-muted mt-0.5">{hint}</span>}
+    <span className="block text-[14px] font-medium text-foreground">{title}</span>
+    {description && <span className="block text-[13px] text-muted mt-0.5">{description}</span>}
+    {hint && <span id={hintId} className="block text-[12px] text-muted mt-0.5">{hint}</span>}
   </span>
 );
 
@@ -100,7 +104,7 @@ const ChoiceRow = ({ name, checked, onSelect, title, description, blockedHint }:
       />
       <span
         aria-hidden="true"
-        className={`mt-0.5 w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center ${checked ? 'border-primary bg-primary' : 'border-border'}`}
+        className={`mt-0.5 w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center ${checked ? 'border-primary bg-primary' : 'border-foreground/30'}`}
       >
         {checked && <Check size={12} strokeWidth={3} className="text-primary-foreground" />}
       </span>
@@ -135,7 +139,7 @@ const CheckRow = ({ checked, onToggle, title, description, disabled, blockedHint
       />
       <span
         aria-hidden="true"
-        className={`mt-0.5 w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center ${checked ? 'border-primary bg-primary' : 'border-border'}`}
+        className={`mt-0.5 w-5 h-5 shrink-0 rounded border-2 flex items-center justify-center ${checked ? 'border-primary bg-primary' : 'border-foreground/30'}`}
       >
         {checked && <Check size={12} strokeWidth={3} className="text-primary-foreground" />}
       </span>
@@ -153,8 +157,8 @@ const Question = ({ title, helper, kind = 'radiogroup', children }: { title: str
   const titleId = useId();
   return (
     <div role={kind} aria-labelledby={titleId}>
-      <p id={titleId} className="text-base font-semibold text-foreground">{title}</p>
-      {helper && <p className="text-sm text-muted mt-0.5">{helper}</p>}
+      <p id={titleId} className="text-[15px] font-semibold text-foreground">{title}</p>
+      {helper && <p className="text-[13px] text-muted mt-0.5">{helper}</p>}
       <div className="mt-3 space-y-2">{children}</div>
     </div>
   );
@@ -396,11 +400,11 @@ const AreaPanel = (props: PanelProps) => {
 const AreaSummary = ({ area, grants, catalog }: { area: AreaDef; grants: GrantMap; catalog: CatalogIndex }) => (
   <ul className="space-y-3">
     {summarizeArea(grants, catalog, area).map((line, i) => (
-      <li key={i} className={`flex items-start gap-2.5 text-base ${line.ok ? 'text-foreground' : 'text-muted'}`}>
+      <li key={i} className={`flex items-start gap-2.5 text-[14px] ${line.ok ? 'text-foreground' : 'text-muted'}`}>
         {line.ok ? (
-          <Check size={18} className="shrink-0 mt-0.5 text-primary" aria-label="Sim" />
+          <Check size={17} strokeWidth={2} className="shrink-0 mt-0.5 text-success" aria-label="Sim" />
         ) : (
-          <X size={18} className="shrink-0 mt-0.5 text-muted" aria-label="Não" />
+          <X size={17} strokeWidth={2} className="shrink-0 mt-0.5 text-muted" aria-label="Não" />
         )}
         <span>{line.text}</span>
       </li>
@@ -581,17 +585,13 @@ const Profiles = () => {
     }
   };
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center py-24"><Loader2 className="animate-spin text-primary" size={32} /></div>;
-  }
-
   const modalTitle =
     editingProfile === 'new'
       ? 'Novo perfil de acesso'
       : editingProfile
         ? isReadOnly
-          ? `Perfil "${editingProfile.name}"`
-          : `Editar o perfil "${editingProfile.name}"`
+          ? `Perfil “${editingProfile.name}”`
+          : `Editar o perfil “${editingProfile.name}”`
         : '';
 
   const renderSubtitle = () => {
@@ -606,339 +606,292 @@ const Profiles = () => {
   };
 
   const deleteCount = deletingProfile?.userCount ?? 0;
+  const reassignOptions = deletingProfile
+    // O perfil de destino também precisa caber no perfil de quem exclui (é uma atribuição).
+    ? profiles.filter((p) => p.id !== deletingProfile.id && !isAboveCaller(p))
+    : [];
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Shield className="text-primary" size={24} /> Perfis de Acesso
-          </h1>
-          <p className="text-sm text-muted mt-1 max-w-2xl">
-            Um perfil diz o que a pessoa pode fazer no sistema. Você escolhe o perfil de cada pessoa na tela Usuários e Acessos.
-          </p>
+    <div className="px-4 py-6 md:px-8 md:py-8">
+      <div className="max-w-5xl mx-auto">
+        <PageHeader
+          title="Perfis de acesso"
+          description="Um perfil diz o que a pessoa pode fazer no sistema. Você escolhe o perfil de cada pessoa em Usuários e acessos."
+          actions={<Button icon={Plus} onClick={openCreate} disabled={isLoading}>Novo perfil</Button>}
+        />
+
+        {error && <Notice tone="danger" className="mb-4">{error}</Notice>}
+
+        <div className="bg-panel border border-border rounded-lg shadow-sm overflow-hidden">
+          {isLoading ? (
+            <div className="divide-y divide-border" role="status" aria-label="Carregando perfis">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-6 px-5 h-14">
+                  <span className="skeleton h-4 w-44" />
+                  <span className="skeleton h-4 w-32 hidden sm:block" />
+                  <span className="skeleton h-4 w-24 ml-auto" />
+                </div>
+              ))}
+            </div>
+          ) : error ? null : profiles.length === 0 ? (
+            <EmptyState title="Nenhum perfil ainda" description="Crie um perfil a partir de um modelo pronto." />
+          ) : (
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Perfil</TH>
+                  <TH className="hidden sm:table-cell">Uso</TH>
+                  <TH align="right"><span className="sr-only">Ações</span></TH>
+                </tr>
+              </THead>
+              <TBody>
+                {profiles.map((profile) => {
+                  const aboveCaller = !profile.isProtected && isAboveCaller(profile);
+                  const viewOnly = profile.isProtected || aboveCaller;
+                  const lockReason = profile.isProtected
+                    ? 'Perfil criado pelo sistema. Não pode ser alterado nem excluído.'
+                    : aboveCaller ? PROFILE_ABOVE_CALLER_MESSAGE : undefined;
+                  return (
+                    <TR key={profile.id} interactive onClick={() => openEdit(profile)}>
+                      <TD>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-foreground">{profile.name}</span>
+                          {profile.isProtected && <StatusBadge tone="neutral">Do sistema</StatusBadge>}
+                        </div>
+                        <span className="block text-[12px] text-muted sm:hidden">{usageText(profile.userCount)}</span>
+                      </TD>
+                      <TD className="hidden sm:table-cell text-muted">{usageText(profile.userCount)}</TD>
+                      <TD align="right" onClick={(e) => e.stopPropagation()}>
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            variant="ghost" size="sm" icon={viewOnly ? Eye : Pencil}
+                            onClick={() => openEdit(profile)}
+                            title={lockReason}
+                            aria-label={viewOnly ? `Ver o perfil ${profile.name}` : `Editar o perfil ${profile.name}`}
+                          >
+                            <span className="hidden sm:inline">{viewOnly ? 'Ver' : 'Editar'}</span>
+                          </Button>
+                          {viewOnly ? (
+                            <span title={lockReason} className="inline-flex h-8 w-8 items-center justify-center text-muted">
+                              <Lock size={14} strokeWidth={1.8} aria-hidden="true" />
+                              <span className="sr-only">{lockReason}</span>
+                            </span>
+                          ) : (
+                            <Button
+                              variant="ghost" size="sm" icon={Trash2}
+                              onClick={() => openDelete(profile)}
+                              aria-label={`Excluir o perfil ${profile.name}`}
+                            >
+                              <span className="hidden sm:inline">Excluir</span>
+                            </Button>
+                          )}
+                        </div>
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          )}
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        >
-          <Plus size={16} /> Novo perfil
-        </button>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 mb-6 text-red-600 dark:text-red-400 text-sm">{error}</div>
-      )}
+      {/* Editor de perfil: janela grande do kit (Esc, foco preso, rolagem da página travada). */}
+      <Modal
+        open={!!editingProfile}
+        onClose={closeForm}
+        title={modalTitle}
+        description={renderSubtitle()}
+        size="2xl"
+        // Altura fixa só no passo de edição (duas colunas que rolam sozinhas); os modelos ocupam o que precisam.
+        fill={step === 'review'}
+        dismissable={!isSaving}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeForm} disabled={isSaving}>{isReadOnly ? 'Fechar' : 'Cancelar'}</Button>
+            {step === 'review' && !isReadOnly && (
+              <Button type="submit" form="profile-form" loading={isSaving}>Salvar perfil</Button>
+            )}
+          </>
+        }
+      >
+        <form id="profile-form" onSubmit={handleSave} noValidate className={step === 'review' ? 'flex-1 min-h-0 flex flex-col' : ''}>
+          {formError && <Notice tone="danger" className={step === 'review' ? 'mx-6 mt-4 shrink-0' : 'mb-4'}>{formError}</Notice>}
 
-      <div className="space-y-3">
-        {profiles.map((profile) => {
-          const aboveCaller = !profile.isProtected && isAboveCaller(profile);
-          const viewOnly = profile.isProtected || aboveCaller;
-          return (
-          <div key={profile.id} className="flex items-center justify-between gap-3 bg-panel border border-border/40 rounded-2xl p-4">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-bold text-foreground">{profile.name}</span>
-                {profile.isProtected && (
-                  <span
-                    title="Perfil criado pelo sistema. Não pode ser alterado nem excluído."
-                    className="flex items-center gap-1 text-xs font-semibold text-muted bg-secondary/60 px-2 py-0.5 rounded-full"
-                  >
-                    <Lock size={11} /> Do sistema
-                  </span>
+          {step === 'template' ? (
+            <div className="pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {PROFILE_TEMPLATES.map((template) => {
+                  const Icon = template.icon;
+                  // Modelo com alguma permissão que o perfil de quem edita não tem: não pode ser usado.
+                  const blocked = !isWithinCaller(caller, buildTemplateGrants(template, catalog));
+                  const hintId = `template-hint-${template.key}`;
+                  return (
+                    <button
+                      key={template.key}
+                      type="button"
+                      onClick={() => chooseTemplate(template)}
+                      disabled={blocked}
+                      aria-disabled={blocked || undefined}
+                      aria-describedby={blocked ? hintId : undefined}
+                      title={blocked ? NOT_IN_YOUR_PROFILE_HINT : undefined}
+                      className={`flex items-start gap-3 text-left p-4 min-h-[96px] rounded-md border border-border bg-panel transition-colors outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
+                        blocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-foreground/40 hover:bg-secondary/60'
+                      }`}
+                    >
+                      <span className="w-10 h-10 shrink-0 rounded-md bg-secondary text-foreground flex items-center justify-center">
+                        <Icon size={19} strokeWidth={1.8} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[14px] font-semibold text-foreground">{template.title}</span>
+                        <span className="block text-[13px] text-muted mt-0.5">{template.description}</span>
+                        {blocked && <span id={hintId} className="block text-[12px] text-muted mt-1">{NOT_IN_YOUR_PROFILE_HINT}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Faixa de cima, fora das áreas que rolam */}
+              <div className="px-6 py-4 border-b border-border shrink-0">
+                {isReadOnly ? (
+                  <p className="flex gap-2 text-[14px] text-foreground">
+                    <Lock size={16} strokeWidth={1.8} className="shrink-0 mt-0.5 text-muted" aria-hidden="true" />
+                    <span>
+                      {editingAboveCaller
+                        ? PROFILE_ABOVE_CALLER_MESSAGE
+                        : 'Este é o perfil do dono da empresa. Ele sempre pode tudo e não pode ser alterado.'}
+                    </span>
+                  </p>
+                ) : (
+                  <div className="flex flex-col md:flex-row md:items-end gap-3 md:gap-6">
+                    <Field
+                      label="Nome do perfil" htmlFor="profile-name" className="w-full md:max-w-sm"
+                      error={nameMissing ? 'Dê um nome ao perfil, por exemplo “Recepção”.' : undefined}
+                    >
+                      <Input
+                        id="profile-name"
+                        ref={nameInputRef}
+                        value={formName}
+                        invalid={nameMissing}
+                        onChange={(e) => {
+                          setFormName(e.target.value);
+                          if (nameMissing) setNameMissing(false);
+                        }}
+                        placeholder="Ex.: Recepção"
+                        data-autofocus={editingProfile === 'new' ? true : undefined}
+                      />
+                    </Field>
+                    {editingProfile === 'new' && (
+                      <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => setStep('template')} className="self-start md:self-auto md:mb-1">
+                        Escolher outro modelo
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
-              <p className="text-sm text-muted mt-1">{usageText(profile.userCount)}</p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => openEdit(profile)}
-                title={profile.isProtected ? 'Ver o que este perfil libera' : aboveCaller ? PROFILE_ABOVE_CALLER_MESSAGE : 'Editar'}
-                aria-label={viewOnly ? `Ver o perfil ${profile.name}` : `Editar o perfil ${profile.name}`}
-                className="p-2 rounded-xl border border-border text-foreground hover:bg-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                {viewOnly ? <Eye size={16} /> : <Pencil size={16} />}
-              </button>
-              <button
-                onClick={() => openDelete(profile)}
-                disabled={viewOnly}
-                aria-disabled={viewOnly || undefined}
-                title={
-                  profile.isProtected
-                    ? 'Perfil criado pelo sistema. Não pode ser alterado nem excluído.'
-                    : aboveCaller
-                      ? PROFILE_ABOVE_CALLER_MESSAGE
-                      : 'Excluir'
-                }
-                aria-label={`Excluir o perfil ${profile.name}`}
-                className="p-2 rounded-xl border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          </div>
-          );
-        })}
-      </div>
 
-      {editingProfile && (
-        <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center md:p-4 bg-background/80 backdrop-blur-sm">
-          <form
-            onSubmit={handleSave}
-            noValidate
-            aria-labelledby="profile-modal-title"
-            className="bg-background border border-border/60 rounded-t-3xl md:rounded-3xl w-full max-w-5xl shadow-2xl h-[92vh] max-h-[92vh] md:h-[min(90vh,760px)] flex flex-col overflow-hidden"
-          >
-            {/* Cabeçalho fixo */}
-            <div className="flex items-start justify-between gap-3 px-5 md:px-7 pt-5 pb-4 border-b border-border/40 shrink-0">
-              <div className="min-w-0">
-                <h2 id="profile-modal-title" className="text-xl font-heading font-bold text-foreground break-words">{modalTitle}</h2>
-                <p className="text-sm text-muted mt-0.5">{renderSubtitle()}</p>
-              </div>
-              <button
-                type="button"
-                onClick={closeForm}
-                aria-label="Fechar"
-                className="p-2 text-muted hover:text-foreground bg-secondary/50 rounded-full shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {formError && (
-              <div role="alert" className="mx-5 md:mx-7 mt-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-red-600 dark:text-red-400 text-sm shrink-0">
-                {formError}
-              </div>
-            )}
-
-            {step === 'template' ? (
-              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 md:px-7 py-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {PROFILE_TEMPLATES.map((template) => {
-                    const Icon = template.icon;
-                    // Modelo com alguma permissão que o perfil de quem edita não tem: não pode ser usado.
-                    const blocked = !isWithinCaller(caller, buildTemplateGrants(template, catalog));
-                    const hintId = `template-hint-${template.key}`;
+              {/* Duas colunas: áreas à esquerda, perguntas da área à direita. Cada uma rola sozinha. */}
+              <div className="flex-1 min-h-0 flex">
+                <div
+                  role="tablist"
+                  aria-orientation="vertical"
+                  aria-label="Áreas do sistema"
+                  className={`${showAreaOnMobile ? 'hidden' : 'flex'} md:flex flex-col gap-0.5 w-full md:w-72 shrink-0 overflow-y-auto p-3 md:border-r border-border`}
+                >
+                  {areas.map((area, index) => {
+                    const isSelected = currentArea?.key === area.key;
                     return (
                       <button
-                        key={template.key}
+                        key={area.key}
+                        ref={(el) => {
+                          if (el) areaButtonRefs.current.set(area.key, el);
+                          else areaButtonRefs.current.delete(area.key);
+                        }}
                         type="button"
-                        onClick={() => chooseTemplate(template)}
-                        disabled={blocked}
-                        aria-disabled={blocked || undefined}
-                        aria-describedby={blocked ? hintId : undefined}
-                        title={blocked ? NOT_IN_YOUR_PROFILE_HINT : undefined}
-                        className={`flex items-start gap-3 text-left p-4 min-h-[96px] rounded-2xl border border-border/60 bg-panel transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-                          blocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary hover:bg-primary/5'
+                        role="tab"
+                        id={`area-tab-${area.key}`}
+                        aria-selected={isSelected}
+                        aria-controls="area-panel"
+                        tabIndex={isSelected ? 0 : -1}
+                        onClick={() => pickArea(area.key)}
+                        onKeyDown={(e) => handleAreaKeyDown(e, index)}
+                        className={`flex items-center gap-2 w-full text-left px-3 py-2.5 min-h-[52px] rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
+                          isSelected ? 'bg-secondary text-foreground' : 'text-foreground hover:bg-secondary/60'
                         }`}
                       >
-                        <span className="w-10 h-10 shrink-0 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                          <Icon size={20} />
+                        <span className="min-w-0 flex-1">
+                          <span className={`block text-[14px] ${isSelected ? 'font-semibold' : 'font-medium'}`}>{area.title}</span>
+                          <span className="block text-[13px] text-muted mt-0.5">{areaStatus(formGrants, catalogIndex, area)}</span>
                         </span>
-                        <span className="min-w-0">
-                          <span className="block font-bold text-foreground">{template.title}</span>
-                          <span className="block text-sm text-muted mt-0.5">{template.description}</span>
-                          {blocked && <span id={hintId} className="block text-xs text-muted mt-1">{NOT_IN_YOUR_PROFILE_HINT}</span>}
-                        </span>
+                        <ChevronRight size={16} aria-hidden="true" className="md:hidden shrink-0 text-muted" />
                       </button>
                     );
                   })}
                 </div>
-              </div>
-            ) : (
-              <>
-                {/* Faixa de cima, fora das áreas que rolam */}
-                <div className="px-5 md:px-7 py-4 border-b border-border/40 shrink-0">
-                  {isReadOnly ? (
-                    <div className="flex gap-2 text-sm text-foreground">
-                      <Lock size={16} className="shrink-0 mt-0.5 text-muted" />
-                      <span>
-                        {editingAboveCaller
-                          ? PROFILE_ABOVE_CALLER_MESSAGE
-                          : 'Este é o perfil do dono da empresa. Ele sempre pode tudo e não pode ser alterado.'}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col md:flex-row md:items-end gap-3 md:gap-6">
-                      <div className="w-full md:max-w-sm">
-                        <label htmlFor="profile-name" className="block text-sm font-semibold text-foreground mb-1.5">Nome do perfil</label>
-                        <input
-                          id="profile-name"
-                          ref={nameInputRef}
-                          value={formName}
-                          onChange={(e) => {
-                            setFormName(e.target.value);
-                            if (nameMissing) setNameMissing(false);
-                          }}
-                          placeholder="Ex.: Recepção"
-                          aria-invalid={nameMissing}
-                          aria-describedby={nameMissing ? 'profile-name-hint' : undefined}
-                          className={`w-full px-4 py-2.5 rounded-xl bg-secondary/30 border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 ${
-                            nameMissing ? 'border-red-500/60' : 'border-border/60'
-                          }`}
-                        />
-                        {nameMissing && (
-                          <p id="profile-name-hint" className="text-sm text-red-600 dark:text-red-400 mt-1.5">
-                            Dê um nome ao perfil, por exemplo "Recepção".
-                          </p>
-                        )}
-                      </div>
-                      {editingProfile === 'new' && (
-                        <button
-                          type="button"
-                          onClick={() => setStep('template')}
-                          className="self-start md:self-auto md:mb-2.5 flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                        >
-                          <ArrowLeft size={14} /> Escolher outro modelo
-                        </button>
+
+                <div
+                  role="tabpanel"
+                  id="area-panel"
+                  aria-labelledby={currentArea ? `area-tab-${currentArea.key}` : undefined}
+                  className={`${showAreaOnMobile ? 'block' : 'hidden'} md:block flex-1 min-w-0 overflow-y-auto px-6 md:px-8 py-5 md:py-6`}
+                >
+                  <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => setShowAreaOnMobile(false)} className="md:hidden mb-4 -ml-2">
+                    Voltar para as áreas
+                  </Button>
+                  {currentArea && (
+                    <div className="max-w-2xl">
+                      <h3 className="text-[16px] font-semibold text-foreground mb-5">{currentArea.title}</h3>
+                      {isReadOnly ? (
+                        <AreaSummary area={currentArea} grants={formGrants} catalog={catalogIndex} />
+                      ) : (
+                        <AreaPanel key={currentArea.key} area={currentArea} grants={formGrants} catalog={catalogIndex} onChange={setFormGrants} caller={caller} />
                       )}
                     </div>
                   )}
                 </div>
+              </div>
+            </>
+          )}
+        </form>
+      </Modal>
 
-                {/* Duas colunas: áreas à esquerda, perguntas da área à direita. Cada uma rola sozinha. */}
-                <div className="flex-1 min-h-0 flex">
-                  <div
-                    role="tablist"
-                    aria-orientation="vertical"
-                    aria-label="Áreas do sistema"
-                    className={`${showAreaOnMobile ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-72 shrink-0 overflow-y-auto custom-scrollbar p-3 md:border-r border-border/40`}
-                  >
-                    {areas.map((area, index) => {
-                      const isSelected = currentArea?.key === area.key;
-                      return (
-                        <button
-                          key={area.key}
-                          ref={(el) => {
-                            if (el) areaButtonRefs.current.set(area.key, el);
-                            else areaButtonRefs.current.delete(area.key);
-                          }}
-                          type="button"
-                          role="tab"
-                          id={`area-tab-${area.key}`}
-                          aria-selected={isSelected}
-                          aria-controls="area-panel"
-                          tabIndex={isSelected ? 0 : -1}
-                          onClick={() => pickArea(area.key)}
-                          onKeyDown={(e) => handleAreaKeyDown(e, index)}
-                          className={`relative flex items-center gap-2 w-full text-left pl-4 pr-3 py-3 min-h-[56px] rounded-xl transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-                            isSelected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-secondary/40'
-                          }`}
-                        >
-                          {isSelected && <span aria-hidden="true" className="absolute left-1 top-3 bottom-3 w-1 rounded-full bg-primary" />}
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold">{area.title}</span>
-                            <span className="block text-sm text-muted mt-0.5">{areaStatus(formGrants, catalogIndex, area)}</span>
-                          </span>
-                          <ChevronRight size={16} aria-hidden="true" className="md:hidden shrink-0 text-muted" />
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div
-                    role="tabpanel"
-                    id="area-panel"
-                    aria-labelledby={currentArea ? `area-tab-${currentArea.key}` : undefined}
-                    className={`${showAreaOnMobile ? 'block' : 'hidden'} md:block flex-1 min-w-0 overflow-y-auto custom-scrollbar px-5 md:px-8 py-5 md:py-6`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setShowAreaOnMobile(false)}
-                      className="md:hidden flex items-center gap-1.5 mb-4 text-sm font-semibold text-primary rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                    >
-                      <ArrowLeft size={14} /> Voltar para as áreas
-                    </button>
-                    {currentArea && (
-                      <div className="max-w-2xl">
-                        <h3 className="text-lg font-heading font-bold text-foreground mb-5">{currentArea.title}</h3>
-                        {isReadOnly ? (
-                          <AreaSummary area={currentArea} grants={formGrants} catalog={catalogIndex} />
-                        ) : (
-                          <AreaPanel key={currentArea.key} area={currentArea} grants={formGrants} catalog={catalogIndex} onChange={setFormGrants} caller={caller} />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Rodapé fixo */}
-            <div className="px-5 md:px-7 py-4 flex justify-end gap-3 border-t border-border/40 shrink-0">
-              <button
-                type="button"
-                onClick={closeForm}
-                className="flex-1 md:flex-none md:min-w-[140px] py-3 px-5 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                {isReadOnly ? 'Fechar' : 'Cancelar'}
-              </button>
-              {step === 'review' && !isReadOnly && (
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="flex-1 md:flex-none md:min-w-[160px] py-3 px-5 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 text-sm flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                >
-                  {isSaving && <Loader2 size={16} className="animate-spin" />}
-                  {isSaving ? 'Salvando…' : 'Salvar perfil'}
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
-      )}
-
-      {deletingProfile && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-labelledby="delete-profile-title" className="bg-background border border-border/60 rounded-3xl p-6 w-full max-w-md shadow-2xl">
-            <h2 id="delete-profile-title" className="text-lg font-heading font-bold text-foreground mb-3">
-              Excluir o perfil "{deletingProfile.name}"?
-            </h2>
-
-            {deleteError && (
-              <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-4 text-red-600 dark:text-red-400 text-sm">{deleteError}</div>
-            )}
-
-            {deleteCount > 0 ? (
-              <>
-                <p className="text-sm text-muted mb-4">
-                  {deleteCount === 1
-                    ? '1 pessoa usa este perfil. Escolha o novo perfil dela antes de excluir.'
-                    : `${deleteCount} pessoas usam este perfil. Escolha o novo perfil delas antes de excluir.`}
-                </p>
-                <CustomSelect
-                  value={reassignTargetId}
-                  onChange={setReassignTargetId}
-                  options={profiles
-                    // O perfil de destino também precisa caber no perfil de quem exclui (é uma atribuição).
-                    .filter((p) => p.id !== deletingProfile.id && !isAboveCaller(p))
-                    .map((p) => ({ value: p.id, label: p.name }))}
-                  placeholder="Escolha o novo perfil"
-                />
-              </>
-            ) : (
-              <p className="text-sm text-muted mb-4">Ninguém usa este perfil, então ele pode ser excluído agora. Isso não pode ser desfeito.</p>
-            )}
-
-            <div className="pt-4 flex gap-3">
-              <button
-                onClick={() => setDeletingProfile(null)}
-                className="flex-1 py-2.5 rounded-xl font-bold border border-border text-foreground hover:bg-secondary transition-colors text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="flex-1 py-2.5 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50 text-sm flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-              >
-                {isDeleting && <Loader2 size={16} className="animate-spin" />}
-                {isDeleting ? 'Excluindo…' : 'Excluir'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={!!deletingProfile}
+        onClose={() => setDeletingProfile(null)}
+        title={deletingProfile ? `Excluir o perfil “${deletingProfile.name}”?` : ''}
+        size="sm"
+        dismissable={!isDeleting}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeletingProfile(null)} disabled={isDeleting}>Cancelar</Button>
+            <Button variant="danger" onClick={handleDelete} loading={isDeleting} disabled={deleteCount > 0 && !reassignTargetId}>
+              Excluir perfil
+            </Button>
+          </>
+        }
+      >
+        {deleteError && <Notice tone="danger" className="mb-4">{deleteError}</Notice>}
+        {deleteCount > 0 ? (
+          <>
+            <p className="text-[14px] text-muted mb-4">
+              {deleteCount === 1
+                ? '1 pessoa usa este perfil. Escolha o novo perfil dela antes de excluir.'
+                : `${deleteCount} pessoas usam este perfil. Escolha o novo perfil delas antes de excluir.`}
+            </p>
+            <Field label="Novo perfil" htmlFor="reassign-profile" required>
+              <Select id="reassign-profile" value={reassignTargetId} onChange={(e) => setReassignTargetId(e.target.value)} data-autofocus>
+                <option value="">Escolha o novo perfil</option>
+                {reassignOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </Field>
+          </>
+        ) : (
+          <p className="text-[14px] text-muted">Ninguém usa este perfil, então ele pode ser excluído agora. Isso não pode ser desfeito.</p>
+        )}
+      </Modal>
     </div>
   );
 };

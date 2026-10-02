@@ -78,7 +78,7 @@ interface BaseProps {
   dismissable?: boolean;
 }
 
-const MODAL_WIDTH = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-4xl' } as const;
+const MODAL_WIDTH = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-4xl', '2xl': 'max-w-5xl' } as const;
 
 const CloseButton = ({ onClose }: { onClose: () => void }) => (
   <button
@@ -92,8 +92,13 @@ const CloseButton = ({ onClose }: { onClose: () => void }) => (
 );
 
 export const Modal = ({
-  open, onClose, title, description, children, footer, size = 'md', dismissable = true,
-}: BaseProps & { size?: keyof typeof MODAL_WIDTH }) => {
+  open, onClose, title, description, children, footer, size = 'md', dismissable = true, fill = false,
+}: BaseProps & {
+  size?: keyof typeof MODAL_WIDTH;
+  /** Altura fixa e corpo sem padding/rolagem própria: o conteúdo monta o próprio layout (ex.: colunas
+   *  que rolam sozinhas no editor de perfis). */
+  fill?: boolean;
+}) => {
   const reduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -121,20 +126,20 @@ export const Modal = ({
             aria-labelledby={titleId}
             aria-describedby={description ? descId : undefined}
             tabIndex={-1}
-            className={`relative w-full ${MODAL_WIDTH[size]} max-h-[92vh] flex flex-col bg-panel border border-border rounded-t-xl sm:rounded-lg shadow-2xl outline-none`}
+            className={`relative w-full ${MODAL_WIDTH[size]} ${fill ? 'h-[92vh] sm:h-[min(90vh,760px)]' : ''} max-h-[92vh] flex flex-col bg-panel border border-border rounded-t-xl sm:rounded-lg shadow-2xl outline-none`}
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98, filter: 'blur(6px)' }}
             animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)', transitionEnd: { filter: 'none' } }}
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.98, filter: 'blur(6px)' }}
             transition={{ duration: 0.24, ease: EASE }}
           >
-            <header className="flex items-start justify-between gap-4 px-6 pt-5 pb-4">
+            <header className={`flex items-start justify-between gap-4 px-6 pt-5 pb-4 ${fill ? 'border-b border-border' : ''}`}>
               <div className="min-w-0">
-                <h2 id={titleId} className="text-[17px] font-semibold text-foreground">{title}</h2>
+                <h2 id={titleId} className="text-[17px] font-semibold text-foreground break-words">{title}</h2>
                 {description && <p id={descId} className="mt-1 text-[14px] text-muted">{description}</p>}
               </div>
               {dismissable && <CloseButton onClose={close} />}
             </header>
-            {children && <div className="px-6 pb-5 overflow-y-auto">{children}</div>}
+            {children && <div className={fill ? 'flex-1 min-h-0 flex flex-col' : 'px-6 pb-5 overflow-y-auto'}>{children}</div>}
             {footer && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-6 py-4">{footer}</footer>}
           </motion.div>
         </div>
