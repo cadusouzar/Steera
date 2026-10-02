@@ -112,7 +112,8 @@ const Register = () => {
   const [planName, setPlanName] = useState<string>('');
 
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [focusedPassword, setFocusedPassword] = useState(false);
+  // Campo com foco agora: o balão do Stee explica o que preencher nele.
+  const [focusedField, setFocusedField] = useState<keyof FormState | null>(null);
   // Balão "Achei! Já preenchi pra você." depois de um autopreenchimento por CNPJ/CEP.
   const [justFilled, setJustFilled] = useState(false);
 
@@ -329,21 +330,50 @@ const Register = () => {
 
   const isPJ = form.personType === 'PJ';
 
-  const isCoveringEyes = focusedPassword && !isSubmitting;
+  const isCoveringEyes = (focusedField === 'password' || focusedField === 'confirmPassword') && !isSubmitting;
+  const hasFieldErrors = Object.keys(errors).length > 0;
+  const fieldTips: Partial<Record<keyof FormState, string>> = {
+    personType: 'É uma empresa com CNPJ ou você trabalha no seu CPF?',
+    document: isPJ ? 'O CNPJ da empresa. Com ele eu busco o resto dos dados pra você.' : 'Seu CPF, só os números. O resto eu formato.',
+    phone: 'Um telefone para falarmos com você, de preferência com WhatsApp.',
+    legalName: isPJ ? 'O nome oficial da empresa, como está no cartão do CNPJ.' : 'Seu nome completo, como está no documento.',
+    tradeName: isPJ ? 'O nome que os clientes conhecem. Ex.: Padaria Aurora.' : 'Se você usa um nome comercial. Pode deixar em branco.',
+    zipCode: 'Digite o CEP que eu completo o endereço pra você.',
+    number: 'O número do endereço. Sem número? Escreva "S/N".',
+    state: 'O estado, pela sigla. Ex.: SP.',
+    street: 'Rua, avenida ou praça, sem o número.',
+    district: 'O bairro onde fica a empresa.',
+    city: 'A cidade onde fica a empresa.',
+    complement: 'Sala, andar ou bloco. Se não tiver, pode pular.',
+    name: 'Seu nome, para eu saber como te chamar.',
+    email: 'Seu e-mail de acesso. Vou mandar uma confirmação pra ele.',
+    password: 'Crie uma senha forte. Pode digitar, não estou olhando!',
+    confirmPassword: 'Repita a senha. Continuo de olhos fechados!',
+  };
+
   const bubble = isSubmitting ? 'Preparando tudo…'
-    : error ? 'Opa, algo não bateu. Dá uma olhada?'
-    : isCoveringEyes ? 'Pode digitar, não estou olhando!'
+    : error ? 'Opa, algo não bateu. Dá uma olhada na mensagem.'
     : justFilled ? 'Achei! Já preenchi pra você.'
+    : focusedField && fieldTips[focusedField] ? fieldTips[focusedField]
+    : hasFieldErrors ? 'Faltou algo. Olhe os campos em vermelho.'
     : step === 0 ? 'Vamos começar pela sua empresa.'
-    : step === 1 ? 'Onde fica a empresa?'
-    : 'Agora é o seu acesso.';
+    : step === 1 ? 'Agora, onde fica a empresa?'
+    : 'Por último, o seu acesso.';
 
   const field = (key: keyof FormState) => ({
     id: `reg-${key}`,
     'aria-invalid': errors[key] ? true : undefined,
     className: inputClass(!!errors[key]),
-    onFocus: () => setFocusedPassword(false),
   });
+
+  // O foco de qualquer campo do formulário sobe até aqui: os campos têm id "reg-<chave>"; o seletor
+  // PJ/PF não tem id e conta como "personType".
+  const trackFocus = (e: React.FocusEvent<HTMLFormElement>) => {
+    const id = (e.target as HTMLElement).id;
+    if (id.startsWith('reg-')) setFocusedField(id.slice(4) as keyof FormState);
+    else if ((e.target as HTMLElement).getAttribute('role') === 'radio') setFocusedField('personType');
+    else setFocusedField(null);
+  };
 
   return (
     <div
@@ -396,21 +426,23 @@ const Register = () => {
 
             {/* No computador o Stee ocupa todo o espaço livre abaixo das etapas (até a borda do cartão);
                 no celular fica num tamanho fixo. O componente tem tamanho próprio — o contêiner sobrescreve. */}
-            <div className="relative mt-auto flex justify-center pt-6 md:-mx-6 md:mt-4 md:min-h-[240px] md:flex-1 md:pt-0">
-              <div className="[&>div]:mb-0 [&>div]:h-[150px] [&>div]:w-[170px] md:absolute md:inset-x-0 md:bottom-0 md:top-6 md:[&>div]:h-full md:[&>div]:w-full">
-                <Mascot mousePosition={mousePos} isCoveringEyes={isCoveringEyes} />
-              </div>
+            <div className="mt-auto flex flex-col items-center pt-5 md:-mx-6 md:mt-4 md:min-h-[250px] md:flex-1 md:pt-0">
+              {/* Balão acima do Stee, com a ponta apontando para ele (antes ficava sobre a cabeça).
+                  Altura fixa: o texto muda a cada campo e o Stee não pode ficar subindo e descendo. */}
               <p
                 aria-hidden="true"
-                className="absolute right-0 top-0 max-w-[140px] rounded-[14px] rounded-bl-[4px] bg-white px-3 py-[9px] font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] md:right-4 md:top-0 md:z-10"
+                className="relative flex h-[62px] w-full max-w-[250px] items-center justify-center rounded-[14px] bg-white px-3.5 text-center font-brand text-[13px] font-semibold leading-[1.3] text-[#3E2722] shadow-[0_4px_14px_rgba(62,39,34,0.1)] after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-[8px] after:border-t-[8px] after:border-x-transparent after:border-t-white after:content-['']"
               >
                 {bubble}
               </p>
+              <div className="relative mt-3 w-full flex-1 [&>div]:mb-0 [&>div]:h-[150px] [&>div]:w-[170px] md:[&>div]:absolute md:[&>div]:inset-0 md:[&>div]:h-full md:[&>div]:w-full">
+                <Mascot mousePosition={mousePos} isCoveringEyes={isCoveringEyes} />
+              </div>
             </div>
           </aside>
 
           {/* Lado do formulário: a etapa atual em duas colunas. */}
-          <form onSubmit={handleRegister} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
+          <form onSubmit={handleRegister} onFocus={trackFocus} onBlur={() => setFocusedField(null)} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="text-[18px] font-semibold tracking-tight">{STEP_TITLES[step]}</h2>
               <span className="text-[12px] text-[#666]">Etapa {step + 1} de 3</span>
@@ -505,8 +537,6 @@ const Register = () => {
                     autoComplete="new-password"
                     value={form.password}
                     onChange={(e) => set('password', e.target.value)}
-                    onFocus={() => setFocusedPassword(true)}
-                    onBlur={() => setFocusedPassword(false)}
                     placeholder="Crie uma senha forte"
                   />
                 </Field>
@@ -517,8 +547,6 @@ const Register = () => {
                     autoComplete="new-password"
                     value={form.confirmPassword}
                     onChange={(e) => set('confirmPassword', e.target.value)}
-                    onFocus={() => setFocusedPassword(true)}
-                    onBlur={() => setFocusedPassword(false)}
                     placeholder="Repita a senha"
                   />
                 </Field>
