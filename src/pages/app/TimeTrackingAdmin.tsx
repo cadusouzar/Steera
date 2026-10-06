@@ -580,7 +580,7 @@ function CorrectionTab({ employees }: { employees: { id: string; fullName: strin
             {error && <Notice tone="danger">{error}</Notice>}
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Funcionário" htmlFor="c-emp" required>
-                <Select id="c-emp" required value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); }}>
+                <Select id="c-emp" required value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
                   <option value="" disabled>Selecione</option>
                   {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
                 </Select>

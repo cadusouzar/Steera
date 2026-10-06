@@ -575,11 +575,10 @@ const Profiles = () => {
           return;
         }
         await api.reassignAndDeleteProfile(deletingProfile.id, reassignTargetId);
-        toast.success(`Perfil excluído: ${deletingProfile.name}`);
       } else {
         await api.deleteProfile(deletingProfile.id);
-        toast.success(`Perfil excluído: ${deletingProfile.name}`);
       }
+      toast.success(`Perfil excluído: ${deletingProfile.name}`);
       setDeletingProfile(null);
       await loadAll();
     } catch (err) {

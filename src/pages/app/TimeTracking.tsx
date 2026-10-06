@@ -8,6 +8,7 @@ import {
   type AdjustmentRequestRecord, type TimePunchType, type EmployeeListItem,
 } from '../../lib/api';
 import RollingText from '../../components/motion/RollingText';
+import { reloadAfterSave } from '../../lib/reloadAfterSave';
 import {
   Button, ButtonLink, ConfirmDialog, Drawer, Field, Input, Modal, Notice, PageHeader, Panel, Select,
   StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, toast, type StatusTone,
@@ -108,8 +109,7 @@ const TimeTracking = () => {
       await linkMyEmployee(selectedLinkId);
       const linkedName = linkableEmployees.find((emp) => emp.id === selectedLinkId)?.fullName;
       toast.success(linkedName ? `Ficha vinculada: ${linkedName}` : 'Ficha vinculada');
-      const updated = await refreshCurrentUser();
-      setLinkedEmployeeId(updated.employeeId);
+      await reloadAfterSave(async () => setLinkedEmployeeId((await refreshCurrentUser()).employeeId), setLinkError);
     } catch (err) {
       setLinkError(err instanceof Error ? err.message : 'Não foi possível vincular seu login a este funcionário.');
     } finally {

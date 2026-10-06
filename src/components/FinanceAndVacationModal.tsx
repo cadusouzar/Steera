@@ -6,6 +6,7 @@ import { isOwnDataLocked } from '../lib/grantCoverage';
 import OwnDataNote from './OwnDataNote';
 import { ApiError } from '../lib/apiError';
 import type { EmployeeDetail, EmployeePaymentRecord, EmployeeRecurringPaymentRecord } from '../lib/api';
+import { reloadAfterSave } from '../lib/reloadAfterSave';
 import { Button, ConfirmDialog, Field, Input, Modal, Notice, StatusBadge, Tabs, toast, type StatusTone } from './ui';
 
 // Pagamentos, férias e afastamento de um funcionário (redesenho no kit de peças, 01/10/2026). Fica
@@ -174,7 +175,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       await api.generateEmployeeCharge(recurringPaymentId);
       toast.success('Pagamento do mês gerado');
-      setPayments(await api.listEmployeePayments(id));
+      await reloadAfterSave(async () => setPayments(await api.listEmployeePayments(id)), setActionError);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível gerar a fatura deste mês.');
     } finally {
@@ -190,7 +191,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       await api.unpayEmployeePayment(paymentId);
       toast.success('Pagamento voltou para pendente');
-      setPayments(await api.listEmployeePayments(id));
+      await reloadAfterSave(async () => setPayments(await api.listEmployeePayments(id)), setActionError);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível desfazer o pagamento.');
     } finally {
@@ -204,7 +205,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       await api.deleteEmployeeRecurringPayment(recurringPaymentId);
       toast.success('Recorrência excluída');
-      setRecurringPayments(await api.listEmployeeRecurringPayments(id));
+      await reloadAfterSave(async () => setRecurringPayments(await api.listEmployeeRecurringPayments(id)), setActionError);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível excluir o pagamento recorrente.');
     } finally {
@@ -219,7 +220,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       await api.cancelVacationSchedule(scheduleId);
       toast.success('Férias canceladas');
-      setVacationSchedules(await api.listVacationSchedules(id));
+      await reloadAfterSave(async () => setVacationSchedules(await api.listVacationSchedules(id)), setActionError);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível cancelar as férias.');
     } finally {
@@ -233,7 +234,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       await api.cancelLeaveSchedule(scheduleId);
       toast.success('Afastamento cancelado');
-      setLeaveSchedules(await api.listLeaveSchedules(id));
+      await reloadAfterSave(async () => setLeaveSchedules(await api.listLeaveSchedules(id)), setActionError);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível cancelar o afastamento.');
     } finally {
@@ -250,7 +251,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       await api.resumeVacationSchedule(scheduleId, resumeCapErrorId === scheduleId ? resumeExceptionAuthorized : undefined);
       toast.success('Férias retomadas');
-      setVacationSchedules(await api.listVacationSchedules(id));
+      await reloadAfterSave(async () => setVacationSchedules(await api.listVacationSchedules(id)), setActionError);
       setResumeCapErrorId(null);
       setResumeExceptionAuthorized(false);
     } catch (err) {
@@ -273,7 +274,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
     try {
       await api.resumeLeaveSchedule(scheduleId);
       toast.success('Afastamento retomado');
-      setLeaveSchedules(await api.listLeaveSchedules(id));
+      await reloadAfterSave(async () => setLeaveSchedules(await api.listLeaveSchedules(id)), setActionError);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível retomar o afastamento.');
     } finally {
@@ -294,7 +295,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
         startDate: scheduleStart, endDate: scheduleEnd, daysCount: daysBetween(scheduleStart, scheduleEnd), exceptionAuthorized,
       });
       toast.success(`Férias agendadas${employee ? `: ${employee.fullName}` : ''}`);
-      setVacationSchedules(await api.listVacationSchedules(id));
+      await reloadAfterSave(async () => setVacationSchedules(await api.listVacationSchedules(id)), setActionError);
       setIsSchedulingOpen(false);
       setScheduleStart('');
       setScheduleEnd('');
@@ -319,7 +320,7 @@ const FinanceAndVacationModal: React.FC<FinanceAndVacationModalProps> = ({ emplo
         reason: leaveReason || undefined,
       });
       toast.success(`Afastamento agendado${employee ? `: ${employee.fullName}` : ''}`);
-      setLeaveSchedules(await api.listLeaveSchedules(id));
+      await reloadAfterSave(async () => setLeaveSchedules(await api.listLeaveSchedules(id)), setActionError);
       setIsLeaveSchedulingOpen(false);
       setLeaveScheduleStart('');
       setLeaveScheduleEnd('');

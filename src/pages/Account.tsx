@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
-import { CheckCircle2, CreditCard, Info, LogIn, MailWarning, Pencil, Shield, User } from 'lucide-react';
+import { CreditCard, Info, LogIn, MailWarning, Pencil, Shield, User } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import AccountProfileDetails from '../components/account/AccountProfileDetails';
 import AccountProfileEditForm from '../components/account/AccountProfileEditForm';
@@ -31,7 +31,6 @@ const Account = () => {
   const tab = tabFromPath(location.pathname);
   const [user, setUser] = useState<CurrentUser | null>(() => getCurrentUser());
   const [isEditing, setIsEditing] = useState(false);
-  const [savedNotice, setSavedNotice] = useState(false);
   // Faixa de confirmação de e-mail pendente ("Acesso e sessões", 26/09/2026) — mesmo caso do
   // EmailVerificationRequired que bloqueia o /app inteiro, só que aqui /conta continua acessível
   // (é justamente daqui que a pessoa consegue reenviar sem entrar no sistema).
@@ -53,10 +52,9 @@ const Account = () => {
     }
   };
 
-  // Trocar de aba sai do modo de edição (sem salvar) e esconde o aviso de "salvo".
+  // Trocar de aba sai do modo de edição (sem salvar).
   useEffect(() => {
     setIsEditing(false);
-    setSavedNotice(false);
   }, [tab]);
 
   const tabClass = ({ isActive }: { isActive: boolean }) =>
@@ -117,13 +115,6 @@ const Account = () => {
           </NavLink>
         </nav>
 
-        {savedNotice && (
-          <div role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-foreground">
-            <CheckCircle2 size={18} className="text-primary shrink-0" aria-hidden="true" />
-            Alterações salvas.
-          </div>
-        )}
-
         <section className="bg-panel border border-border rounded-3xl p-6 md:p-8">
           {tab === 'assinatura' && (
             <AccountSubscriptionDetails user={user}>
@@ -146,7 +137,6 @@ const Account = () => {
                 onSaved={(updated) => {
                   setUser(updated);
                   setIsEditing(false);
-                  setSavedNotice(true);
                 }}
               />
             ) : (
@@ -160,10 +150,7 @@ const Account = () => {
                   </p>
                   <button
                     type="button"
-                    onClick={() => {
-                      setSavedNotice(false);
-                      setIsEditing(true);
-                    }}
+                    onClick={() => setIsEditing(true)}
                     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-foreground border border-border hover:bg-secondary/50 transition-colors self-end sm:self-auto shrink-0"
                   >
                     <Pencil size={16} aria-hidden="true" /> Editar
