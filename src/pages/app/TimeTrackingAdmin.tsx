@@ -798,6 +798,7 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId, e
     dailyMinutes: 480, weeklyMinutes: 2400, validFrom: new Date().toISOString().slice(0, 10),
   });
   const [form, setForm] = useState(emptyForm);
+  const [employeeError, setEmployeeError] = useState('');
 
   // GET /work-schedules sem filtro exige hasFullPontoAccess (404 pra quem não tem) — um superior
   // restrito lista só o próprio padrão de time e as jornadas individuais de quem ele administra (uma
@@ -822,7 +823,7 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId, e
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || form.weekDays.length === 0) return;
-    if (tier === 'individual' && !form.employeeId) return;
+    if (tier === 'individual' && !form.employeeId) { setEmployeeError('Escolha o funcionário.'); return; }
     setSaving(true);
     setError('');
     try {
@@ -868,8 +869,8 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId, e
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             {tier === 'individual' && (
-              <Field label="Funcionário" htmlFor="ws-emp" required>
-                <Select id="ws-emp" required value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
+              <Field label="Funcionário" htmlFor="ws-emp" required error={employeeError || undefined}>
+                <Select id="ws-emp" required invalid={!!employeeError} value={form.employeeId} onChange={(e) => { setForm({ ...form, employeeId: e.target.value }); setEmployeeError(''); }}>
                   <option value="" disabled>Selecione</option>
                   {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}</option>)}
                 </Select>

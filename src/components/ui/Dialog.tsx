@@ -12,6 +12,8 @@ import { controlClass } from './fieldStyles';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+// Fora da ordem de Tab: elementos escondidos de leitores de tela ou com tabindex -1 (ex.: select de sincronia do Select do kit).
+const isTabbable = (el: HTMLElement) => el.offsetParent !== null && !el.closest('[aria-hidden="true"]') && el.getAttribute('tabindex') !== '-1';
 
 let openCount = 0;
 // Pilha de janelas abertas: só a do topo reage a Esc e prende o foco (ex.: confirmação aberta por
@@ -47,7 +49,7 @@ function useDialogBehavior(open: boolean, onClose: () => void, panelRef: React.R
         return;
       }
       if (e.key !== 'Tab' || !panelRef.current) return;
-      const items = [...panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+      const items = [...panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(isTabbable);
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];

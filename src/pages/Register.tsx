@@ -373,6 +373,8 @@ const Register = () => {
   // O foco de qualquer campo do formulário sobe até aqui: os campos têm id "reg-<chave>"; o seletor
   // PJ/PF não tem id e conta como "personType".
   const trackFocus = (e: React.FocusEvent<HTMLFormElement>) => {
+    // A lista do dropdown vive num portal fora do formulário: eventos dela não mexem no foco rastreado.
+    if (!e.currentTarget.contains(e.target as Node)) return;
     const id = (e.target as HTMLElement).id;
     if (id.startsWith('reg-')) setFocusedField(id.slice(4) as keyof FormState);
     else if ((e.target as HTMLElement).getAttribute('role') === 'radio') setFocusedField('personType');
@@ -445,7 +447,7 @@ const Register = () => {
           </aside>
 
           {/* Lado do formulário: a etapa atual em duas colunas. */}
-          <form onSubmit={handleRegister} onFocus={trackFocus} onBlur={() => setFocusedField(null)} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
+          <form onSubmit={handleRegister} onFocus={trackFocus} onBlur={(e) => { if (!e.currentTarget.contains(e.target as Node)) return; setFocusedField(null); }} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="text-[18px] font-semibold tracking-tight">{STEP_TITLES[step]}</h2>
               <span className="text-[12px] text-[var(--a-muted)]">Etapa {step + 1} de 3</span>
@@ -506,7 +508,7 @@ const Register = () => {
                 </Field>
                 <Field label="UF" htmlFor="reg-state" required error={errors.state} className="col-span-2 sm:col-span-1">
                   <Select {...field('state')} unstyled value={form.state} onChange={(e) => set('state', e.target.value)}>
-                    <option value="">Selecione</option>
+                    <option value="">UF</option>
                     {BRAZILIAN_STATES.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
                   </Select>
                 </Field>

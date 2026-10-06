@@ -92,6 +92,10 @@ const Select = ({
   const [query, setQuery] = useState('');
   const [labelInfo, setLabelInfo] = useState<{ name: string; labelId?: string }>({ name: '' });
   const [active, setActive] = useState(-1);
+  const [nativeInvalid, setNativeInvalid] = useState(false);
+  // Dentro de um modal a lista vai para o próprio diálogo (leitores de tela ignoram o que está fora de aria-modal).
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [popWidth, setPopWidth] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -115,6 +119,7 @@ const Select = ({
 
   const choose = (next: string) => {
     if (value === undefined) setInner(next);
+    setNativeInvalid(false);
     if (next !== current) onChange?.({ target: { value: next, name } });
   };
 
@@ -127,6 +132,7 @@ const Select = ({
   const openList = () => {
     if (disabled) return;
     setAnchor(triggerRef.current?.getBoundingClientRect() ?? null);
+    setPortalTarget(triggerRef.current?.closest<HTMLElement>('[role="dialog"]') ?? document.body);
     setQuery('');
     const labelEl = document.querySelector<HTMLElement>(`label[for="${CSS.escape(triggerId)}"]`);
     setLabelInfo({ name: ariaLabel ?? labelEl?.textContent?.replace(/\s*\*\s*$/, '').trim() ?? '', labelId: labelEl?.id || undefined });
@@ -143,6 +149,13 @@ const Select = ({
     (withSearch && !coarse ? searchRef.current : listRef.current)?.focus({ preventScroll: true });
   }, [open, withSearch]);
 
+  // Largura real da lista (pode passar do campo): usada para nunca vazar pela borda direita.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const w = popRef.current?.offsetWidth ?? 0;
+    if (w) setPopWidth((prev) => (prev === w ? prev : w));
+  }, [open, anchor, visible]);
+
   // Mantém a opção ativa à vista.
   useEffect(() => {
     if (!open || active < 0) return;
@@ -158,6 +171,11 @@ const Select = ({
       const target = e.target as Node;
       if (popRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
       close(false);
+      // Clique em área sem foco: devolve o foco ao campo (sem roubar de outro controle focável).
+      window.setTimeout(() => {
+        const a = document.activeElement;
+        if (a === document.body || popRef.current?.contains(a)) triggerRef.current?.focus({ preventScroll: true });
+      }, 0);
     };
     const reposition = (e: Event) => {
       if (e.target instanceof Node && popRef.current?.contains(e.target)) return;
@@ -224,8 +242,13 @@ const Select = ({
     switch (e.key) {
       case 'ArrowDown': e.preventDefault(); step(1); break;
       case 'ArrowUp': e.preventDefault(); step(-1); break;
-      case 'Home': e.preventDefault(); edge(false); break;
-      case 'End': e.preventDefault(); edge(true); break;
+      case 'Home':
+      case 'End':
+        // Na busca, Home/End movem o cursor do texto.
+        if (e.target === searchRef.current) break;
+        e.preventDefault();
+        edge(e.key === 'End');
+        break;
       case 'Enter': {
         e.preventDefault();
         const o = visible[active];
@@ -265,7 +288,7 @@ const Select = ({
     listMaxHeight = Math.max(120, Math.min(MAX_VISIBLE * ITEM_HEIGHT, room));
     popStyle = {
       position: 'fixed',
-      left: Math.max(8, Math.min(anchor.left, window.innerWidth - 8 - anchor.width)),
+      left: Math.max(8, Math.min(anchor.left, window.innerWidth - 8 - Math.max(popWidth, anchor.width))),
       minWidth: anchor.width,
       ...(openUp ? { bottom: window.innerHeight - anchor.top + GAP } : { top: anchor.bottom + GAP }),
       transformOrigin: openUp ? 'bottom' : 'top',
@@ -274,10 +297,12 @@ const Select = ({
   const offsetY = reduceMotion ? 0 : openUp ? 4 : -4;
   const startScale = reduceMotion ? 1 : 0.96;
 
+  const isInvalid = !!invalid || nativeInvalid || ariaInvalid === true || ariaInvalid === 'true';
   const showsPlaceholder = !selected || selected.value === '';
 
   return (
     <>
+      <div className="relative">
       <button
         ref={triggerRef}
         id={triggerId}
@@ -288,14 +313,14 @@ const Select = ({
         aria-controls={open ? listId : undefined}
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
-        aria-invalid={invalid || ariaInvalid === true || ariaInvalid === 'true' || undefined}
+        aria-invalid={isInvalid || undefined}
         aria-required={required || undefined}
         data-autofocus={dataAutofocus}
         disabled={disabled}
         onClick={() => (open ? close(false) : openList())}
         onKeyDown={onTriggerKeyDown}
         className={`flex items-center justify-between gap-2 text-left ${
-          unstyled ? className : controlClass(invalid, `h-10 ${className}`)
+          unstyled ? className : controlClass(isInvalid, `h-10 ${className}`)
         }`}
       >
         <span className={`truncate ${showsPlaceholder ? 'text-muted' : ''}`}>{selected ? selected.label : placeholder}</span>
@@ -319,11 +344,14 @@ const Select = ({
           onChange={() => undefined}
           // A validação nativa (required) foca este campo invisível: devolve o foco ao botão visível.
           onFocus={() => triggerRef.current?.focus()}
-          className="sr-only pointer-events-none"
+          // Marca o botão como inválido; sem preventDefault, o aviso nativo aparece ancorado sobre ele.
+          onInvalid={() => setNativeInvalid(true)}
+          className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
         >
-          {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {options.map((o, i) => <option key={i} value={o.value}>{o.label}</option>)}
         </select>
       )}
+      </div>
 
       {createPortal(
         <AnimatePresence>
@@ -410,7 +438,7 @@ const Select = ({
             </motion.div>
           )}
         </AnimatePresence>,
-        document.body,
+        portalTarget ?? document.body,
       )}
     </>
   );
