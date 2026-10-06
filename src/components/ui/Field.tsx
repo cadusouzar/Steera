@@ -1,5 +1,4 @@
-import { forwardRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { forwardRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { controlClass } from './fieldStyles';
 
 // Campo de formulário do kit (01/10/2026): rótulo + controle + mensagem de erro/dica. Mesma API do
@@ -34,19 +33,6 @@ type InputProps = InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean };
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ invalid, className = '', ...rest }, ref) {
   return <input ref={ref} aria-invalid={invalid || undefined} className={controlClass(invalid, `h-10 ${className}`)} {...rest} />;
-});
-
-type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean };
-
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select({ invalid, className = '', children, ...rest }, ref) {
-  return (
-    <div className="relative">
-      <select ref={ref} aria-invalid={invalid || undefined} className={controlClass(invalid, `h-10 appearance-none pr-9 ${className}`)} {...rest}>
-        {children}
-      </select>
-      <ChevronDown size={16} strokeWidth={1.8} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" aria-hidden="true" />
-    </div>
-  );
 });
 
 type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean };

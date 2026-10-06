@@ -35,7 +35,7 @@ function useDialogBehavior(open: boolean, onClose: () => void, panelRef: React.R
     const focusTimer = window.setTimeout(() => {
       const panel = panelRef.current;
       if (!panel) return;
-      const preferred = panel.querySelector<HTMLElement>('[data-autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled])');
+      const preferred = panel.querySelector<HTMLElement>('[data-autofocus], input:not([disabled]), button[role="combobox"]:not(:disabled), select:not([disabled]), textarea:not([disabled])');
       (preferred ?? panel).focus();
     }, 30);
 
