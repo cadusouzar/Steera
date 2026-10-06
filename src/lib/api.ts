@@ -101,6 +101,17 @@ interface ApiFinancialSummary {
     contact: string;
     overdueAmount: number | string;
   }>;
+  period: { from: string; to: string } | null;
+  receipts: Array<{
+    id: string;
+    clientId: string;
+    clientName: string;
+    description: string;
+    dueDate: string;
+    paidAt: string;
+    amount: number | string;
+  }>;
+  receiptsTruncated: boolean;
 }
 
 // ---- Shapes the UI works with ----
@@ -154,12 +165,24 @@ export interface Defaulter {
   contact: string;
   overdueAmount: number;
 }
+export interface Receipt {
+  id: string;
+  clientId: string;
+  clientName: string;
+  description: string;
+  dueDate: string;
+  paidAt: string;
+  amount: number;
+}
 export interface FinancialSummary {
   totalPaid: number;
   totalPending: number;
   totalOverdue: number;
   totalRecurring: number;
   topDefaulters: Defaulter[];
+  period: { from: string; to: string } | null;
+  receipts: Receipt[];
+  receiptsTruncated: boolean;
 }
 
 function mapReceivable(r: ApiReceivable): Receivable {
@@ -1043,14 +1066,21 @@ export async function reassignAndDeleteProfile(id: string, targetProfileId: stri
 }
 
 // ---- Reports ----
-export async function getFinancialSummary(): Promise<FinancialSummary> {
-  const res = await request<ApiFinancialSummary>(`/reports/financial-summary`);
+// Sem período: o relatório de sempre (Visão Geral). Com período: também a lista de recebimentos.
+export async function getFinancialSummary(period?: { from: Date; to: Date }): Promise<FinancialSummary> {
+  const query = period
+    ? `?${new URLSearchParams({ from: period.from.toISOString(), to: period.to.toISOString() }).toString()}`
+    : '';
+  const res = await request<ApiFinancialSummary>(`/reports/financial-summary${query}`);
   return {
     totalPaid: Number(res.totalPaid),
     totalPending: Number(res.totalPending),
     totalOverdue: Number(res.totalOverdue),
     totalRecurring: Number(res.totalRecurring),
     topDefaulters: res.topDefaulters.map((d) => ({ ...d, overdueAmount: Number(d.overdueAmount) })),
+    period: res.period,
+    receipts: res.receipts.map((r) => ({ ...r, amount: Number(r.amount) })),
+    receiptsTruncated: res.receiptsTruncated,
   };
 }
 
