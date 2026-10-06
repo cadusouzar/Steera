@@ -25,7 +25,7 @@ const PRESETS: Array<{ value: PeriodPreset; label: string }> = [
 const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 const formatDate = (isoDate: string) => isoDate.split('-').reverse().join('/');
 const formatDateTime = (iso: string) =>
-  new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+  new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
 const Figure = ({ label, value, hint, danger }: { label: string; value: number; hint: string; danger?: boolean }) => (
   <div className="rounded-md border border-border px-4 py-3">
@@ -92,7 +92,7 @@ const ClientReportModal: React.FC<ClientReportModalProps> = ({ open, onClose }) 
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Fechar</Button>
-          <Button icon={Printer} onClick={() => window.print()} disabled={!summary || isLoading || customInvalid}>Imprimir</Button>
+          <Button icon={Printer} onClick={() => window.print()} disabled={!summary || isLoading || customInvalid || !!error}>Imprimir</Button>
         </>
       }
     >
