@@ -1,4 +1,5 @@
 import { CustomFieldDefinition, CustomFieldType } from './api';
+import Select from '../components/ui/Select';
 import { controlClass } from '../components/ui/fieldStyles';
 import { formatCnpjInput, formatCpfInput, formatPhoneInput, isValidCnpj, isValidCpf, isValidPhone } from './validation';
 
@@ -101,10 +102,10 @@ export function renderTypedInput(
       );
     case 'SELECT':
       return (
-        <select id={id} className={`${baseClass} ${borderClass(false)}`} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+        <Select id={id} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
           <option value="">Selecione...</option>
           {(options ?? []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
+        </Select>
       );
     case 'MULTI_SELECT': {
       const selected = Array.isArray(value) ? (value as string[]) : [];

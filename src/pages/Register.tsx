@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Check, Loader2 } from 'lucide-react';
 import Mascot from '../components/Mascot';
-import { Field, SegmentedControl } from '../components/ui';
+import { Field, SegmentedControl, Select } from '../components/ui';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
 import { usePasswordStrength } from '../hooks/usePasswordStrength';
 import { buildPasswordUserInputs, isWeakPasswordError } from '../lib/passwordStrength';
@@ -505,10 +505,10 @@ const Register = () => {
                   <input {...field('number')} maxLength={20} value={form.number} onChange={(e) => set('number', e.target.value)} placeholder="123" />
                 </Field>
                 <Field label="UF" htmlFor="reg-state" required error={errors.state} className="col-span-2 sm:col-span-1">
-                  <select {...field('state')} value={form.state} onChange={(e) => set('state', e.target.value)}>
+                  <Select {...field('state')} unstyled value={form.state} onChange={(e) => set('state', e.target.value)}>
                     <option value="">Selecione</option>
                     {BRAZILIAN_STATES.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
-                  </select>
+                  </Select>
                 </Field>
                 <Field label="Logradouro" htmlFor="reg-street" required error={errors.street} className="col-span-2 sm:col-span-3">
                   <input {...field('street')} maxLength={NAME_MAX_LENGTH} value={form.street} onChange={(e) => set('street', e.target.value)} placeholder="Rua, avenida…" />

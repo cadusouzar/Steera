@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Loader2, Lock } from 'lucide-react';
 import FormField from '../FormField';
+import { Select } from '../ui';
 import { fetchAddressByCep } from '../../lib/brazilLookups';
 import { updateMyCompany, updateMyName, type CurrentUser } from '../../lib/auth';
 import {
@@ -217,12 +218,12 @@ const AccountProfileEditForm: React.FC<AccountProfileEditFormProps> = ({ user, o
                 <input id="account-city" value={company.city} maxLength={NAME_MAX_LENGTH} onChange={(e) => setField('city', e.target.value)} className={inputClass(!!errors.city)} />
               </FormField>
               <FormField label="UF" htmlFor="account-state" required={isAdmin} error={errors.state}>
-                <select id="account-state" value={company.state} onChange={(e) => setField('state', e.target.value)} className={inputClass(!!errors.state)}>
+                <Select id="account-state" unstyled className={inputClass(!!errors.state)} value={company.state} onChange={(e) => setField('state', e.target.value)}>
                   <option value="">Selecione</option>
                   {BRAZILIAN_STATES.map((uf) => (
                     <option key={uf} value={uf}>{uf}</option>
                   ))}
-                </select>
+                </Select>
               </FormField>
             </div>
             <p className="text-xs text-muted">

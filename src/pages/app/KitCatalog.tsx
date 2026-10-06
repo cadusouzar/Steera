@@ -8,7 +8,14 @@ import {
 // Catálogo do kit de peças — SÓ em desenvolvimento (rota registrada atrás de import.meta.env.DEV em
 // App.tsx, carregada sob demanda; nunca entra no build de produção). Serve pra conferir cada peça em
 // todos os estados, nos dois temas, antes de levar às telas reais.
+const KIT_PEOPLE = [
+  'Ana Souza', 'Bruno Lima', 'Carla Mendes', 'Diego Araújo', 'Élida Rocha', 'Fábio Nunes',
+  'Gabriela Costa', 'Heitor Alves', 'Íris Barbosa', 'João Pereira', 'Larissa Dias', 'Marcos Teixeira',
+];
+
 const KitCatalog = () => {
+  const [kitShort, setKitShort] = useState('clt');
+  const [kitLong, setKitLong] = useState('');
   const [modal, setModal] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -54,6 +61,33 @@ const KitCatalog = () => {
             </Field>
             <Field label="Desabilitado" htmlFor="k-dis"><Input id="k-dis" disabled defaultValue="Não editável" /></Field>
             <Field label="Observação" htmlFor="k-obs" className="sm:col-span-2"><Textarea id="k-obs" placeholder="Texto livre" /></Field>
+          </div>
+        </Panel>
+
+        <Panel title="Dropdown">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Lista curta" htmlFor="k-sel-short">
+              <Select id="k-sel-short" value={kitShort} onChange={(e) => setKitShort(e.target.value)}>
+                <option value="clt">CLT</option>
+                <option value="pj">PJ</option>
+                <option value="estagio">Estágio</option>
+              </Select>
+            </Field>
+            <Field label="Lista longa (com busca)" htmlFor="k-sel-long" hint="Mais de 8 opções liga a busca.">
+              <Select id="k-sel-long" value={kitLong} onChange={(e) => setKitLong(e.target.value)}>
+                <option value="">Nenhum (sem superior)</option>
+                {KIT_PEOPLE.map((p) => <option key={p} value={p}>{p}</option>)}
+              </Select>
+            </Field>
+            <Field label="Desativado" htmlFor="k-sel-dis">
+              <Select id="k-sel-dis" value="loja" disabled><option value="loja">Loja</option></Select>
+            </Field>
+            <Field label="Com erro" htmlFor="k-sel-err" error="Escolha um cargo.">
+              <Select id="k-sel-err" value="" invalid onChange={() => undefined}>
+                <option value="">Selecione…</option>
+                <option value="a">Atendente</option>
+              </Select>
+            </Field>
           </div>
         </Panel>
 
