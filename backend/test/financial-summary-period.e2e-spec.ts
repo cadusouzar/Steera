@@ -130,5 +130,9 @@ describe('Relatório financeiro por período (e2e)', () => {
     const garbage = await request(server).get('/reports/financial-summary')
       .query({ from: 'ontem', to: '2026-10-05T00:00:00.000Z' }).set('Authorization', token).expect(400);
     expect(garbage.body.message).toBe('Data de início do período inválida.');
+    const badTz = await request(server).get('/reports/financial-summary')
+      .query({ from: '2026-10-05T11:00:00.000Z', to: '2026-10-06T04:00:59.999Z', tz: 'Mars/Olympus' })
+      .set('Authorization', token).expect(400);
+    expect(badTz.body.message).toBe('Fuso horário inválido.');
   });
 });

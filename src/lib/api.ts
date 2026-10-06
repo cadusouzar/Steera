@@ -1069,7 +1069,12 @@ export async function reassignAndDeleteProfile(id: string, targetProfileId: stri
 // Sem período: o relatório de sempre (Visão Geral). Com período: também a lista de recebimentos.
 export async function getFinancialSummary(period?: { from: Date; to: Date }): Promise<FinancialSummary> {
   const query = period
-    ? `?${new URLSearchParams({ from: period.from.toISOString(), to: period.to.toISOString() }).toString()}`
+    ? `?${new URLSearchParams({
+        from: period.from.toISOString(),
+        to: period.to.toISOString(),
+        // fuso do navegador: os dias de vencimento e o "hoje" do período seguem o mesmo fuso das datas enviadas
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }).toString()}`
     : '';
   const res = await request<ApiFinancialSummary>(`/reports/financial-summary${query}`);
   return {

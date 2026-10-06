@@ -31,4 +31,19 @@ describe('parseReportPeriod', () => {
     );
     expect(parseReportPeriod('2025-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z')).toBeDefined();
   });
+
+  it('tz válido é aceito e levado junto', () => {
+    const p = parseReportPeriod('2026-10-05T11:00:00.000Z', '2026-10-06T04:00:59.999Z', 'America/Manaus');
+    expect(p?.timeZone).toBe('America/Manaus');
+  });
+
+  it('tz inválido é 400', () => {
+    expect(() => parseReportPeriod('2026-10-05T11:00:00.000Z', '2026-10-06T04:00:59.999Z', 'Mars/Olympus')).toThrow(
+      new BadRequestException('Fuso horário inválido.'),
+    );
+  });
+
+  it('tz sem período é ignorado', () => {
+    expect(parseReportPeriod(undefined, undefined, 'Mars/Olympus')).toBeUndefined();
+  });
 });

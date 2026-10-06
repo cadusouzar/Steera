@@ -40,12 +40,13 @@ export class ReportsService {
     const revenueClientFilter = { client: { companyId, includeInRevenueReport: true } };
 
     // Sem período: comportamento de sempre (hoje = dia UTC). Com período (06/10/2026): hoje e os
-    // dias do período seguem o fuso da empresa — Company é tabela central, lida fora de transação.
+    // dias do período seguem o fuso informado (`tz`, do navegador) ou, sem ele, o da empresa — Company é tabela central, lida fora de transação.
     let today = startOfToday();
     let fromDate: Date | undefined;
     let toDate: Date | undefined;
     if (period) {
-      const { timezone } = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { timezone: true } });
+      const timezone = period.timeZone
+        ?? (await this.prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { timezone: true } })).timezone;
       today = localDateOnly(new Date(), timezone);
       fromDate = localDateOnly(period.from, timezone);
       toDate = localDateOnly(period.to, timezone);

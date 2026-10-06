@@ -195,5 +195,24 @@ describe('ReportsService', () => {
         amount: 99.5,
       });
     });
+
+    it('com tz no período usa esse fuso e não lê o fuso da empresa', async () => {
+      jest.setSystemTime(new Date('2026-10-06T15:00:00.000Z'));
+      const manaus = {
+        from: new Date('2026-10-06T04:00:00.000Z'),
+        to: new Date('2026-10-07T03:59:59.999Z'),
+        timeZone: 'America/Manaus',
+      };
+      prisma.receivable.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+      prisma.receivable.findMany.mockResolvedValue([]);
+
+      await service.financialSummary(5, manaus);
+
+      const [, pendingCall, overdueCall] = prisma.receivable.aggregate.mock.calls;
+      const day = new Date('2026-10-06T00:00:00.000Z');
+      expect(pendingCall[0].where.dueDate).toEqual({ gte: day, lte: day });
+      expect(overdueCall[0].where.dueDate).toEqual({ gte: day, lte: day, lt: day });
+      expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
   });
 });

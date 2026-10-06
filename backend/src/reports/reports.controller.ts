@@ -19,7 +19,7 @@ export class ReportsController {
   @Get('financial-summary')
   async financialSummary(@Query() query: FinancialSummaryQueryDto) {
     const limit = query.topDefaulters ? parseInt(query.topDefaulters, 10) : 5;
-    const period = parseReportPeriod(query.from, query.to);
+    const period = parseReportPeriod(query.from, query.to, query.tz);
     return this.reportsService.financialSummary(Number.isFinite(limit) && limit > 0 ? limit : 5, period);
   }
 }
