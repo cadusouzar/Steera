@@ -52,3 +52,16 @@ export function localMidnightUtc(dateOnlyUtc: Date, timeZone: string): Date {
   const offsetMs = wallClockAsIfUtc - utcGuess;
   return new Date(utcGuess - offsetMs);
 }
+
+// Inverso de localMidnightUtc: dado um instante real, devolve o dia de calendário que ele tem no
+// fuso informado, normalizado para meia-noite UTC (o formato das colunas `@db.Date`). Usado pelo
+// relatório financeiro por período: um período 05/10 08:00 → 06/10 01:00 (horário da empresa)
+// precisa cobrir os vencimentos dos dias 05 e 06, não os dias UTC desses instantes.
+export function localDateOnly(instant: Date, timeZone: string): Date {
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts: Record<string, string> = {};
+  for (const part of formatter.formatToParts(instant)) {
+    if (part.type !== 'literal') parts[part.type] = part.value;
+  }
+  return new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)));
+}
