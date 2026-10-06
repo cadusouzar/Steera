@@ -51,8 +51,12 @@ const ToastPill = ({ item }: { item: ToastItem }) => {
   const remaining = useRef(DURATION_MS);
   const timer = useRef<number | null>(null);
   const startedAt = useRef(0);
+  const hovered = useRef(false);
+  const focused = useRef(false);
+  const dismissed = useRef(false);
 
   const start = () => {
+    if (dismissed.current) return;
     if (timer.current !== null) window.clearTimeout(timer.current);
     startedAt.current = Date.now();
     timer.current = window.setTimeout(() => toast.dismiss(item.id), remaining.current);
@@ -67,7 +71,11 @@ const ToastPill = ({ item }: { item: ToastItem }) => {
   // Nova pílula ou mensagem repetida (bump): tempo cheio de novo.
   useEffect(() => {
     remaining.current = DURATION_MS;
-    start();
+    if (!hovered.current && !focused.current) start();
+    else if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
     return () => {
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = null;
@@ -79,16 +87,21 @@ const ToastPill = ({ item }: { item: ToastItem }) => {
   return (
     <motion.button
       type="button"
-      layout
+      layout={!reduceMotion}
       initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.98 }}
       transition={{ type: 'spring', stiffness: 520, damping: 40, mass: 0.7 }}
-      onMouseEnter={pause}
-      onMouseLeave={start}
-      onFocus={pause}
-      onBlur={start}
-      onClick={() => toast.dismiss(item.id)}
+      onMouseEnter={() => { hovered.current = true; pause(); }}
+      onMouseLeave={() => { hovered.current = false; if (!focused.current) start(); }}
+      onFocus={() => { focused.current = true; pause(); }}
+      onBlur={() => { focused.current = false; if (!hovered.current) start(); }}
+      onClick={() => {
+        dismissed.current = true;
+        if (timer.current !== null) window.clearTimeout(timer.current);
+        timer.current = null;
+        toast.dismiss(item.id);
+      }}
       title="Fechar"
       className="pointer-events-auto flex max-w-[min(420px,100%)] items-center gap-2.5 rounded-lg bg-primary px-4 py-3 text-left text-[14px] font-medium text-primary-foreground shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
     >
