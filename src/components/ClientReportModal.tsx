@@ -3,7 +3,7 @@ import { Printer } from 'lucide-react';
 import * as api from '../lib/api';
 import type { FinancialSummary } from '../lib/api';
 import { customPeriod, formatPeriod, presetPeriod, toDateInput, type PeriodPreset, type ReportPeriod } from '../lib/reportPeriod';
-import { Button, EmptyState, Field, Input, Modal, Notice, SegmentedControl, Table, TBody, TD, TH, THead, TR } from './ui';
+import { Button, EmptyState, Field, Input, Modal, Notice, SegmentedControl, Select, Table, TBody, TD, TH, THead, TR } from './ui';
 
 // Relatório financeiro geral (kit, etapa 5 do polimento — 01/10/2026). Período (06/10/2026): atalhos
 // por dia de calendário + "Personalizado" com data e hora — é assim que quem fecha o caixa depois
@@ -39,8 +39,20 @@ const Figure = ({ label, value, hint, danger }: { label: string; value: number; 
 
 const ClientReportModal: React.FC<ClientReportModalProps> = ({ open, onClose }) => {
   const [preset, setPreset] = useState<PeriodPreset>('thisMonth');
-  const today = toDateInput(new Date());
-  const [custom, setCustom] = useState({ startDate: today, startTime: '00:00', endDate: today, endTime: '23:59' });
+  const [custom, setCustom] = useState(() => {
+    const today = toDateInput(new Date());
+    return { startDate: today, startTime: '00:00', endDate: today, endTime: '23:59' };
+  });
+  // Cada abertura recalcula "hoje": a tela pode ter ficado aberta de um dia para o outro.
+  const [openedAt, setOpenedAt] = useState(() => new Date());
+  useEffect(() => {
+    if (!open) return;
+    const now = new Date();
+    const today = toDateInput(now);
+    setOpenedAt(now);
+    setPreset('thisMonth');
+    setCustom({ startDate: today, startTime: '00:00', endDate: today, endTime: '23:59' });
+  }, [open]);
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +60,8 @@ const ClientReportModal: React.FC<ClientReportModalProps> = ({ open, onClose }) 
   const period: ReportPeriod | null = useMemo(
     () => (preset === 'custom'
       ? customPeriod(custom.startDate, custom.startTime, custom.endDate, custom.endTime)
-      : presetPeriod(preset)),
-    [preset, custom],
+      : presetPeriod(preset, openedAt)),
+    [preset, custom, openedAt],
   );
   const customInvalid = preset === 'custom' && period === null;
   const periodKey = period ? `${period.from.getTime()}-${period.to.getTime()}` : '';
@@ -85,8 +97,15 @@ const ClientReportModal: React.FC<ClientReportModalProps> = ({ open, onClose }) 
       }
     >
       <div className="mb-5 space-y-4">
-        <div className="overflow-x-auto scrollbar-none">
+        <div className="hidden sm:block">
           <SegmentedControl label="Período do relatório" options={PRESETS} value={preset} onChange={setPreset} />
+        </div>
+        <div className="sm:hidden">
+          <Field label="Período do relatório" htmlFor="report-period-select">
+            <Select id="report-period-select" value={preset} onChange={(e) => setPreset(e.target.value as PeriodPreset)}>
+              {PRESETS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Field>
         </div>
         {preset === 'custom' && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
