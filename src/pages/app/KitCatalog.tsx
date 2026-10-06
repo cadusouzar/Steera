@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowRight, Download, Plus, Trash2 } from 'lucide-react';
 import {
   Button, ButtonLink, ConfirmDialog, Drawer, EmptyState, Field, Input, Modal, PageHeader, Panel, PanelLink,
-  Select, StatCard, StatValue, StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea,
+  Select, StatCard, StatValue, StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, toast,
 } from '../../components/ui';
 
 // Catálogo do kit de peças — SÓ em desenvolvimento (rota registrada atrás de import.meta.env.DEV em
@@ -88,6 +88,15 @@ const KitCatalog = () => {
                 <option value="a">Atendente</option>
               </Select>
             </Field>
+          </div>
+        </Panel>
+
+        <Panel title="Notificação">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => toast.success('Funcionário cadastrado: Marina Alves')}>Cadastro</Button>
+            <Button variant="secondary" onClick={() => toast.success('Ajuste aprovado: Ana Souza')}>Aprovação</Button>
+            <Button variant="secondary" onClick={() => toast.success('Senha alterada')}>Curta</Button>
+            <Button variant="secondary" onClick={() => toast.success('Cliente enviado para a lixeira: Padaria e Confeitaria Pão Quente da Esquina Ltda')}>Longa</Button>
           </div>
         </Panel>
 
