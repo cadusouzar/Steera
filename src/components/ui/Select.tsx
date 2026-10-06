@@ -37,6 +37,8 @@ interface SelectProps {
   'aria-label'?: string;
   'aria-labelledby'?: string;
   'aria-invalid'?: boolean | 'true' | 'false';
+  /** Repassado ao botão: o foco inicial de Modal/Drawer procura por `data-autofocus`. */
+  'data-autofocus'?: boolean | string;
 }
 
 interface Option {
@@ -78,7 +80,7 @@ function readOptions(children: ReactNode): Option[] {
 
 const Select = ({
   id, name, value, defaultValue, onChange, children, required, disabled, invalid, className = '', unstyled = false,
-  placeholder = 'Selecione…', searchable, 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy, 'aria-invalid': ariaInvalid,
+  placeholder = 'Selecione…', searchable, 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy, 'aria-invalid': ariaInvalid, 'data-autofocus': dataAutofocus,
 }: SelectProps) => {
   const options = useMemo(() => readOptions(children), [children]);
   const [inner, setInner] = useState(defaultValue ?? '');
@@ -88,6 +90,7 @@ const Select = ({
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const [query, setQuery] = useState('');
+  const [labelInfo, setLabelInfo] = useState<{ name: string; labelId?: string }>({ name: '' });
   const [active, setActive] = useState(-1);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -125,6 +128,8 @@ const Select = ({
     if (disabled) return;
     setAnchor(triggerRef.current?.getBoundingClientRect() ?? null);
     setQuery('');
+    const labelEl = document.querySelector<HTMLElement>(`label[for="${CSS.escape(triggerId)}"]`);
+    setLabelInfo({ name: ariaLabel ?? labelEl?.textContent?.replace(/\s*\*\s*$/, '').trim() ?? '', labelId: labelEl?.id || undefined });
     const i = options.findIndex((o) => o.value === current && !o.disabled);
     setActive(i >= 0 ? i : firstEnabled(options));
     setOpen(true);
@@ -133,7 +138,9 @@ const Select = ({
   // Foco ao abrir: busca (se houver) ou a própria lista; sem rolar a página.
   useLayoutEffect(() => {
     if (!open) return;
-    (withSearch ? searchRef.current : listRef.current)?.focus({ preventScroll: true });
+    // Em tela de toque a busca não recebe foco (o teclado virtual taparia a lista); continua tocável.
+    const coarse = window.matchMedia('(pointer: coarse)').matches;
+    (withSearch && !coarse ? searchRef.current : listRef.current)?.focus({ preventScroll: true });
   }, [open, withSearch]);
 
   // Mantém a opção ativa à vista.
@@ -283,6 +290,7 @@ const Select = ({
         aria-labelledby={ariaLabelledBy}
         aria-invalid={invalid || ariaInvalid === true || ariaInvalid === 'true' || undefined}
         aria-required={required || undefined}
+        data-autofocus={dataAutofocus}
         disabled={disabled}
         onClick={() => (open ? close(false) : openList())}
         onKeyDown={onTriggerKeyDown}
@@ -309,6 +317,8 @@ const Select = ({
           disabled={disabled}
           value={current}
           onChange={() => undefined}
+          // A validação nativa (required) foca este campo invisível: devolve o foco ao botão visível.
+          onFocus={() => triggerRef.current?.focus()}
           className="sr-only pointer-events-none"
         >
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -342,7 +352,7 @@ const Select = ({
                       aria-controls={listId}
                       aria-autocomplete="list"
                       aria-activedescendant={active >= 0 ? optionId(active) : undefined}
-                      aria-label="Buscar opção"
+                      aria-label={labelInfo.name ? `Buscar em ${labelInfo.name}` : 'Buscar opção'}
                       placeholder="Buscar…"
                       autoComplete="off"
                       value={query}
@@ -362,7 +372,8 @@ const Select = ({
                 id={listId}
                 role="listbox"
                 tabIndex={-1}
-                aria-labelledby={triggerId}
+                aria-labelledby={labelInfo.labelId}
+                aria-label={labelInfo.labelId ? undefined : labelInfo.name || undefined}
                 aria-activedescendant={!withSearch && active >= 0 ? optionId(active) : undefined}
                 style={{ maxHeight: listMaxHeight }}
                 className="overflow-y-auto overscroll-contain py-1 outline-none"
