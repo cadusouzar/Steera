@@ -5,12 +5,13 @@ import { ReportsService } from './reports.service';
 
 describe('ReportsService', () => {
   let service: ReportsService;
-  let prisma: { receivable: Record<string, jest.Mock>; subscription: Record<string, jest.Mock> };
+  let prisma: Record<string, Record<string, jest.Mock>>;
 
   beforeEach(async () => {
     prisma = {
       receivable: { aggregate: jest.fn(), findMany: jest.fn() },
       subscription: { aggregate: jest.fn() },
+      company: { findUniqueOrThrow: jest.fn() },
     };
 
     const module = await Test.createTestingModule({
@@ -87,5 +88,112 @@ describe('ReportsService', () => {
       expect(boundary.getUTCMilliseconds()).toBe(0);
     }
     expect(pendingBoundary.getTime()).toBe(overdueBoundary.getTime());
+  });
+
+  it('sem período: lista de recebimentos vazia, period null, e não lê o fuso da empresa', async () => {
+    prisma.receivable.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+    prisma.receivable.findMany.mockResolvedValue([]);
+    prisma.subscription.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+
+    const result = await service.financialSummary();
+
+    expect(result.period).toBeNull();
+    expect(result.receipts).toEqual([]);
+    expect(result.receiptsTruncated).toBe(false);
+    expect(prisma.company.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prisma.receivable.aggregate).toHaveBeenCalledTimes(2);
+  });
+
+  describe('com período', () => {
+    // 05/10 08:00 → 06/10 01:00 no horário de São Paulo (UTC-3)
+    const period = { from: new Date('2026-10-05T11:00:00.000Z'), to: new Date('2026-10-06T04:00:59.999Z') };
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-10-06T04:30:00.000Z')); // 06/10 01:30 em SP
+      prisma.company.findUniqueOrThrow.mockResolvedValue({ timezone: 'America/Sao_Paulo' });
+      prisma.subscription.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('Recebido filtra paidAt pelo instante exato; vencimentos pelos dias 05 e 06 no fuso da empresa', async () => {
+      prisma.receivable.aggregate
+        .mockResolvedValueOnce({ _sum: { amount: 300 } }) // paid
+        .mockResolvedValueOnce({ _sum: { amount: 40 } }) // pending
+        .mockResolvedValueOnce({ _sum: { amount: 15 } }); // overdue no período
+      prisma.receivable.findMany
+        .mockResolvedValueOnce([]) // atrasos atuais (maiores atrasos)
+        .mockResolvedValueOnce([]); // recebimentos
+
+      const result = await service.financialSummary(5, period);
+
+      const [paidCall, pendingCall, overdueCall] = prisma.receivable.aggregate.mock.calls;
+      expect(paidCall[0].where.paidAt).toEqual({ gte: period.from, lte: period.to });
+      // hoje na empresa = 06/10, então "a receber" é só o dia 06
+      expect(pendingCall[0].where.dueDate).toEqual({
+        gte: new Date('2026-10-06T00:00:00.000Z'),
+        lte: new Date('2026-10-06T00:00:00.000Z'),
+      });
+      expect(overdueCall[0].where.dueDate).toEqual({
+        gte: new Date('2026-10-05T00:00:00.000Z'),
+        lte: new Date('2026-10-06T00:00:00.000Z'),
+        lt: new Date('2026-10-06T00:00:00.000Z'),
+      });
+      expect(overdueCall[0].where.status).toBe('PENDING');
+      expect(result.totalPaid).toBe(300);
+      expect(result.totalPending).toBe(40);
+      expect(result.totalOverdue).toBe(15);
+      expect(result.period).toEqual({ from: period.from.toISOString(), to: period.to.toISOString() });
+    });
+
+    it('maiores atrasos continuam sendo o retrato atual (sem filtro de período)', async () => {
+      prisma.receivable.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+      prisma.receivable.findMany
+        .mockResolvedValueOnce([{ amount: 500, client: { id: 'c1', name: 'Antigo', category: null, contact: 'x' } }])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.financialSummary(5, period);
+
+      const defaultersCall = prisma.receivable.findMany.mock.calls[0][0];
+      expect(defaultersCall.where.dueDate).toEqual({ lt: new Date('2026-10-06T00:00:00.000Z') });
+      expect(result.topDefaulters).toEqual([
+        { clientId: 'c1', name: 'Antigo', category: null, contact: 'x', overdueAmount: 500 },
+      ]);
+      expect(result.totalOverdue).toBe(0); // o total do período vem do agregado, não dos atrasos atuais
+    });
+
+    it('lista os recebimentos do período em ordem de pagamento e marca quando passa de 1000', async () => {
+      prisma.receivable.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+      const row = {
+        id: 'r1',
+        description: 'Mensalidade',
+        amount: 99.5,
+        dueDate: new Date('2026-10-05T00:00:00.000Z'),
+        paidAt: new Date('2026-10-06T03:30:00.000Z'),
+        client: { id: 'c1', name: 'Cliente 1' },
+      };
+      prisma.receivable.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(Array.from({ length: 1001 }, (_, i) => ({ ...row, id: `r${i}` })));
+
+      const result = await service.financialSummary(5, period);
+
+      const receiptsCall = prisma.receivable.findMany.mock.calls[1][0];
+      expect(receiptsCall.where.paidAt).toEqual({ gte: period.from, lte: period.to });
+      expect(receiptsCall.where.status).toBe('PAID');
+      expect(receiptsCall.where.client).toEqual({ companyId: 'company-1', includeInRevenueReport: true });
+      expect(receiptsCall.orderBy).toEqual({ paidAt: 'asc' });
+      expect(receiptsCall.take).toBe(1001);
+      expect(result.receipts).toHaveLength(1000);
+      expect(result.receiptsTruncated).toBe(true);
+      expect(result.receipts[0]).toEqual({
+        id: 'r0',
+        clientId: 'c1',
+        clientName: 'Cliente 1',
+        description: 'Mensalidade',
+        dueDate: '2026-10-05',
+        paidAt: '2026-10-06T03:30:00.000Z',
+        amount: 99.5,
+      });
+    });
   });
 });
