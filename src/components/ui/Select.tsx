@@ -119,8 +119,20 @@ const Select = ({
 
   const choose = (next: string) => {
     if (value === undefined) setInner(next);
-    setNativeInvalid(false);
     if (next !== current) onChange?.({ target: { value: next, name } });
+  };
+
+  // A marca de inválido da validação nativa some sempre que o valor muda (escolha ou mudança pelo código).
+  useEffect(() => {
+    setNativeInvalid(false);
+  }, [current]);
+
+  // Aplica um texto de busca e põe a primeira opção que bate como ativa.
+  const applyQuery = (next: string) => {
+    setQuery(next);
+    const q = normalize(next.trim());
+    const matches = q ? options.filter((o) => normalize(o.label).includes(q)) : options;
+    setActive(firstEnabled(matches));
   };
 
   const close = useCallback((refocus = true) => {
@@ -145,7 +157,7 @@ const Select = ({
   useLayoutEffect(() => {
     if (!open) return;
     // Em tela de toque a busca não recebe foco (o teclado virtual taparia a lista); continua tocável.
-    const coarse = window.matchMedia('(pointer: coarse)').matches;
+    const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     (withSearch && !coarse ? searchRef.current : listRef.current)?.focus({ preventScroll: true });
   }, [open, withSearch]);
 
@@ -170,7 +182,17 @@ const Select = ({
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (popRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      // Rótulo do próprio campo: o clique dele já aciona o botão (que fecha a lista). Fechar aqui
+      // faria o botão reabrir logo em seguida.
+      if (target instanceof Element && target.closest(`label[for="${CSS.escape(triggerId)}"]`)) return;
       close(false);
+      // Fundo de um modal: o primeiro clique só fecha a lista (como o select nativo); o modal fica.
+      const dialog = triggerRef.current?.closest('[role="dialog"]');
+      if (dialog && !dialog.contains(target)) {
+        const swallow = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); };
+        window.addEventListener('click', swallow, { capture: true, once: true });
+        window.setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 600);
+      }
       // Clique em área sem foco: devolve o foco ao campo (sem roubar de outro controle focável).
       window.setTimeout(() => {
         const a = document.activeElement;
@@ -189,7 +211,7 @@ const Select = ({
       window.removeEventListener('scroll', reposition, true);
       window.removeEventListener('resize', reposition);
     };
-  }, [open, close]);
+  }, [open, close, triggerId]);
 
   const step = (dir: 1 | -1) => {
     setActive((a) => {
@@ -267,10 +289,16 @@ const Select = ({
         close();
         break;
       default:
-        if (!withSearch && isPrintable(e)) {
+        if (!isPrintable(e)) break;
+        if (!withSearch) {
           e.preventDefault();
           const i = typeaheadMatch(e.key, visible, active);
           if (i >= 0) setActive(i);
+        } else if (e.target !== searchRef.current) {
+          // Com o foco na lista (ex.: tela de toque com teclado físico), digitar vai para a busca.
+          e.preventDefault();
+          applyQuery(query + e.key);
+          searchRef.current?.focus({ preventScroll: true });
         }
     }
   };
@@ -363,6 +391,8 @@ const Select = ({
               animate={{ opacity: 1, scale: 1, y: 0, transition: { duration: 0.16, ease: [0.16, 1, 0.3, 1] } }}
               exit={{ opacity: 0, scale: startScale, y: offsetY, transition: { duration: 0.12, ease: 'easeIn' } }}
               style={popStyle}
+              // Telas que acompanham o foco (ex.: dica do mascote no Cadastro) reconhecem a lista por aqui.
+              data-select-popover=""
               onKeyDown={onListKeyDown}
               // Eventos de portal sobem pela árvore do React (ex.: linha clicável de tabela).
               onClick={(e) => e.stopPropagation()}
@@ -384,12 +414,7 @@ const Select = ({
                       placeholder="Buscar…"
                       autoComplete="off"
                       value={query}
-                      onChange={(e) => {
-                        setQuery(e.target.value);
-                        const q = normalize(e.target.value.trim());
-                        const next = q ? options.filter((o) => normalize(o.label).includes(q)) : options;
-                        setActive(firstEnabled(next));
-                      }}
+                      onChange={(e) => applyQuery(e.target.value)}
                       className="h-9 w-full rounded bg-secondary pl-8 pr-2.5 text-[14px] text-foreground placeholder:text-muted outline-none focus:ring-2 focus:ring-foreground/15"
                     />
                   </div>

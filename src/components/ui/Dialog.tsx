@@ -49,6 +49,8 @@ function useDialogBehavior(open: boolean, onClose: () => void, panelRef: React.R
         return;
       }
       if (e.key !== 'Tab' || !panelRef.current) return;
+      // Uma lista aberta (dropdown/menu) já tratou o Tab e devolveu o foco ao seu botão: não embrulhar de novo.
+      if (e.defaultPrevented) return;
       const items = [...panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(isTabbable);
       if (items.length === 0) return;
       const first = items[0];

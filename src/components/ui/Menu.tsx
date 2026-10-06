@@ -29,6 +29,8 @@ interface MenuProps {
 const Menu = ({ label, items, ariaLabel, trigger }: MenuProps) => {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  // Dentro de um modal o menu vai para o próprio diálogo (leitores de tela ignoram o que está fora de aria-modal).
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
@@ -65,6 +67,7 @@ const Menu = ({ label, items, ariaLabel, trigger }: MenuProps) => {
   const toggle = () => {
     if (open) return close();
     setAnchor(triggerRef.current?.getBoundingClientRect() ?? null);
+    setPortalTarget(triggerRef.current?.closest<HTMLElement>('[role="dialog"]') ?? document.body);
     setOpen(true);
   };
 
@@ -77,7 +80,8 @@ const Menu = ({ label, items, ariaLabel, trigger }: MenuProps) => {
     else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
     else if (e.key === 'End') { e.preventDefault(); focusAt(buttons.length - 1); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
-    else if (e.key === 'Tab') close(false);
+    // Tab volta ao botão (o menu é portal: deixar o Tab seguir tiraria o foco do formulário/modal).
+    else if (e.key === 'Tab') { e.preventDefault(); close(); }
   };
 
   // Abre para cima quando não cabe embaixo.
@@ -139,7 +143,7 @@ const Menu = ({ label, items, ariaLabel, trigger }: MenuProps) => {
             );
           })}
         </div>,
-        document.body,
+        portalTarget ?? document.body,
       )}
     </>
   );

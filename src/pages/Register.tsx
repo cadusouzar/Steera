@@ -447,7 +447,12 @@ const Register = () => {
           </aside>
 
           {/* Lado do formulário: a etapa atual em duas colunas. */}
-          <form onSubmit={handleRegister} onFocus={trackFocus} onBlur={(e) => { if (!e.currentTarget.contains(e.target as Node)) return; setFocusedField(null); }} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
+          <form onSubmit={handleRegister} onFocus={trackFocus} onBlur={(e) => {
+            if (!e.currentTarget.contains(e.target as Node)) return;
+            // Abrir a lista da UF leva o foco para o dropdown (fora do form): a dica do campo continua.
+            if (e.relatedTarget instanceof Element && e.relatedTarget.closest('[data-select-popover]')) return;
+            setFocusedField(null);
+          }} noValidate className="flex flex-col gap-5 px-6 py-7 sm:px-9">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="text-[18px] font-semibold tracking-tight">{STEP_TITLES[step]}</h2>
               <span className="text-[12px] text-[var(--a-muted)]">Etapa {step + 1} de 3</span>

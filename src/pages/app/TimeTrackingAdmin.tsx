@@ -865,7 +865,7 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId, e
       {showForm && (
         <form onSubmit={submit} className="mb-5 space-y-4 rounded-md border border-border p-4">
           {tierOptions.length > 1 && (
-            <SegmentedControl<'company' | 'team' | 'individual'> label="Nível da jornada" value={tier} onChange={setTier} options={tierOptions} />
+            <SegmentedControl<'company' | 'team' | 'individual'> label="Nível da jornada" value={tier} onChange={(t) => { setTier(t); setEmployeeError(''); }} options={tierOptions} />
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             {tier === 'individual' && (
@@ -905,7 +905,7 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId, e
             <Field label="Carga semanal (min)" htmlFor="ws-weekly"><Input id="ws-weekly" type="number" min={0} value={form.weeklyMinutes} onChange={(e) => setForm({ ...form, weeklyMinutes: Number(e.target.value) })} /></Field>
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => { setShowForm(false); setForm(emptyForm()); }}>Cancelar</Button>
+            <Button variant="secondary" onClick={() => { setShowForm(false); setForm(emptyForm()); setEmployeeError(''); }}>Cancelar</Button>
             <Button type="submit" loading={saving} disabled={!form.name.trim() || form.weekDays.length === 0}>Criar jornada</Button>
           </div>
         </form>
