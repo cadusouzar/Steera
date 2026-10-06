@@ -11,6 +11,7 @@ import {
 import * as api from '../../lib/api';
 import { can, permissionScope, useCurrentUser } from '../../lib/auth';
 import { isOwnDataLocked } from '../../lib/grantCoverage';
+import { reloadAfterSave } from '../../lib/reloadAfterSave';
 import type { EmployeeDetail, EmployeeListItem, EmployeeWarning, Role } from '../../lib/api';
 import { formatCpfInput, formatPhoneInput, isValidCpf, isValidEmail, isValidPhone } from '../../lib/validation';
 
@@ -222,27 +223,36 @@ const EmployeesList = () => {
         customFields: editForm.customFields,
       });
 
-      // Ligar/desligar a recorrência automática de salário nesta edição.
-      if (editForm.salaryRecurrenceEnabled !== selectedEmployee.salaryRecurrenceEnabled) {
-        const recurrences = await api.listEmployeeRecurringPayments(selectedEmployee.id);
-        const salaryRecurrence = recurrences.filter((r) => r.description === 'Salário').pop();
-        if (editForm.salaryRecurrenceEnabled && !salaryRecurrence) {
-          await api.createEmployeeRecurringPayment(selectedEmployee.id, {
-            description: 'Salário', amount: updated.baseValue,
-            dueDay: updated.paymentDay === 'last' ? 31 : Number(updated.paymentDay),
-          });
-        } else if (!editForm.salaryRecurrenceEnabled && salaryRecurrence?.status === 'active') {
-          await api.deactivateEmployeeRecurringPayment(salaryRecurrence.id);
-        }
-      }
-
-      const warnings = await api.listWarnings(selectedEmployee.id);
-      setSelectedEmployee({ ...updated, warnings });
+      // O funcionário já foi salvo: daqui em diante nada pode virar "não foi possível salvar" (reenviar repetiria o PATCH).
+      setSelectedEmployee({ ...updated, warnings: selectedEmployee.warnings });
       setEmployeeItems((prev) => prev.map((e) => (e.id === updated.id
         ? { id: updated.id, fullName: updated.fullName, roleId: updated.roleId, managerId: updated.managerId, department: updated.department, contractType: updated.contractType, status: updated.status, cpfMasked: e.cpfMasked, baseValue: updated.baseValue }
         : e)));
       setIsEditing(false);
       toast.success(`Funcionário atualizado: ${updated.fullName}`);
+
+      // Ligar/desligar a recorrência automática de salário nesta edição.
+      if (editForm.salaryRecurrenceEnabled !== selectedEmployee.salaryRecurrenceEnabled) {
+        try {
+          const recurrences = await api.listEmployeeRecurringPayments(selectedEmployee.id);
+          const salaryRecurrence = recurrences.filter((r) => r.description === 'Salário').pop();
+          if (editForm.salaryRecurrenceEnabled && !salaryRecurrence) {
+            await api.createEmployeeRecurringPayment(selectedEmployee.id, {
+              description: 'Salário', amount: updated.baseValue,
+              dueDay: updated.paymentDay === 'last' ? 31 : Number(updated.paymentDay),
+            });
+          } else if (!editForm.salaryRecurrenceEnabled && salaryRecurrence?.status === 'active') {
+            await api.deactivateEmployeeRecurringPayment(salaryRecurrence.id);
+          }
+        } catch {
+          setActionError('Funcionário salvo, mas não foi possível atualizar o pagamento recorrente. Confira em Pagamentos e férias.');
+        }
+      }
+
+      await reloadAfterSave(async () => {
+        const warnings = await api.listWarnings(selectedEmployee.id);
+        setSelectedEmployee((prev) => (prev && prev.id === updated.id ? { ...prev, warnings } : prev));
+      }, setActionError);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível salvar o funcionário.');
     } finally {

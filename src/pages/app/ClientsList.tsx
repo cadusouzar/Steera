@@ -9,6 +9,7 @@ import {
 } from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
+import { reloadAfterSave } from '../../lib/reloadAfterSave';
 import type { ClientRecord, ClientTotals } from '../../lib/api';
 
 export type { Receivable, Subscription } from '../../lib/api';
@@ -147,12 +148,13 @@ const ClientsList = () => {
     try {
       await action();
       toast.success(successMessage);
-      await refreshClientDetails(clientId);
-      return true;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : fallback);
       return false;
     }
+    // A ação já deu certo: se só a recarga falhar, não pode virar "erro ao salvar" (a janela ficaria aberta e o reenvio duplicaria).
+    await reloadAfterSave(() => refreshClientDetails(clientId), setActionError);
+    return true;
   };
 
   const handleUpdateClient = async (

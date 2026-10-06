@@ -109,7 +109,10 @@ const TimeTracking = () => {
       await linkMyEmployee(selectedLinkId);
       const linkedName = linkableEmployees.find((emp) => emp.id === selectedLinkId)?.fullName;
       toast.success(linkedName ? `Ficha vinculada: ${linkedName}` : 'Ficha vinculada');
-      await reloadAfterSave(async () => setLinkedEmployeeId((await refreshCurrentUser()).employeeId), setLinkError);
+      await reloadAfterSave(
+        async () => setLinkedEmployeeId((await refreshCurrentUser()).employeeId),
+        () => setLinkError('Ficha vinculada, mas não foi possível atualizar a tela. Recarregue a página.'),
+      );
     } catch (err) {
       setLinkError(err instanceof Error ? err.message : 'Não foi possível vincular seu login a este funcionário.');
     } finally {
