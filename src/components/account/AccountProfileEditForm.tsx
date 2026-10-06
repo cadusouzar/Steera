@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Loader2, Lock } from 'lucide-react';
 import FormField from '../FormField';
-import { Select } from '../ui';
+import { Select, toast } from '../ui';
 import { fetchAddressByCep } from '../../lib/brazilLookups';
 import { updateMyCompany, updateMyName, type CurrentUser } from '../../lib/auth';
 import {
@@ -144,6 +144,7 @@ const AccountProfileEditForm: React.FC<AccountProfileEditFormProps> = ({ user, o
           state: company.state,
         });
       }
+      toast.success('Dados salvos');
       onSaved(latest);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível salvar.');

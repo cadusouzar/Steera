@@ -3,7 +3,7 @@ import { ArrowLeft, Briefcase, User, Wallet } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
-import { Button, ButtonLink, Field, Input, Notice, Select, Switch, Tabs } from '../../components/ui';
+import { Button, ButtonLink, Field, Input, Notice, Select, Switch, Tabs, toast } from '../../components/ui';
 import * as api from '../../lib/api';
 import type { EmployeeListItem, Role } from '../../lib/api';
 import { ApiError } from '../../lib/apiError';
@@ -151,6 +151,7 @@ const EmployeeForm = () => {
         }
       }
 
+      toast.success(`Funcionário cadastrado: ${created.fullName}`);
       navigate('/app/funcionarios', recurrenceWarning ? { state: { recurrenceWarning: true } } : undefined);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar o funcionário.');

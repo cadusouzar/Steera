@@ -6,7 +6,7 @@ import FinanceAndVacationModal from '../../components/FinanceAndVacationModal';
 import OwnDataNote from '../../components/OwnDataNote';
 import {
   Button, ButtonLink, ConfirmDialog, Drawer, EmptyState, Field, Input, Modal, Notice, PageHeader,
-  SegmentedControl, Select, StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea,
+  SegmentedControl, Select, StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, toast,
 } from '../../components/ui';
 import * as api from '../../lib/api';
 import { can, permissionScope, useCurrentUser } from '../../lib/auth';
@@ -242,6 +242,7 @@ const EmployeesList = () => {
         ? { id: updated.id, fullName: updated.fullName, roleId: updated.roleId, managerId: updated.managerId, department: updated.department, contractType: updated.contractType, status: updated.status, cpfMasked: e.cpfMasked, baseValue: updated.baseValue }
         : e)));
       setIsEditing(false);
+      toast.success(`Funcionário atualizado: ${updated.fullName}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível salvar o funcionário.');
     } finally {
@@ -260,6 +261,7 @@ const EmployeesList = () => {
       setSelectedEmployee((prev) => (prev ? { ...prev, status: updated.status, terminationDate: updated.terminationDate } : prev));
       setEmployeeItems((prev) => prev.map((e) => (e.id === updated.id ? { ...e, status: updated.status } : e)));
       setConfirmDeactivate(false);
+      toast.success(`Funcionário inativado: ${selectedEmployee.fullName}`);
     } catch (err) {
       setConfirmDeactivate(false);
       setActionError(err instanceof Error ? err.message : 'Não foi possível inativar o funcionário.');
@@ -278,6 +280,7 @@ const EmployeesList = () => {
       // personalizados (ver employee-response.mapper.ts) — mesclar o objeto inteiro apagava os dois da tela.
       setSelectedEmployee((prev) => (prev ? { ...prev, status: updated.status, terminationDate: updated.terminationDate } : prev));
       setEmployeeItems((prev) => prev.map((e) => (e.id === updated.id ? { ...e, status: updated.status } : e)));
+      toast.success(`Funcionário reativado: ${selectedEmployee.fullName}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível reativar o funcionário.');
     } finally {
@@ -301,6 +304,7 @@ const EmployeesList = () => {
       const created = await api.createWarning(selectedEmployee.id, { occurredAt: warningDate, reason: warningReason });
       setSelectedEmployee({ ...selectedEmployee, warnings: [...selectedEmployee.warnings, created] });
       setWarningModalOpen(false);
+      toast.success(`Advertência registrada: ${selectedEmployee.fullName}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível registrar a advertência.');
     } finally {

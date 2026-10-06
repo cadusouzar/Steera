@@ -4,7 +4,7 @@ import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import RoleColorPicker from '../../components/RoleColorPicker';
 import {
   Button, ButtonLink, ConfirmDialog, Drawer, EmptyState, Field, Input, Notice, PageHeader, SegmentedControl,
-  StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, toast,
 } from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
@@ -100,6 +100,7 @@ const Roles = () => {
       });
       setRoles((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
       setDraft(null);
+      toast.success(`Cargo atualizado: ${saved.name}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível salvar o cargo.');
     } finally {
@@ -116,6 +117,7 @@ const Roles = () => {
       setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       setDraft(null);
       refreshPlan();
+      toast.success(`Cargo inativado: ${updated.name}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível inativar o cargo.');
     } finally {
@@ -133,6 +135,7 @@ const Roles = () => {
       setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       setDraft((prev) => (prev ? { ...prev, active: updated.active } : prev));
       refreshPlan();
+      toast.success(`Cargo reativado: ${updated.name}`);
     } catch (err) {
       // Ex.: limite de cargos ativos do plano — a mensagem do backend explica.
       setActionError(err instanceof Error ? err.message : 'Não foi possível reativar o cargo.');

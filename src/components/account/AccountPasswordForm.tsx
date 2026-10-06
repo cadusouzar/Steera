@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { CheckCircle2, Loader2, Shield } from 'lucide-react';
+import { Loader2, Shield } from 'lucide-react';
 import { changePassword, useCurrentUser } from '../../lib/auth';
 import { buildPasswordUserInputs } from '../../lib/passwordStrength';
 import { usePasswordStrength } from '../../hooks/usePasswordStrength';
 import PasswordStrengthMeter from '../PasswordStrengthMeter';
 import FormField from '../FormField';
+import { toast } from '../ui';
 import { inputBorderClass } from '../../lib/validation';
 
 // Troca de senha real (PATCH /auth/me/password via changePassword() em lib/auth.ts) — compartilhada
@@ -16,7 +17,6 @@ const AccountPasswordForm: React.FC = () => {
   const [passwordError, setPasswordError] = useState('');
   const [confirmError, setConfirmError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const user = useCurrentUser();
   const userInputs = useMemo(
     () => buildPasswordUserInputs([user?.email, user?.name, user?.companyName]),
@@ -46,8 +46,7 @@ const AccountPasswordForm: React.FC = () => {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      toast.success('Senha alterada');
     } catch (err) {
       setPasswordError(err instanceof Error ? err.message : 'Não foi possível trocar a senha');
     } finally {
@@ -107,11 +106,6 @@ const AccountPasswordForm: React.FC = () => {
           />
         </FormField>
         <div className="pt-2 flex items-center justify-end gap-3">
-          {saved && (
-            <span className="text-green-500 text-sm font-bold flex items-center gap-1">
-              <CheckCircle2 size={16} aria-hidden="true" /> Senha atualizada!
-            </span>
-          )}
           <button
             type="submit"
             disabled={isSaving}

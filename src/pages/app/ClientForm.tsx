@@ -3,7 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
-import { Button, ButtonLink, Field, Input, Notice } from '../../components/ui';
+import { Button, ButtonLink, Field, Input, Notice, toast } from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { isValidEmail, NAME_MAX_LENGTH } from '../../lib/validation';
@@ -42,13 +42,14 @@ const ClientForm = () => {
     setIsSaving(true);
     setSaveError(null);
     try {
-      await api.createClient({
+      const created = await api.createClient({
         name: name.trim(),
         category: category.trim() || undefined,
         contact: contact.trim(),
         email: email.trim() || undefined,
         customFields,
       });
+      toast.success(`Cliente cadastrado: ${created.name}`);
       navigate('/app/clientes');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar o cliente.');

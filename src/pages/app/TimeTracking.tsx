@@ -10,7 +10,7 @@ import {
 import RollingText from '../../components/motion/RollingText';
 import {
   Button, ButtonLink, ConfirmDialog, Drawer, Field, Input, Modal, Notice, PageHeader, Panel, Select,
-  StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, type StatusTone,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, toast, type StatusTone,
 } from '../../components/ui';
 
 // Controle de Ponto do funcionário (redesenho no kit, etapa 3 do polimento — 01/10/2026). Mudanças
@@ -106,6 +106,8 @@ const TimeTracking = () => {
     setLinkError('');
     try {
       await linkMyEmployee(selectedLinkId);
+      const linkedName = linkableEmployees.find((emp) => emp.id === selectedLinkId)?.fullName;
+      toast.success(linkedName ? `Ficha vinculada: ${linkedName}` : 'Ficha vinculada');
       const updated = await refreshCurrentUser();
       setLinkedEmployeeId(updated.employeeId);
     } catch (err) {
@@ -343,7 +345,7 @@ const TimeTracking = () => {
     setSubmittingPunch(true);
     setSubmitPunchError('');
     try {
-      await createTimePunch({
+      const punched = await createTimePunch({
         type: status.nextAllowedType,
         latitude: gpsCoords?.lat,
         longitude: gpsCoords?.lng,
@@ -351,6 +353,7 @@ const TimeTracking = () => {
         isMobile: isMobileDevice(),
         photo: capturedPhotoBlob ? new File([capturedPhotoBlob], 'ponto.jpg', { type: 'image/jpeg' }) : undefined,
       });
+      toast.success(`${PUNCH_TYPE_LABELS[punched.event.type]} registrada às ${formatTimeOnly(punched.event.recordedAt)}`);
       closeConfirmModal();
       bump();
     } catch (err) {
@@ -405,6 +408,7 @@ const TimeTracking = () => {
         reason: maintenanceReason,
         attachment: maintenanceAttachment ?? undefined,
       });
+      toast.success('Solicitação de ajuste enviada');
       setMaintenanceModalOpen(false);
       bump();
     } catch (err) {
@@ -418,6 +422,7 @@ const TimeTracking = () => {
     setCancellingRequestId(id);
     try {
       await cancelAdjustmentRequest(id);
+      toast.success('Solicitação de ajuste cancelada');
       setConfirmCancelRequest(null);
       bump();
     } catch (err) {

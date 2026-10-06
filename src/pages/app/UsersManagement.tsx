@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Check, Copy, KeyRound, Link2, Lock, Pencil, Search, Send, ShieldCheck, ShieldOff, Trash2, UserPlus, X } from 'lucide-react';
 import {
   Button, ConfirmDialog, EmptyState, Field, Input, Menu, Modal, Notice, PageHeader, SegmentedControl, Select,
-  StatusBadge, Table, TBody, TD, TH, THead, TR, type MenuItem, type StatusTone,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, toast, type MenuItem, type StatusTone,
 } from '../../components/ui';
 import { can, useCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
@@ -262,6 +262,7 @@ const UsersManagement = () => {
       });
       setUsers(prev => [...prev, result.user]);
       setUserNotice({ kind: 'invite', email: result.user.email, inviteUrl: result.inviteUrl, sent: result.sent });
+      toast.success(result.sent ? `Convite enviado: ${result.user.email}` : `Acesso criado: ${result.user.email}`);
       setIsModalOpen(false);
       setFormData(newUserForm);
       // O uso do plano mudou (convite pendente já ocupa vaga).
@@ -280,8 +281,10 @@ const UsersManagement = () => {
     try {
       if (isBlockedStatus(user.status)) {
         await api.unblockSystemUser(user.id);
+        toast.success(`Acesso desbloqueado: ${user.email}`);
       } else {
         await api.blockSystemUser(user.id);
+        toast.success(`Acesso bloqueado: ${user.email}`);
       }
       // Recarrega em vez de adivinhar o novo status: desbloquear um login que nunca aceitou o
       // convite volta pra `invited` (não `active`) — ver UsersService.unblock().
@@ -300,6 +303,7 @@ const UsersManagement = () => {
     setActionError(null);
     try {
       const result = await api.resendSystemUserInvite(user.id);
+      if (result.sent) toast.success(`Convite reenviado: ${user.email}`);
       setUserNotice({ kind: 'invite', email: user.email, inviteUrl: result.inviteUrl, sent: result.sent });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Não foi possível reenviar o convite deste usuário.');
@@ -343,6 +347,7 @@ const UsersManagement = () => {
     setActionError(null);
     try {
       await api.assignUserProfile(editingUser.id, editProfileId);
+      toast.success(`Perfil alterado: ${editingUser.email}`);
       await loadData();
       closeEditModal();
     } catch (err) {
@@ -358,6 +363,7 @@ const UsersManagement = () => {
     setActionError(null);
     try {
       await api.deleteSystemUser(deletingUser.id);
+      toast.success(`Acesso excluído: ${deletingUser.email}`);
       setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
       api.getMyPlan().then(setPlan).catch(() => undefined);
     } catch (err) {
@@ -386,6 +392,7 @@ const UsersManagement = () => {
     setActionError(null);
     try {
       await api.linkUserToEmployee(linkingUser.id, linkEmployeeId);
+      toast.success(`Ficha vinculada: ${linkingUser.email}`);
       setLinkingUser(null);
       await loadData();
     } catch (err) {
@@ -402,6 +409,7 @@ const UsersManagement = () => {
     try {
       const result = await api.resetSystemUserPassword(resettingPasswordUser.id);
       const email = resettingPasswordUser.email;
+      if (result.sent) toast.success(result.inviteUrl !== undefined ? `Convite reenviado: ${email}` : `Link de redefinição enviado: ${email}`);
       // Um login ainda `invited` não tem senha pra redefinir — o backend reenvia o convite em vez
       // disso (`inviteUrl` presente, possivelmente `null` para quem não pode vincular fichas).
       if (result.inviteUrl !== undefined) {

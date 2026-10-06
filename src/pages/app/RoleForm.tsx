@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import CustomFieldsFormSection from '../../components/CustomFieldsFormSection';
 import PermissionDeniedNotice from '../../components/PermissionDeniedNotice';
 import RoleColorPicker from '../../components/RoleColorPicker';
-import { Button, ButtonLink, Field, Input, Notice, Textarea } from '../../components/ui';
+import { Button, ButtonLink, Field, Input, Notice, Textarea, toast } from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { NAME_MAX_LENGTH, TEXT_MAX_LENGTH } from '../../lib/validation';
@@ -38,13 +38,14 @@ const RoleForm = () => {
     setIsSaving(true);
     setSaveError(null);
     try {
-      await api.createRole({
+      const created = await api.createRole({
         name: name.trim(),
         department: department.trim(),
         colorHex: colorHex.toUpperCase(),
         description: description.trim() || undefined,
         customFields,
       });
+      toast.success(`Cargo cadastrado: ${created.name}`);
       navigate('/app/cargos');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar o cargo.');

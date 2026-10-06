@@ -12,7 +12,7 @@ import {
 import { getCurrentUser } from '../../lib/auth';
 import {
   Button, EmptyState, Field, Input, Modal, Notice, PageHeader, Panel, SegmentedControl, Select, StatusBadge,
-  Switch, Table, Tabs, TBody, TD, TH, THead, TR, Textarea, type StatusTone,
+  Switch, Table, Tabs, TBody, TD, TH, THead, TR, Textarea, toast, type StatusTone,
 } from '../../components/ui';
 
 // Administração de Ponto (redesenho no kit, etapa 4 do polimento — 01/10/2026). Mudanças aprovadas:
@@ -305,6 +305,8 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
     setError('');
     try {
       await approveAdjustmentRequest(id);
+      const approved = items.find((i) => i.id === id);
+      toast.success(approved ? `Ajuste aprovado: ${employeeName(approved.employeeId)}` : 'Ajuste aprovado');
       setRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível aprovar a solicitação.');
@@ -319,6 +321,7 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
     setError('');
     try {
       await rejectAdjustmentRequest(rejecting.id, reason);
+      toast.success(`Ajuste rejeitado: ${employeeName(rejecting.employeeId)}`);
       setRejecting(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {
@@ -412,6 +415,8 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
     setError('');
     try {
       await reviewJustification(id, 'approve');
+      const approved = items.find((i) => i.id === id);
+      toast.success(approved ? `Justificativa aprovada: ${employeeName(approved.employeeId)}` : 'Justificativa aprovada');
       setRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível aprovar a justificativa.');
@@ -426,6 +431,7 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
     setError('');
     try {
       await reviewJustification(rejecting.id, 'reject', reason);
+      toast.success(`Justificativa rejeitada: ${employeeName(rejecting.employeeId)}`);
       setRejecting(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {
@@ -520,7 +526,6 @@ function CorrectionTab({ employees }: { employees: { id: string; fullName: strin
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -539,7 +544,6 @@ function CorrectionTab({ employees }: { employees: { id: string; fullName: strin
     if (!employeeId || !targetDate || !reason.trim()) return;
     setSubmitting(true);
     setError('');
-    setSuccess(false);
     try {
       const requestedTimeIso = requestedTime ? new Date(`${targetDate}T${requestedTime}:00`).toISOString() : undefined;
       await proactiveCorrection(employeeId, {
@@ -550,7 +554,7 @@ function CorrectionTab({ employees }: { employees: { id: string; fullName: strin
         requestedTime: type !== 'remove_punch' ? requestedTimeIso : undefined,
         reason: reason.trim(),
       });
-      setSuccess(true);
+      toast.success(`Correção registrada: ${employees.find((emp) => emp.id === employeeId)?.fullName ?? 'funcionário'}`);
       setReason('');
       setRelatedEventId('');
       setRequestedTime('');
@@ -574,16 +578,15 @@ function CorrectionTab({ employees }: { employees: { id: string; fullName: strin
         <Panel className="lg:col-span-3">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && <Notice tone="danger">{error}</Notice>}
-            {success && <Notice tone="info" onDismiss={() => setSuccess(false)}>Correção registrada.</Notice>}
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Funcionário" htmlFor="c-emp" required>
-                <Select id="c-emp" required value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); setSuccess(false); }}>
+                <Select id="c-emp" required value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); }}>
                   <option value="" disabled>Selecione</option>
                   {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
                 </Select>
               </Field>
               <Field label="Dia" htmlFor="c-date" required>
-                <Input id="c-date" required type="date" value={targetDate} onChange={(e) => { setTargetDate(e.target.value); setSuccess(false); }} />
+                <Input id="c-date" required type="date" value={targetDate} onChange={(e) => { setTargetDate(e.target.value); }} />
               </Field>
             </div>
             <Field label="Tipo de correção" htmlFor="c-type" required>
@@ -689,12 +692,10 @@ function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { ha
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     setError('');
-    setSaved(false);
     const managerId = scope === 'team' ? (myOwnEmployeeId ?? undefined) : undefined;
     getTimeTrackingSettings(managerId)
       .then(setSettings)
@@ -705,7 +706,6 @@ function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { ha
   const set = (key: 'requirePhoto' | 'requireLocation' | 'allowLocationException' | 'allowExtraPeriods', value: boolean) => {
     if (!settings) return;
     setSettings({ ...settings, [key]: value });
-    setSaved(false);
   };
 
   const save = async () => {
@@ -715,7 +715,7 @@ function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { ha
     try {
       const managerId = scope === 'team' ? (myOwnEmployeeId ?? undefined) : undefined;
       setSettings(await updateTimeTrackingSettings({ ...settings, managerId }));
-      setSaved(true);
+      toast.success('Regras do ponto salvas');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível salvar as regras.');
     } finally {
@@ -774,7 +774,6 @@ function SettingsPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId }: { ha
             ))}
           </div>
           <div className="mt-4 flex items-center justify-end gap-3">
-            {saved && <span className="text-[13px] text-success" role="status">Regras salvas</span>}
             <Button onClick={save} loading={saving}>Salvar regras</Button>
           </div>
         </>
@@ -827,11 +826,12 @@ function WorkSchedulesPanel({ hasFullPontoAccess, hasOwnTeam, myOwnEmployeeId, e
     setSaving(true);
     setError('');
     try {
-      await createWorkSchedule({
+      const createdSchedule = await createWorkSchedule({
         ...form,
         employeeId: tier === 'individual' ? form.employeeId : undefined,
         managerId: tier === 'team' ? (myOwnEmployeeId ?? undefined) : undefined,
       });
+      toast.success(`Jornada criada: ${createdSchedule.name}`);
       setShowForm(false);
       setForm(emptyForm());
       load();
@@ -958,7 +958,8 @@ function WorkLocationsPanel({ canEdit }: { canEdit: boolean }) {
     setSaving(true);
     setError('');
     try {
-      await createWorkLocation({ name: form.name, latitude: Number(form.latitude), longitude: Number(form.longitude), radiusMeters: form.radiusMeters });
+      const createdLocation = await createWorkLocation({ name: form.name, latitude: Number(form.latitude), longitude: Number(form.longitude), radiusMeters: form.radiusMeters });
+      toast.success(`Local cadastrado: ${createdLocation.name}`);
       setShowForm(false);
       setForm({ name: '', latitude: '', longitude: '', radiusMeters: 100 });
       load();
@@ -973,6 +974,7 @@ function WorkLocationsPanel({ canEdit }: { canEdit: boolean }) {
     setTogglingId(loc.id);
     try {
       await updateWorkLocation(loc.id, { active: !loc.active });
+      toast.success(`Local atualizado: ${loc.name}`);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível atualizar o local.');

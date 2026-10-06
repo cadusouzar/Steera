@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { listTrashedClients, restoreClient } from '../lib/api';
 import type { ClientRecord } from '../lib/api';
-import { Button, Drawer, EmptyState, Modal, Notice } from './ui';
+import { Button, Drawer, EmptyState, Modal, Notice, toast } from './ui';
 
 // Lixeira de clientes (kit, etapa 5 do polimento — 01/10/2026). Recarrega a lista a cada abertura.
 // "Restaurar" pergunta se o cliente volta a contar nos relatórios (pedido do usuário, 01/10/2026) — antes,
@@ -57,6 +57,7 @@ const ClientTrashDrawer: React.FC<ClientTrashDrawerProps> = ({ open, onClose, on
     try {
       await restoreClient(id, includeInRevenueReport);
       setClients((prev) => prev.filter((c) => c.id !== id));
+      toast.success(`Cliente restaurado: ${restoreTarget.name}`);
       onRestored();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível restaurar o cliente.');

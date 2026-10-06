@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   Button, ConfirmDialog, EmptyState, Field, Input, Menu, Modal, Notice, PageHeader, SegmentedControl, Switch,
-  Table, TBody, TD, TH, THead, TR, Tabs, Textarea, type MenuItem,
+  Table, TBody, TD, TH, THead, TR, Tabs, Textarea, toast, type MenuItem,
 } from '../../components/ui';
 import { can, useCurrentUser } from '../../lib/auth';
 import * as api from '../../lib/api';
@@ -187,6 +187,7 @@ const CustomFieldsSettings = () => {
         ...(createForm.defaultValue ? { defaultValue: createForm.defaultValue } : {}),
       });
       setDefinitions((prev) => [...prev, created]);
+      toast.success(`Campo criado: ${created.displayName}`);
       setStatusFilter('active');
       setIsCreateModalOpen(false);
     } catch (err) {
@@ -240,6 +241,7 @@ const CustomFieldsSettings = () => {
         defaultValue: form.defaultValue || null,
       });
       setDefinitions((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      toast.success(`Campo atualizado: ${updated.displayName}`);
       setEditingField(null);
       setEditForm(null);
       return true;
@@ -319,12 +321,15 @@ const CustomFieldsSettings = () => {
       } else if (confirmAction.kind === 'deactivate') {
         const updated = await api.deactivateCustomFieldDefinition(confirmAction.field.id);
         setDefinitions((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+        toast.success(`Campo desativado: ${updated.displayName}`);
       } else if (confirmAction.kind === 'reactivate') {
         const updated = await api.activateCustomFieldDefinition(confirmAction.field.id);
         setDefinitions((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+        toast.success(`Campo ativado: ${updated.displayName}`);
       } else {
         const deletedId = confirmAction.field.id;
         await api.deleteCustomFieldDefinition(deletedId);
+        toast.success(`Campo excluído: ${confirmAction.field.displayName}`);
         setDefinitions((prev) => prev.filter((d) => d.id !== deletedId));
       }
     } catch (err) {

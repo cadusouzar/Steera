@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, ChevronRight, Eye, Lock, Pencil, Plus, Trash2, X } from 'lucide-react';
 import {
-  Button, EmptyState, Field, Input, Modal, Notice, PageHeader, Select, StatusBadge, Table, TBody, TD, TH, THead, TR,
+  Button, EmptyState, Field, Input, Modal, Notice, PageHeader, Select, StatusBadge, Table, TBody, TD, TH, THead, TR, toast,
 } from '../../components/ui';
 import * as api from '../../lib/api';
 import type { PermissionCatalogEntry, Profile } from '../../lib/api';
@@ -523,8 +523,10 @@ const Profiles = () => {
       const grants = mapToGrants(formGrants);
       if (editingProfile === 'new') {
         await api.createProfile({ name: formName.trim(), grants });
+        toast.success(`Perfil criado: ${formName.trim()}`);
       } else if (editingProfile) {
         await api.updateProfile(editingProfile.id, { name: formName.trim(), grants });
+        toast.success(`Perfil atualizado: ${formName.trim()}`);
       }
       closeForm();
       await loadAll();
@@ -573,8 +575,10 @@ const Profiles = () => {
           return;
         }
         await api.reassignAndDeleteProfile(deletingProfile.id, reassignTargetId);
+        toast.success(`Perfil excluído: ${deletingProfile.name}`);
       } else {
         await api.deleteProfile(deletingProfile.id);
+        toast.success(`Perfil excluído: ${deletingProfile.name}`);
       }
       setDeletingProfile(null);
       await loadAll();

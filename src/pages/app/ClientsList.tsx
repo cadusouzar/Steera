@@ -5,7 +5,7 @@ import ClientReportModal from '../../components/ClientReportModal';
 import ClientTrashDrawer from '../../components/ClientTrashDrawer';
 import {
   Button, ButtonLink, EmptyState, Input, Notice, PageHeader, SegmentedControl, StatCard, StatValue,
-  StatusBadge, Table, TBody, TD, TH, THead, TR, type LoadStatus, type StatusTone,
+  StatusBadge, Table, TBody, TD, TH, THead, TR, toast, type LoadStatus, type StatusTone,
 } from '../../components/ui';
 import * as api from '../../lib/api';
 import { useCan } from '../../lib/auth';
@@ -142,10 +142,11 @@ const ClientsList = () => {
 
   // Envolve cada ação do drawer: limpa o erro anterior, executa, recarrega o cliente e devolve se deu certo
   // (as janelas do drawer só fecham quando a ação passou).
-  const runAction = async (clientId: string, action: () => Promise<unknown>, fallback: string): Promise<boolean> => {
+  const runAction = async (clientId: string, action: () => Promise<unknown>, fallback: string, successMessage: string): Promise<boolean> => {
     setActionError(null);
     try {
       await action();
+      toast.success(successMessage);
       await refreshClientDetails(clientId);
       return true;
     } catch (err) {
@@ -161,6 +162,7 @@ const ClientsList = () => {
     setActionError(null);
     try {
       const updated = await api.updateClient(clientId, dto);
+      toast.success(`Cliente atualizado: ${updated.name}`);
       setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
       setSelectedClient(prev => (prev && prev.id === clientId ? { ...prev, ...updated } : prev));
       return true;
@@ -179,6 +181,7 @@ const ClientsList = () => {
     setActionError(null);
     try {
       const updated = await api.deactivateClient(clientId, includeInRevenueReport);
+      toast.success(includeInRevenueReport ? `Cliente desativado: ${updated.name}` : `Cliente enviado para a lixeira: ${updated.name}`);
       if (includeInRevenueReport) {
         setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
       } else {
@@ -204,6 +207,7 @@ const ClientsList = () => {
     setActionError(null);
     try {
       const updated = await api.restoreClient(clientId);
+      toast.success(`Cliente restaurado: ${updated.name}`);
       setClients(prev => prev.map(c => (c.id === clientId ? { ...c, ...updated } : c)));
       setSelectedClient(prev => (prev && prev.id === clientId ? { ...prev, ...updated } : prev));
       return true;
@@ -398,13 +402,13 @@ const ClientsList = () => {
         isLoading={isDrawerLoading}
         actionError={actionError}
         onDismissError={() => setActionError(null)}
-        onMarkAsPaid={(clientId, id) => runAction(clientId, () => api.payReceivable(id), 'Não foi possível marcar o lançamento como pago.')}
-        onUnmarkAsPaid={(clientId, id) => runAction(clientId, () => api.unpayReceivable(id), 'Não foi possível desfazer o pagamento.')}
-        onDeleteReceivable={(clientId, id) => runAction(clientId, () => api.deleteReceivable(id), 'Não foi possível excluir o lançamento.')}
-        onDeleteSubscription={(clientId, id) => runAction(clientId, () => api.deleteSubscription(id), 'Não foi possível cancelar a assinatura.')}
-        onAddReceivable={(clientId, rec) => runAction(clientId, () => api.createReceivable(clientId, rec), 'Não foi possível lançar a cobrança.')}
-        onAddSubscription={(clientId, sub) => runAction(clientId, () => api.createSubscription(clientId, sub), 'Não foi possível criar a assinatura.')}
-        onGenerateCharge={(clientId, id) => runAction(clientId, () => api.generateCharge(id), 'Não foi possível gerar a fatura do mês.')}
+        onMarkAsPaid={(clientId, id) => runAction(clientId, () => api.payReceivable(id), 'Não foi possível marcar o lançamento como pago.', 'Lançamento marcado como pago')}
+        onUnmarkAsPaid={(clientId, id) => runAction(clientId, () => api.unpayReceivable(id), 'Não foi possível desfazer o pagamento.', 'Lançamento voltou para pendente')}
+        onDeleteReceivable={(clientId, id) => runAction(clientId, () => api.deleteReceivable(id), 'Não foi possível excluir o lançamento.', 'Lançamento excluído')}
+        onDeleteSubscription={(clientId, id) => runAction(clientId, () => api.deleteSubscription(id), 'Não foi possível cancelar a assinatura.', 'Assinatura excluída')}
+        onAddReceivable={(clientId, rec) => runAction(clientId, () => api.createReceivable(clientId, rec), 'Não foi possível lançar a cobrança.', 'Lançamento criado')}
+        onAddSubscription={(clientId, sub) => runAction(clientId, () => api.createSubscription(clientId, sub), 'Não foi possível criar a assinatura.', 'Assinatura criada')}
+        onGenerateCharge={(clientId, id) => runAction(clientId, () => api.generateCharge(id), 'Não foi possível gerar a fatura do mês.', 'Fatura do mês gerada')}
         onUpdateClient={handleUpdateClient}
         onDeactivateClient={handleDeactivateClient}
         onRestoreClient={handleRestoreClient}
