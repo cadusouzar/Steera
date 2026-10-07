@@ -56,11 +56,15 @@ const FieldsSketch = () => {
 
 const InviteSketch = () => (
   <div className={frame} aria-hidden="true">
-    <p className="text-[11px] text-muted">Assunto: Você foi convidado para o Steera</p>
-    <p className="mt-3">Olá, Marina.</p>
-    <p className="mt-2 text-muted">Sua empresa convidou você para o sistema. Crie sua senha para entrar.</p>
+    <p className="text-[11px] text-muted">Assunto: Você foi convidado para Padaria Central na Steera</p>
+    <p className="mt-3 text-[16px] font-semibold">Você foi convidado</p>
+    <p className="mt-2 text-muted">
+      Você foi convidado para acessar a <strong className="text-foreground">Padaria Central</strong> na Steera. Clique no
+      botão abaixo para criar sua senha e acessar o sistema.
+    </p>
+    <p className="mt-2 text-muted">Este link expira em 72 horas.</p>
     <span className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground">
-      Criar minha senha
+      Aceitar convite
     </span>
   </div>
 );

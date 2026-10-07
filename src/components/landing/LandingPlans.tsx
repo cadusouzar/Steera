@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react';
 import LandingSection from './LandingSection';
-import { ButtonLink } from '../ui';
+import { Link } from 'react-router-dom';
+import { buttonClass } from '../ui';
 
 // Valores conferidos com backend/src/plans/plan-catalog.ts (preço = priceLabel).
 interface PlanRow {
@@ -19,11 +21,24 @@ const PLANS: PlanRow[] = [
   { name: 'Empresarial', price: 'Sob consulta', employees: 'ilimitados', roles: 'ilimitados', ponto: true, logins: 'ilimitados', cta: 'Começar grátis' },
 ];
 
-const ROWS: Array<{ label: string; get: (p: PlanRow) => string }> = [
+const YES = (
+  <>
+    <span aria-hidden="true">✓</span>
+    <span className="sr-only">Incluído</span>
+  </>
+);
+const NO = (
+  <>
+    <span aria-hidden="true">—</span>
+    <span className="sr-only">Não incluído</span>
+  </>
+);
+
+const ROWS: Array<{ label: string; get: (p: PlanRow) => ReactNode }> = [
   { label: 'Funcionários', get: (p) => p.employees },
   { label: 'Cargos', get: (p) => p.roles },
-  { label: 'RH e clientes', get: () => '✓' },
-  { label: 'Controle de ponto', get: (p) => (p.ponto ? '✓' : '—') },
+  { label: 'RH e clientes', get: () => YES },
+  { label: 'Controle de ponto', get: (p) => (p.ponto ? YES : NO) },
   { label: 'Logins de funcionário', get: (p) => p.logins },
 ];
 
@@ -56,7 +71,13 @@ const LandingPlans = () => (
           <td className="border-t border-border py-5 pr-4" />
           {PLANS.map((p) => (
             <td key={p.name} className="border-t border-border py-5 pr-4">
-              <ButtonLink to="/register" variant={p.name === 'Grátis' ? 'primary' : 'secondary'}>{p.cta}</ButtonLink>
+              <Link
+                to="/register"
+                aria-label={`${p.cta} — plano ${p.name}`}
+                className={buttonClass(p.name === 'Grátis' ? 'primary' : 'secondary')}
+              >
+                {p.cta}
+              </Link>
             </td>
           ))}
         </tr>
@@ -79,7 +100,13 @@ const LandingPlans = () => (
             ))}
           </dl>
           <div className="mt-4">
-            <ButtonLink to="/register" variant={p.name === 'Grátis' ? 'primary' : 'secondary'}>{p.cta}</ButtonLink>
+            <Link
+                to="/register"
+                aria-label={`${p.cta} — plano ${p.name}`}
+                className={buttonClass(p.name === 'Grátis' ? 'primary' : 'secondary')}
+              >
+                {p.cta}
+              </Link>
           </div>
         </div>
       ))}
