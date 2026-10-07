@@ -10,9 +10,11 @@ interface TourTypedProps {
   caret?: boolean;
   /** Duração total da digitação em ms. */
   duration?: number;
+  /** Deixa o texto quebrar linha (área de texto). */
+  wrap?: boolean;
 }
 
-const TourTyped = ({ text, caret = false, duration = 340 }: TourTypedProps) => {
+const TourTyped = ({ text, caret = false, duration = 340, wrap = false }: TourTypedProps) => {
   const reduceMotion = useReducedMotion();
   const [count, setCount] = useState(reduceMotion ? text.length : 0);
 
@@ -36,7 +38,7 @@ const TourTyped = ({ text, caret = false, duration = 340 }: TourTypedProps) => {
   }, [text, duration, reduceMotion]);
 
   return (
-    <span className="whitespace-nowrap">
+    <span className={wrap ? 'whitespace-normal' : 'whitespace-nowrap'}>
       {text.slice(0, count)}
       {caret && <span className="ml-px inline-block h-[1.05em] w-px translate-y-[0.15em] animate-pulse bg-foreground" />}
     </span>

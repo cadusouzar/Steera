@@ -68,7 +68,8 @@ const FakeField = ({ label, required, value, placeholder, focused, select, hint,
   </div>
 );
 
-const ListView = ({ added }: { added: boolean }) => {
+/** Lista de funcionários; também é o fundo da cena de Férias (sem o destaque de "recém-cadastrada"). */
+export const EmployeesListView = ({ added, flash = true }: { added: boolean; flash?: boolean }) => {
   const reduceMotion = useReducedMotion();
   const rows = added ? [MARINA, ...EMPLOYEES] : EMPLOYEES;
   const total = rows.length;
@@ -111,7 +112,7 @@ const ListView = ({ added }: { added: boolean }) => {
           <span />
         </div>
         {rows.map((e, i) => {
-          const isNew = added && e === MARINA;
+          const isNew = flash && added && e === MARINA;
           return (
             <motion.div
               key={e.name}
@@ -251,7 +252,7 @@ const EmployeesScene = ({ sub, typed }: TourViewProps) => {
   return (
     <div className="absolute inset-0">
       <AnimatePresence initial={false}>
-        {formOpen ? <FormView key="form" tab={sub - 1} t={t} /> : <ListView key={sub >= 4 ? 'list-added' : 'list'} added={sub >= 4} />}
+        {formOpen ? <FormView key="form" tab={sub - 1} t={t} /> : <EmployeesListView key={sub >= 4 ? 'list-added' : 'list'} added={sub >= 4} />}
       </AnimatePresence>
     </div>
   );
