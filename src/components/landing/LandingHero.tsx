@@ -14,7 +14,7 @@ const LandingHero = ({ tour }: LandingHeroProps) => (
         Gestão de pessoas, ponto e clientes em um só sistema.
       </h1>
       <p className="mx-auto mt-6 max-w-[56ch] text-[17px] leading-relaxed text-muted">
-        Para pequenas e médias empresas: funcionários, férias, ponto com aprovação de ajustes e cobrança de
+        Para empresas de qualquer tamanho: funcionários, férias, ponto com aprovação de ajustes e cobrança de
         clientes no mesmo lugar.
       </p>
       <div className="mt-9 flex flex-wrap justify-center gap-3">
