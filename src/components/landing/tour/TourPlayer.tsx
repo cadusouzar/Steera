@@ -208,7 +208,10 @@ const TourPlayer = () => {
     >
       <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
         <div ref={wrapRef} className="relative w-full" style={{ height: TOUR_H * scale }}>
-          <div aria-hidden="true" className="absolute left-0 top-0 origin-top-left" style={{ width: TOUR_W, height: TOUR_H, transform: `scale(${scale})` }}>
+          {/* Reduz com `zoom`, não com `transform: scale`: o texto é desenhado já no tamanho final, como numa página
+              normal. Com scale, o Chrome redesenhava o conteúdo reduzido sempre que um modal/gaveta animava por cima
+              (fundo e textos piscavam) e, preso numa camada, trocava a suavização e deixava as letras "em negrito". */}
+          <div aria-hidden="true" className="absolute left-0 top-0" style={{ width: TOUR_W, height: TOUR_H, zoom: scale }}>
             <TourWindow
               menu={TOUR_SCENES[shown].menu}
               clickable={clickableMenus}
