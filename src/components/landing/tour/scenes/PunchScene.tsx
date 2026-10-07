@@ -18,12 +18,13 @@ import { EASE, useRise } from './tourMotion';
 // x 53–281, y 209–257; janela de confirmação x 245–625 a partir de y 110; espelho com linhas de
 // 44 px (hoje é a 6ª, centrada em y 519), botão de ajuste centrado em x 805; gaveta x 430–870.
 
-const START_SECONDS = 8 * 3600 + 1 * 60 + 57;
+// A tela aparece no clique do menu (800 ms); "Registrar" é clicado 2,7 s depois, já em 08:02:01.
+const START_SECONDS = 8 * 3600 + 1 * 60 + 59;
 const REDUCED_SECONDS = 8 * 3600 + 2 * 60 + 30;
 const pad = (n: number) => String(n).padStart(2, '0');
 const clock = (s: number) => `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
 
-/** Relógio da tela: anda de segundo em segundo a partir de 08:01:57 (parado com movimento reduzido). */
+/** Relógio da tela: anda de segundo em segundo a partir de 08:01:59, recomeçando a cada execução da cena (a View ganha uma key nova no TourPlayer); parado em 08:02:30 com movimento reduzido. */
 const useClock = () => {
   const reduceMotion = useReducedMotion();
   const [secs, setSecs] = useState(reduceMotion ? REDUCED_SECONDS : START_SECONDS);

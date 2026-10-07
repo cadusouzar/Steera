@@ -24,6 +24,8 @@ const TourPlayer = () => {
   const [step, setStep] = useState(0);
   /** Cena cuja tela está desenhada — troca no clique do menu, um pouco depois de `step`. */
   const [shown, setShown] = useState(0);
+  /** Conta as vezes que uma tela de cena aparece: vira a `key` da View, então toda execução começa do zero. */
+  const [run, setRun] = useState(0);
   const [sub, setSub] = useState(0);
   const [typed, setTyped] = useState<Record<string, number>>({});
   const [cursor, setCursor] = useState({ x: 520, y: 330, clicking: false });
@@ -57,6 +59,7 @@ const TourPlayer = () => {
     setToast('');
     if (reduceMotion) {
       setShown(i);
+      setRun((r) => r + 1);
       setSub(scene.acts.filter((a) => a.click !== undefined).length);
       const finalTyped: Record<string, number> = {};
       (scene.typing ?? []).forEach(([, v, k]) => { finalTyped[k ?? 'typed'] = Math.max(finalTyped[k ?? 'typed'] ?? 0, v); });
@@ -72,6 +75,7 @@ const TourPlayer = () => {
     later(MENU_CLICK_MS, () => {
       click();
       setShown(i);
+      setRun((r) => r + 1);
       setSub(0);
       setTyped({});
     });
@@ -146,7 +150,7 @@ const TourPlayer = () => {
               toast={<TourToast message={toast} />}
               cursor={reduceMotion ? null : <TourCursor x={cursor.x} y={cursor.y} clicking={cursor.clicking} />}
             >
-              <View sub={sub} typed={typed} />
+              <View key={run} sub={sub} typed={typed} />
             </TourWindow>
           </div>
         </div>
