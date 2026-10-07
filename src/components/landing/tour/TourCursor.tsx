@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 
-// Cursor falso do tour: seta que desliza entre os pontos do roteiro (transição CSS, mesma curva do
-// esboço) e, no clique, "afunda" e solta uma onda. Posição em coordenadas da janela inteira — a
+// Cursor falso do tour: seta que desliza entre os pontos do roteiro (transição CSS de 450 ms, curva do
+// esboço — curta o bastante para chegar antes do clique: o menor intervalo move→clique é 500 ms) e, no clique, "afunda" e solta uma onda. Posição em coordenadas da janela inteira — a
 // ponta da seta fica em (x, y).
 
 interface TourCursorProps {
@@ -15,7 +15,7 @@ const TourCursor = ({ x, y, clicking }: TourCursorProps) => (
     className="pointer-events-none absolute left-0 top-0 z-30"
     style={{
       transform: `translate(${x - 4}px, ${y - 3}px)`,
-      transition: 'transform 750ms cubic-bezier(.45,.05,.25,1)',
+      transition: 'transform 450ms cubic-bezier(.45,.05,.25,1)',
     }}
   >
     <AnimatePresence>
@@ -35,12 +35,12 @@ const TourCursor = ({ x, y, clicking }: TourCursorProps) => (
       width="22"
       height="22"
       viewBox="0 0 24 24"
-      className="relative block drop-shadow-[0_2px_3px_rgba(0,0,0,0.3)]"
+      className="relative block drop-shadow-md"
       animate={clicking ? { scale: [1, 0.82, 1] } : { scale: 1 }}
       transition={{ duration: 0.28, times: [0, 0.4, 1] }}
       style={{ transformOrigin: '4px 3px' }}
     >
-      <path d="M4 2.5 19.5 11l-6.8 1.6L9.6 19z" fill="#111" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M4 2.5 19.5 11l-6.8 1.6L9.6 19z" className="fill-foreground stroke-background" strokeWidth="1.6" strokeLinejoin="round" />
     </motion.svg>
   </div>
 );

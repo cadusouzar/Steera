@@ -6,7 +6,7 @@ import PlaceholderScene from './scenes/PlaceholderScene';
 
 // Roteiro do tour da página inicial (07/10/2026), portado do `STEPS` do esboço
 // (`ideia site/Site.dc.html`). Tempos em ms desde o início da cena; o clique no menu acontece em
-// 700 ms (TourPlayer) e só então a tela da cena aparece. Coordenadas (x, y) na janela inteira
+// 800 ms (TourPlayer) e só então a tela da cena aparece. Coordenadas (x, y) na janela inteira
 // (TOUR_W × TOUR_H): área de conteúdo começa em (230, 52) — cada cena documenta onde ficam os
 // elementos que o cursor procura. Notificações usam as mensagens reais do sistema.
 

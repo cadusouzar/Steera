@@ -9,11 +9,12 @@ import TourToast from './TourToast';
 
 // Tour do sistema na página inicial (07/10/2026): executa as cenas de TOUR_SCENES (roteiro portado
 // do esboço `ideia site/Site.dc.html`) numa janela de tamanho lógico fixo, reduzida para caber.
-// Cada cena começa com o cursor indo até o item do menu e clicando (700 ms) — só então a tela troca,
+// Cada cena começa com o cursor indo até o item do menu e clicando (800 ms) — só então a tela troca,
 // como no esboço. Avança sozinho; mouse/foco em cima não deixa trocar de cena; botões e menu trocam
 // a cena. Movimento reduzido: sem autoplay nem cursor — mostra o estado final da cena.
 
-const MENU_CLICK_MS = 700;
+// O cursor leva 450 ms até o menu (TourCursor); o clique vem depois que ele chega e para.
+const MENU_CLICK_MS = 800;
 const CLICK_MS = 450;
 const TOAST_MS = 2600;
 
@@ -28,6 +29,8 @@ const TourPlayer = () => {
   const [cursor, setCursor] = useState({ x: 520, y: 330, clicking: false });
   const [toast, setToast] = useState('');
   const [scale, setScale] = useState(1);
+  /** Texto anunciado ao leitor de tela — só quando a pessoa troca a cena (botão ou menu), nunca no autoplay. */
+  const [announce, setAnnounce] = useState('');
   const wrapRef = useRef<HTMLDivElement>(null);
   const timers = useRef<number[]>([]);
   const paused = useRef(false);
@@ -44,8 +47,9 @@ const TourPlayer = () => {
     timers.current.push(window.setTimeout(fn, ms));
   }, []);
 
-  const runStep = useCallback((i: number) => {
+  const runStep = useCallback((i: number, byUser = false) => {
     clear();
+    if (byUser) setAnnounce(TOUR_SCENES[i].caption);
     pendingNext.current = false;
     const scene = TOUR_SCENES[i];
     stepRef.current = i;
@@ -117,13 +121,21 @@ const TourPlayer = () => {
 
   const clickableMenus = useMemo(() => new Set(TOUR_SCENES.map((s) => s.menu)), []);
   const onMenu = (m: number) => {
+    // Item já ativo: nada a fazer (Funcionários e Férias dividem o mesmo item do menu).
+    if (TOUR_SCENES[stepRef.current].menu === m) return;
     const i = TOUR_SCENES.findIndex((s) => s.menu === m);
-    if (i >= 0) runStep(i);
+    if (i >= 0) runStep(i, true);
   };
 
   const View = TOUR_SCENES[shown].View;
   return (
-    <div onMouseEnter={pause} onMouseLeave={resume} onFocus={pause} onBlur={resume}>
+    <div
+      onMouseEnter={pause}
+      onMouseLeave={resume}
+      onFocus={pause}
+      // onBlur do React borbulha: andar com Tab entre os botões não pode retomar (e avançar) no meio.
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resume(); }}
+    >
       <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
         <div ref={wrapRef} className="relative w-full" style={{ height: TOUR_H * scale }}>
           <div aria-hidden="true" className="absolute left-0 top-0 origin-top-left" style={{ width: TOUR_W, height: TOUR_H, transform: `scale(${scale})` }}>
@@ -139,14 +151,15 @@ const TourPlayer = () => {
           </div>
         </div>
       </div>
-      <p className="sr-only" aria-live="polite">{TOUR_SCENES[step].caption}</p>
+      <p className="sr-only">{TOUR_SCENES[step].caption}</p>
+      <p className="sr-only" aria-live="polite">{announce}</p>
       <div className="mt-3 flex gap-1.5 overflow-x-auto scrollbar-none sm:flex-wrap" role="group" aria-label="Cenas do tour do sistema">
         {TOUR_SCENES.map((s, i) => (
           <button
             key={s.key}
             type="button"
             aria-pressed={i === step}
-            onClick={() => runStep(i)}
+            onClick={() => runStep(i, true)}
             className={`inline-flex h-9 shrink-0 items-center rounded-full border px-3.5 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
               i === step ? 'border-foreground bg-foreground text-background' : 'border-border bg-panel text-muted hover:text-foreground'
             }`}
