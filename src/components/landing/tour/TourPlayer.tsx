@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useReducedMotion } from 'framer-motion';
 import { Pause, Play } from 'lucide-react';
-import { Button } from '../../ui';
 import { TOUR_H, TOUR_MENU_CLICK_MS, TOUR_W } from './tourTypes';
 import { TourPausedContext } from './tourPause';
 import { TOUR_SCENES } from './tourScenes';
@@ -195,6 +194,18 @@ const TourPlayer = () => {
     if (i >= 0) runStep(i, true);
   };
 
+  // Celular: a barra de cenas rola sozinha até a aba ativa (só a barra, nunca a página).
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const strip = tabsRef.current;
+    const tab = strip?.children[step] as HTMLElement | undefined;
+    if (!strip || !tab) return;
+    const left = tab.offsetLeft - strip.offsetLeft;
+    if (left < strip.scrollLeft || left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollTo({ left: Math.max(0, left - 12), behavior: reduceMotion ? 'auto' : 'smooth' });
+    }
+  }, [step, reduceMotion]);
+
   const View = TOUR_SCENES[shown].View;
   return (
     <div
@@ -206,7 +217,37 @@ const TourPlayer = () => {
       // onBlur do React borbulha: andar com Tab entre os botões não pode retomar (e avançar) no meio.
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) release(); }}
     >
-      <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
+      <div className="mx-auto max-w-[1100px] overflow-hidden rounded-xl border border-border bg-background shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]">
+        {/* Cenas como abas na moldura da janela (07/10/2026): substituem a fileira de botões que ficava embaixo. */}
+        <div className="flex items-stretch border-b border-border bg-panel">
+          <div ref={tabsRef} className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-none px-3" role="group" aria-label="Cenas do tour do sistema">
+            {TOUR_SCENES.map((s, i) => (
+              <button
+                key={s.key}
+                type="button"
+                aria-pressed={i === step}
+                onClick={() => runStep(i, true)}
+                className={`relative h-11 shrink-0 whitespace-nowrap px-3 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground ${
+                  i === step ? 'font-medium text-foreground' : 'text-muted hover:text-foreground'
+                }`}
+              >
+                {s.label}
+                {i === step && <span aria-hidden="true" className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-foreground" />}
+              </button>
+            ))}
+          </div>
+          {!reduceMotion && (
+            <button
+              type="button"
+              onClick={() => setUserPaused((p) => !p)}
+              aria-label={userPaused ? 'Continuar o tour' : 'Pausar o tour'}
+              className="inline-flex h-11 shrink-0 items-center gap-1.5 border-l border-border px-3.5 sm:px-4 text-[13px] text-muted transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground"
+            >
+              {userPaused ? <Play size={14} strokeWidth={1.8} aria-hidden="true" /> : <Pause size={14} strokeWidth={1.8} aria-hidden="true" />}
+              <span className="hidden sm:inline">{userPaused ? 'Continuar' : 'Pausar'}</span>
+            </button>
+          )}
+        </div>
         <div ref={wrapRef} className="relative w-full" style={{ height: TOUR_H * scale }}>
           {/* Reduz com `zoom`, não com `transform: scale`: o texto é desenhado já no tamanho final, como numa página
               normal. Com scale, o Chrome redesenhava o conteúdo reduzido sempre que um modal/gaveta animava por cima
@@ -228,32 +269,6 @@ const TourPlayer = () => {
       </div>
       <p className="sr-only">{TOUR_SCENES[step].caption}</p>
       <p className="sr-only" aria-live="polite">{announce}</p>
-      <div className="mt-3 flex gap-1.5 overflow-x-auto scrollbar-none sm:flex-wrap" role="group" aria-label="Cenas do tour do sistema">
-        {TOUR_SCENES.map((s, i) => (
-          <button
-            key={s.key}
-            type="button"
-            aria-pressed={i === step}
-            onClick={() => runStep(i, true)}
-            className={`inline-flex h-9 shrink-0 items-center rounded-full border px-3.5 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
-              i === step ? 'border-foreground bg-foreground text-background' : 'border-border bg-panel text-muted hover:text-foreground'
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-        {!reduceMotion && (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={userPaused ? Play : Pause}
-            onClick={() => setUserPaused((p) => !p)}
-            className="h-9 rounded-full sm:ml-auto"
-          >
-            {userPaused ? 'Continuar' : 'Pausar'}
-          </Button>
-        )}
-      </div>
     </div>
   );
 };
