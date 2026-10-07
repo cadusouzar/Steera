@@ -44,7 +44,7 @@ const ROWS: Array<{ label: string; get: (p: PlanRow) => ReactNode }> = [
 
 const LandingPlans = () => (
   <LandingSection id="planos" label="Planos" title="Grátis para começar.">
-    <table className="hidden md:table w-full text-left">
+    <table className="hidden lg:table w-full text-left">
       <thead>
         <tr>
           <th scope="col" className="w-[24%] border-t border-border py-4 pr-4">
@@ -84,7 +84,7 @@ const LandingPlans = () => (
       </tbody>
     </table>
 
-    <div className="md:hidden">
+    <div className="lg:hidden">
       {PLANS.map((p) => (
         <div key={p.name} className="border-t border-border py-6">
           <div className="flex items-baseline justify-between gap-3">

@@ -3,7 +3,7 @@ import OverviewScene from './scenes/OverviewScene';
 import EmployeesScene from './scenes/EmployeesScene';
 import VacationScene from './scenes/VacationScene';
 import RolesScene from './scenes/RolesScene';
-import PunchScene from './scenes/PunchScene';
+import PunchScene, { PUNCH_REGISTER_CLICK_MS } from './scenes/PunchScene';
 import PunchAdminScene from './scenes/PunchAdminScene';
 import ClientsScene from './scenes/ClientsScene';
 
@@ -85,7 +85,7 @@ export const TOUR_SCENES: TourSceneDef[] = [
     end: 13000,
     acts: [
       { x: 397, y: 285, move: 1500, click: 2100 }, // "Registrar entrada"
-      { x: 784, y: 397, move: 2900, click: 3500, toast: 'Entrada registrada às 08:02' }, // "Registrar"
+      { x: 784, y: 397, move: PUNCH_REGISTER_CLICK_MS - 600, click: PUNCH_REGISTER_CLICK_MS, toast: 'Entrada registrada às 08:02' }, // "Registrar"
       { x: 1035, y: 571, move: 4900, click: 5500 }, // ajuste do dia de hoje
       { x: 880, y: 196, move: 6200, click: 6800 }, // "O que precisa ser ajustado"
       { x: 880, y: 276, move: 7400, click: 8000 }, // "Corrigir o horário de uma marcação"

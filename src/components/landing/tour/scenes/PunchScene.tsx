@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ChevronDown, ChevronLeft, ChevronRight, MapPin, Paperclip, Undo2, Wrench, X } from 'lucide-react';
 import { StatusBadge, type StatusTone } from '../../../ui';
-import type { TourViewProps } from '../tourTypes';
+import { TOUR_MENU_CLICK_MS, type TourViewProps } from '../tourTypes';
+import { useTourPaused } from '../tourPause';
 import { Backdrop, FakeButton, FakeField, TourDrawer, TourModal } from './tourParts';
 import { EASE, useRise } from './tourMotion';
 
@@ -18,21 +19,27 @@ import { EASE, useRise } from './tourMotion';
 // x 53–281, y 209–257; janela de confirmação x 245–625 a partir de y 110; espelho com linhas de
 // 44 px (hoje é a 6ª, centrada em y 519), botão de ajuste centrado em x 805; gaveta x 430–870.
 
-// A tela aparece no clique do menu (800 ms); "Registrar" é clicado 2,7 s depois, já em 08:02:01.
-const START_SECONDS = 8 * 3600 + 1 * 60 + 59;
+// "Registrar" (2º clique do roteiro em tourScenes.ts) acontece em PUNCH_REGISTER_CLICK_MS desde o
+// início da cena; a tela (e o relógio) só monta no clique do menu, em TOUR_MENU_CLICK_MS. O relógio
+// anda 1 s a cada segundo inteiro desde a montagem, então começa os segundos inteiros desse
+// intervalo antes de 08:02:01 — o horário mostrado no momento de "Registrar" (2,7 s → 08:01:59).
+export const PUNCH_REGISTER_CLICK_MS = 3500;
+const REGISTER_SECONDS = 8 * 3600 + 2 * 60 + 1;
+const START_SECONDS = REGISTER_SECONDS - Math.floor((PUNCH_REGISTER_CLICK_MS - TOUR_MENU_CLICK_MS) / 1000);
 const REDUCED_SECONDS = 8 * 3600 + 2 * 60 + 30;
 const pad = (n: number) => String(n).padStart(2, '0');
 const clock = (s: number) => `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
 
-/** Relógio da tela: anda de segundo em segundo a partir de 08:01:59, recomeçando a cada execução da cena (a View ganha uma key nova no TourPlayer); parado em 08:02:30 com movimento reduzido. */
+/** Relógio da tela: anda de segundo em segundo a partir de 08:01:59, recomeçando a cada execução da cena (a View ganha uma key nova no TourPlayer); para enquanto o tour está pausado; parado em 08:02:30 com movimento reduzido. */
 const useClock = () => {
   const reduceMotion = useReducedMotion();
+  const paused = useTourPaused();
   const [secs, setSecs] = useState(reduceMotion ? REDUCED_SECONDS : START_SECONDS);
   useEffect(() => {
-    if (reduceMotion) return;
+    if (reduceMotion || paused) return;
     const id = window.setInterval(() => setSecs((s) => s + 1), 1000);
     return () => window.clearInterval(id);
-  }, [reduceMotion]);
+  }, [reduceMotion, paused]);
   return clock(secs);
 };
 

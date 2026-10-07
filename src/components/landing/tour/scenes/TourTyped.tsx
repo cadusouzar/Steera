@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useReducedMotion } from 'framer-motion';
+import { useTourPaused } from '../tourPause';
 
 // Texto "digitado" nas cenas do tour: ao aparecer, revela as letras rapidamente com um cursor de
-// texto. Com movimento reduzido, mostra o texto inteiro direto.
+// texto. Com movimento reduzido, mostra o texto inteiro direto. Com o tour pausado, a digitação para
+// onde está (sem voltar ao começo).
 
 interface TourTypedProps {
   text: string;
@@ -16,14 +18,22 @@ interface TourTypedProps {
 
 const TourTyped = ({ text, caret = false, duration = 340, wrap = false }: TourTypedProps) => {
   const reduceMotion = useReducedMotion();
+  const paused = useTourPaused();
   const [count, setCount] = useState(reduceMotion ? text.length : 0);
+  // Texto novo recomeça a digitação (ajuste durante a renderização, não num efeito: assim pausar e
+  // continuar não zeram o que já foi digitado).
+  const [shownText, setShownText] = useState(text);
+  if (shownText !== text) {
+    setShownText(text);
+    setCount(reduceMotion ? text.length : 0);
+  }
 
   useEffect(() => {
     if (reduceMotion) {
       setCount(text.length);
       return;
     }
-    setCount(0);
+    if (paused) return;
     const stepMs = Math.max(12, Math.round(duration / Math.max(1, text.length)));
     const id = window.setInterval(() => {
       setCount((c) => {
@@ -35,7 +45,7 @@ const TourTyped = ({ text, caret = false, duration = 340, wrap = false }: TourTy
       });
     }, stepMs);
     return () => window.clearInterval(id);
-  }, [text, duration, reduceMotion]);
+  }, [text, duration, reduceMotion, paused]);
 
   return (
     <span className={wrap ? 'whitespace-normal' : 'whitespace-nowrap'}>

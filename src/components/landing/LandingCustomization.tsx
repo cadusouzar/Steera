@@ -1,32 +1,37 @@
 import type { ReactNode } from 'react';
 import LandingSection from './LandingSection';
+import { BRAND_NAME } from '../../lib/brand';
 
 const frame = 'rounded-lg border border-border bg-panel p-4 text-[13px] text-foreground';
-const mark = (v: boolean) => (v ? '✓' : '—');
 
 // Recortes desenhados com HTML/Tailwind, imitando as telas reais (decorativos).
+// Perfil de exemplo montado só com permissões que existem (backend/src/permissions/permission-catalog.ts)
+// e em alcances que cada uma aceita; os textos são os da tela Perfis (src/lib/profileEditorModel.ts,
+// pages/app/Profiles.tsx). Códigos: funcionarios.ver + funcionarios.gerenciar (EQUIPE), ferias.gerenciar
+// (EQUIPE), ponto.registrar (sem alcance), ponto.administrar (EQUIPE — só aceita Equipe ou Empresa),
+// clientes.ver (só EMPRESA).
+const PERMISSION_ROWS: Array<{ area: string; action: string; scope: string }> = [
+  { area: 'Funcionários', action: 'Pode ver, cadastrar e alterar', scope: 'Da equipe que ela coordena' },
+  { area: 'Funcionários', action: 'Marcar e cancelar férias e afastamentos', scope: 'Da equipe que ela coordena' },
+  { area: 'Ponto', action: 'Bater o próprio ponto', scope: '—' },
+  { area: 'Ponto', action: 'Cuidar do ponto de outras pessoas (aprovar ajustes e corrigir horários)', scope: 'Da equipe que ela coordena' },
+  { area: 'Clientes', action: 'Pode ver, mas não alterar', scope: 'De todos da empresa' },
+];
+
 const PermissionsSketch = () => {
-  const rows = [
-    { name: 'Funcionários', ver: true, ger: true, apr: false, scope: 'Equipe' },
-    { name: 'Ponto', ver: true, ger: true, apr: true, scope: 'Departamento' },
-    { name: 'Clientes', ver: true, ger: false, apr: false, scope: 'Empresa' },
-  ];
-  const cols = 'grid grid-cols-[1.3fr_0.6fr_0.9fr_0.7fr_1.2fr] gap-2';
+  const cols = 'grid grid-cols-[0.8fr_1.6fr_1.1fr] gap-3';
   return (
     <div className={frame} aria-hidden="true">
-      <div className={`${cols} border-b border-border pb-2 text-[11px] font-medium text-muted`}>
-        <span>Perfil: Gestor</span>
-        <span className="text-center">Ver</span>
-        <span className="text-center">Gerenciar</span>
-        <span className="text-center">Aprovar</span>
+      <p className="border-b border-border pb-2 text-[11px] font-medium text-muted">Perfil: Gestor de equipe</p>
+      <div className={`${cols} border-b border-border py-2 text-[11px] font-medium text-muted`}>
+        <span>Área</span>
+        <span>O que pode fazer</span>
         <span>Alcance</span>
       </div>
-      {rows.map((r) => (
-        <div key={r.name} className={`${cols} border-b border-border py-2 last:border-b-0 last:pb-0`}>
-          <span className="font-medium">{r.name}</span>
-          <span className="text-center">{mark(r.ver)}</span>
-          <span className="text-center">{mark(r.ger)}</span>
-          <span className="text-center">{mark(r.apr)}</span>
+      {PERMISSION_ROWS.map((r) => (
+        <div key={r.action} className={`${cols} border-b border-border py-2 last:border-b-0 last:pb-0`}>
+          <span className="font-medium">{r.area}</span>
+          <span>{r.action}</span>
           <span className="text-muted">{r.scope}</span>
         </div>
       ))}
@@ -56,10 +61,10 @@ const FieldsSketch = () => {
 
 const InviteSketch = () => (
   <div className={frame} aria-hidden="true">
-    <p className="text-[11px] text-muted">Assunto: Você foi convidado para Padaria Central na Steera</p>
+    <p className="text-[11px] text-muted">Assunto: Você foi convidado para Padaria Central na {BRAND_NAME}</p>
     <p className="mt-3 text-[16px] font-semibold">Você foi convidado</p>
     <p className="mt-2 text-muted">
-      Você foi convidado para acessar a <strong className="text-foreground">Padaria Central</strong> na Steera. Clique no
+      Você foi convidado para acessar a <strong className="text-foreground">Padaria Central</strong> na {BRAND_NAME}. Clique no
       botão abaixo para criar sua senha e acessar o sistema.
     </p>
     <p className="mt-2 text-muted">Este link expira em 72 horas.</p>

@@ -119,7 +119,7 @@ const Account = () => {
           {tab === 'assinatura' && (
             <AccountSubscriptionDetails user={user}>
               <Link
-                to={{ pathname: '/', hash: '#pricing' }}
+                to={{ pathname: '/', hash: '#planos' }}
                 className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-full text-sm font-medium transition-colors shadow-sm"
               >
                 Ver planos

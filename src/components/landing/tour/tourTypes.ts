@@ -33,3 +33,6 @@ export const TOUR_H = 660;
 /** Geometria da janela: barra lateral à esquerda e topo; o resto é a área de conteúdo da cena. */
 export const TOUR_SIDEBAR_W = 230;
 export const TOUR_HEADER_H = 52;
+
+/** Em quantos ms, desde o início de uma cena, o cursor clica no menu e a tela da cena aparece. */
+export const TOUR_MENU_CLICK_MS = 800;

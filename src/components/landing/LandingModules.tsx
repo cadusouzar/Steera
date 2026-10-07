@@ -1,4 +1,5 @@
 import { LANDING_LABEL_CLASS } from './LandingSection';
+import { BRAND_NAME } from '../../lib/brand';
 
 const MODULES = [
   {
@@ -32,7 +33,7 @@ const LandingModules = () => (
     <div className="max-w-[1180px] mx-auto px-4 sm:px-6 py-16 sm:py-24 grid grid-cols-1 lg:grid-cols-[4fr_8fr] gap-10 lg:gap-14">
       <div>
         <p className={LANDING_LABEL_CLASS}>Módulos</p>
-        <h2 className="mt-3 text-[28px] sm:text-[34px] font-semibold tracking-tight text-foreground">O que o Steera faz hoje.</h2>
+        <h2 className="mt-3 text-[28px] sm:text-[34px] font-semibold tracking-tight text-foreground">O que o {BRAND_NAME} faz hoje.</h2>
         <p className="mt-3 max-w-[40ch] text-muted">Comece com o essencial e ative o resto quando a empresa crescer.</p>
       </div>
       <div>

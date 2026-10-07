@@ -54,7 +54,7 @@ const Navbar = () => {
 
         {/* Links de seção como rota "/#secao" (não "#secao"): funcionam também fora da landing
             (ex.: /conta) — a LandingPage rola até a seção ao receber o hash. */}
-        <div className="hidden md:flex items-center gap-6 lg:gap-8 text-sm font-medium text-muted">
+        <div className="hidden lg:flex items-center gap-8 text-sm font-medium text-muted">
           <Link to={{ pathname: '/', hash: '#modulos' }} className="hover:text-foreground transition-colors">Módulos</Link>
           <Link to={{ pathname: '/', hash: '#personalizacao' }} className="hover:text-foreground transition-colors">Personalização</Link>
           <Link to={{ pathname: '/', hash: '#seguranca' }} className="hover:text-foreground transition-colors">Segurança</Link>

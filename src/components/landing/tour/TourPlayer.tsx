@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useReducedMotion } from 'framer-motion';
-import { TOUR_H, TOUR_W } from './tourTypes';
+import { Pause, Play } from 'lucide-react';
+import { Button } from '../../ui';
+import { TOUR_H, TOUR_MENU_CLICK_MS, TOUR_W } from './tourTypes';
+import { TourPausedContext } from './tourPause';
 import { TOUR_SCENES } from './tourScenes';
 import { tourMenuPos } from './tourMenu';
 import TourWindow from './TourWindow';
@@ -9,12 +12,21 @@ import TourToast from './TourToast';
 
 // Tour do sistema na página inicial (07/10/2026): executa as cenas de TOUR_SCENES (roteiro portado
 // do esboço `ideia site/Site.dc.html`) numa janela de tamanho lógico fixo, reduzida para caber.
-// Cada cena começa com o cursor indo até o item do menu e clicando (800 ms) — só então a tela troca,
-// como no esboço. Avança sozinho; mouse/foco em cima não deixa trocar de cena; botões e menu trocam
-// a cena. Movimento reduzido: sem autoplay nem cursor — mostra o estado final da cena.
+// Cada cena começa com o cursor indo até o item do menu e clicando (TOUR_MENU_CLICK_MS) — só então a
+// tela troca, como no esboço. Avança sozinho; mouse (só mouse de verdade, não toque) ou foco em cima
+// não deixa trocar de cena; botões e menu trocam a cena. Movimento reduzido: sem autoplay nem
+// cursor — mostra o estado final da cena.
+//
+// Pausa de verdade ("Pausar", tour fora da tela ou aba escondida): limpa todos os timers e congela a
+// tela como está; as cenas com relógio próprio (TourTyped, relógio do Bater ponto) param pelo
+// TourPausedContext. Ao continuar, a cena atual recomeça do zero (a View ganha key nova no clique do
+// menu). O "Pausar" da pessoa vence: voltar a ver o tour não retoma sozinho.
+//
+// O relógio do Bater ponto depende de TOUR_MENU_CLICK_MS (a tela monta nesse instante) — ver
+// PUNCH_REGISTER_CLICK_MS em scenes/PunchScene.tsx.
 
 // O cursor leva 450 ms até o menu (TourCursor); o clique vem depois que ele chega e para.
-const MENU_CLICK_MS = 800;
+const MENU_CLICK_MS = TOUR_MENU_CLICK_MS;
 const CLICK_MS = 450;
 const TOAST_MS = 2600;
 
@@ -33,10 +45,28 @@ const TourPlayer = () => {
   const [scale, setScale] = useState(1);
   /** Texto anunciado ao leitor de tela — só quando a pessoa troca a cena (botão ou menu), nunca no autoplay. */
   const [announce, setAnnounce] = useState('');
+  /** "Pausar" apertado pela pessoa. */
+  const [userPaused, setUserPaused] = useState(false);
+  /** Menos de 20% do tour visível na tela. */
+  const [offscreen, setOffscreen] = useState(false);
+  /** Aba do navegador escondida. */
+  const [tabHidden, setTabHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
+  const frozen = !reduceMotion && (userPaused || offscreen || tabHidden);
+  const rootRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const timers = useRef<number[]>([]);
-  const paused = useRef(false);
+  /** Mouse/foco em cima: a cena continua, mas não troca para a seguinte. */
+  const held = useRef(false);
   const pendingNext = useRef(false);
+  const frozenRef = useRef(false);
+  /** Congelou e ainda não recomeçou a cena atual. */
+  const needsRestart = useRef(false);
+  /**
+   * A View montada ainda não foi usada (primeira carga): o clique do menu da primeira execução não
+   * troca a key, senão a Visão geral montaria duas vezes (entrada e números animados em dobro).
+   * Repetir a mesma cena (ou recomeçar depois de pausar) precisa da key nova para zerar o estado.
+   */
+  const freshView = useRef(true);
   const stepRef = useRef(0);
   // A cena seguinte é chamada pelo timer da anterior: o ref evita a recursão dentro do useCallback.
   const runStepRef = useRef<(i: number) => void>(() => {});
@@ -51,7 +81,12 @@ const TourPlayer = () => {
 
   const runStep = useCallback((i: number, byUser = false) => {
     clear();
-    if (byUser) setAnnounce(TOUR_SCENES[i].caption);
+    if (byUser) {
+      setAnnounce(TOUR_SCENES[i].caption);
+      // Escolher uma cena com o tour pausado volta a tocar.
+      setUserPaused(false);
+    }
+    needsRestart.current = false;
     pendingNext.current = false;
     const scene = TOUR_SCENES[i];
     stepRef.current = i;
@@ -75,7 +110,8 @@ const TourPlayer = () => {
     later(MENU_CLICK_MS, () => {
       click();
       setShown(i);
-      setRun((r) => r + 1);
+      if (freshView.current) freshView.current = false;
+      else setRun((r) => r + 1);
       setSub(0);
       setTyped({});
     });
@@ -95,7 +131,7 @@ const TourPlayer = () => {
     });
     (scene.typing ?? []).forEach(([t, v, key]) => later(t, () => setTyped((p) => ({ ...p, [key ?? 'typed']: v }))));
     later(scene.end, () => {
-      if (paused.current) { pendingNext.current = true; return; }
+      if (held.current) { pendingNext.current = true; return; }
       runStepRef.current((i + 1) % TOUR_SCENES.length);
     });
   }, [reduceMotion, clear, later]);
@@ -114,10 +150,38 @@ const TourPlayer = () => {
     return () => ro.disconnect();
   }, []);
 
-  const pause = () => { paused.current = true; };
-  const resume = () => {
-    paused.current = false;
-    if (pendingNext.current) {
+  // Congela/descongela quando qualquer motivo de pausa muda.
+  useEffect(() => {
+    frozenRef.current = frozen;
+    if (frozen) {
+      clear();
+      pendingNext.current = false;
+      needsRestart.current = true;
+      freshView.current = false;
+      setCursor((c) => (c.clicking ? { ...c, clicking: false } : c));
+    } else if (needsRestart.current) {
+      runStepRef.current(stepRef.current);
+    }
+  }, [frozen, clear]);
+
+  // Fora da tela (menos de 20% visível) ou aba escondida: pausa sozinho.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([entry]) => setOffscreen(entry.intersectionRatio < 0.2), { threshold: [0, 0.2] });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  useEffect(() => {
+    const onVisibility = () => setTabHidden(document.hidden);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  const hold = () => { held.current = true; };
+  const release = () => {
+    held.current = false;
+    if (pendingNext.current && !frozenRef.current) {
       pendingNext.current = false;
       runStep((stepRef.current + 1) % TOUR_SCENES.length);
     }
@@ -134,11 +198,13 @@ const TourPlayer = () => {
   const View = TOUR_SCENES[shown].View;
   return (
     <div
-      onMouseEnter={pause}
-      onMouseLeave={resume}
-      onFocus={pause}
+      ref={rootRef}
+      // Só mouse: um toque no celular dispara pointerenter sem pointerleave e prenderia o tour.
+      onPointerEnter={(e) => { if (e.pointerType === 'mouse') hold(); }}
+      onPointerLeave={(e) => { if (e.pointerType === 'mouse') release(); }}
+      onFocus={hold}
       // onBlur do React borbulha: andar com Tab entre os botões não pode retomar (e avançar) no meio.
-      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resume(); }}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) release(); }}
     >
       <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
         <div ref={wrapRef} className="relative w-full" style={{ height: TOUR_H * scale }}>
@@ -150,7 +216,9 @@ const TourPlayer = () => {
               toast={<TourToast message={toast} />}
               cursor={reduceMotion ? null : <TourCursor x={cursor.x} y={cursor.y} clicking={cursor.clicking} />}
             >
-              <View key={run} sub={sub} typed={typed} />
+              <TourPausedContext.Provider value={frozen}>
+                <View key={run} sub={sub} typed={typed} />
+              </TourPausedContext.Provider>
             </TourWindow>
           </div>
         </div>
@@ -171,6 +239,17 @@ const TourPlayer = () => {
             {s.label}
           </button>
         ))}
+        {!reduceMotion && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={userPaused ? Play : Pause}
+            onClick={() => setUserPaused((p) => !p)}
+            className="h-9 rounded-full sm:ml-auto"
+          >
+            {userPaused ? 'Continuar' : 'Pausar'}
+          </Button>
+        )}
       </div>
     </div>
   );
