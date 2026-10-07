@@ -9,6 +9,7 @@ import LandingPlans from '../components/landing/LandingPlans';
 import LandingFaq from '../components/landing/LandingFaq';
 import LandingFinalCta from '../components/landing/LandingFinalCta';
 import LandingFooter from '../components/landing/LandingFooter';
+import TourPlayer from '../components/landing/tour/TourPlayer';
 import { CheckCircle2, X } from 'lucide-react';
 
 const LandingPage = () => {
@@ -60,16 +61,7 @@ const LandingPage = () => {
       )}
 
       <main>
-        <LandingHero
-          tour={
-            <div
-              className="flex w-full items-center justify-center rounded-lg border border-border bg-panel text-[13px] text-muted"
-              style={{ aspectRatio: '1100 / 660' }}
-            >
-              Tour do sistema
-            </div>
-          }
-        />
+        <LandingHero tour={<TourPlayer />} />
         <LandingModules />
         <LandingCustomization />
         <LandingSecurity />
