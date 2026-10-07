@@ -28,6 +28,22 @@ export const TOUR_SCENES: TourSceneDef[] = [
     View: OverviewScene,
   },
   {
+    key: 'clientes',
+    label: 'Clientes e cobrança',
+    caption: 'Clientes e cobrança: um cliente novo é cadastrado e, na ficha do Mercado São Jorge, o lançamento atrasado é marcado como pago.',
+    menu: 1,
+    end: 13500,
+    acts: [
+      { x: 1002, y: 99, move: 1500, click: 2100 }, // "Novo cliente"
+      { x: 913, y: 123, move: 4200, click: 4800, toast: 'Cliente cadastrado: Restaurante Sabor da Casa' }, // "Salvar cliente"
+      { x: 330, y: 410, move: 6200, click: 6800 }, // linha "Mercado São Jorge"
+      { x: 977, y: 556, move: 8000, click: 8600, toast: 'Lançamento marcado como pago' }, // "Marcar como pago"
+      { x: 1060, y: 84, move: 10200, click: 10800 }, // fechar a ficha
+    ],
+    typing: [[2500, 1, 'typedC'], [2900, 2, 'typedC'], [3300, 3, 'typedC'], [3700, 4, 'typedC']],
+    View: ClientsScene,
+  },
+  {
     key: 'func',
     label: 'Funcionários',
     caption: 'Funcionários: cadastro de Marina Alves com nome, CPF, cargo, superior e salário; ela aparece na lista em seguida.',
@@ -111,21 +127,5 @@ export const TOUR_SCENES: TourSceneDef[] = [
     ],
     typing: [[5900, 1, 'typedA']],
     View: PunchAdminScene,
-  },
-  {
-    key: 'clientes',
-    label: 'Clientes e cobrança',
-    caption: 'Clientes e cobrança: um cliente novo é cadastrado e, na ficha do Mercado São Jorge, o lançamento atrasado é marcado como pago.',
-    menu: 1,
-    end: 13500,
-    acts: [
-      { x: 1002, y: 99, move: 1500, click: 2100 }, // "Novo cliente"
-      { x: 913, y: 123, move: 4200, click: 4800, toast: 'Cliente cadastrado: Restaurante Sabor da Casa' }, // "Salvar cliente"
-      { x: 330, y: 410, move: 6200, click: 6800 }, // linha "Mercado São Jorge"
-      { x: 977, y: 556, move: 8000, click: 8600, toast: 'Lançamento marcado como pago' }, // "Marcar como pago"
-      { x: 1060, y: 84, move: 10200, click: 10800 }, // fechar a ficha
-    ],
-    typing: [[2500, 1, 'typedC'], [2900, 2, 'typedC'], [3300, 3, 'typedC'], [3700, 4, 'typedC']],
-    View: ClientsScene,
   },
 ];
