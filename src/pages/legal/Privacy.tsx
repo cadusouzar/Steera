@@ -18,7 +18,7 @@ const Privacy = () => (
         title: '1. Quem é o responsável',
         content: (
           <>
-            <p>O Steera é um sistema de gestão. Para qualquer assunto sobre privacidade e dados pessoais, inclusive como encarregado, o contato é <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>.</p>
+            <p>O Steera é um sistema de gestão. Para qualquer assunto sobre privacidade e dados pessoais, inclusive como encarregado, o contato é <strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong>.</p>
           </>
         ),
       },
@@ -107,7 +107,7 @@ const Privacy = () => (
         content: (
           <>
             <p>Pela LGPD (art. 18), você pode pedir: confirmação de que tratamos seus dados; acesso a eles; correção de dados incompletos, inexatos ou desatualizados; anonimização, bloqueio ou eliminação de dados desnecessários ou tratados em desacordo com a lei; portabilidade; eliminação dos dados tratados com seu consentimento; informação sobre com quem compartilhamos; e revisão de decisões automatizadas (o Steera não toma decisões automatizadas sobre pessoas).</p>
-            <p>Para exercer qualquer direito, escreva para <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>. Responderemos em até 15 dias. Parte dos dados da conta você mesmo pode ver e corrigir em <strong>Minha conta</strong>. Você também pode reclamar à ANPD.</p>
+            <p>Para exercer qualquer direito, escreva para <strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong>. Responderemos em até 15 dias. Parte dos dados da conta você mesmo pode ver e corrigir em <strong>Minha conta</strong>. Você também pode reclamar à ANPD.</p>
             <p>Para <strong>excluir o seu login</strong>, peça a um administrador da sua empresa (ele faz isso em Usuários e Acessos) ou escreva para o e-mail acima, e encaminharemos o pedido à empresa. Se você for a única pessoa que administra a empresa, é preciso antes passar a administração a outra pessoa ou pedir o <strong>encerramento da conta da empresa</strong>.</p>
           </>
         ),
@@ -144,7 +144,7 @@ const Privacy = () => (
         title: '14. Contato',
         content: (
           <>
-            <p><strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong></p>
+            <p><strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong></p>
           </>
         ),
       },

@@ -10,7 +10,7 @@ const Terms = () => (
     effectiveDate={formatLegalDate(LEGAL_VERSIONS.TERMS.effectiveDate)}
     intro={
       <>
-        <p>Estes termos regem o uso do Steera, sistema de gestão de pessoas, ponto e clientes (contato: <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>). Ao criar uma conta, aceitar um convite ou usar o sistema, você concorda com estes termos e com a <Link to="/privacidade" className="underline underline-offset-2 hover:text-primary">Política de Privacidade</Link>.</p>
+        <p>Estes termos regem o uso do Steera, sistema de gestão de pessoas, ponto e clientes (contato: <strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong>). Ao criar uma conta, aceitar um convite ou usar o sistema, você concorda com estes termos e com a <Link to="/privacidade" className="underline underline-offset-2 hover:text-primary">Política de Privacidade</Link>.</p>
       </>
     }
     sections={[
@@ -28,7 +28,7 @@ const Terms = () => (
         title: '2. Conta e acesso',
         content: (
           <>
-            <ul className="list-disc pl-5 space-y-1.5"><li>Quem cria a conta o faz em nome de uma empresa (pessoa jurídica ou física) e declara ter poderes para isso.</li><li>Os dados informados no cadastro devem ser verdadeiros e mantidos atualizados.</li><li>A empresa é responsável pelos logins que criar: quem recebe acesso, com qual perfil de permissões, e por bloquear quem não deve mais acessar.</li><li>Cada pessoa deve guardar a própria senha e não compartilhá-la. Avise-nos em <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong> se suspeitar de uso indevido.</li><li>O Steera é destinado a maiores de 18 anos.</li></ul>
+            <ul className="list-disc pl-5 space-y-1.5"><li>Quem cria a conta o faz em nome de uma empresa (pessoa jurídica ou física) e declara ter poderes para isso.</li><li>Os dados informados no cadastro devem ser verdadeiros e mantidos atualizados.</li><li>A empresa é responsável pelos logins que criar: quem recebe acesso, com qual perfil de permissões, e por bloquear quem não deve mais acessar.</li><li>Cada pessoa deve guardar a própria senha e não compartilhá-la. Avise-nos em <strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong> se suspeitar de uso indevido.</li><li>O Steera é destinado a maiores de 18 anos.</li></ul>
           </>
         ),
       },
@@ -66,7 +66,7 @@ const Terms = () => (
         title: '6. Disponibilidade e suporte',
         content: (
           <>
-            <ul className="list-disc pl-5 space-y-1.5"><li>Buscamos manter o Steera disponível e funcionando bem, mas, por estar em fase inicial, <strong>não garantimos funcionamento ininterrupto ou livre de erros</strong>, nem cópias de segurança dos dados nesta fase.</li><li>Pode haver interrupções para manutenção ou por falhas de fornecedores.</li><li>O suporte é feito por e-mail, em <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>.</li></ul>
+            <ul className="list-disc pl-5 space-y-1.5"><li>Buscamos manter o Steera disponível e funcionando bem, mas, por estar em fase inicial, <strong>não garantimos funcionamento ininterrupto ou livre de erros</strong>, nem cópias de segurança dos dados nesta fase.</li><li>Pode haver interrupções para manutenção ou por falhas de fornecedores.</li><li>O suporte é feito por e-mail, em <strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong>.</li></ul>
           </>
         ),
       },
@@ -93,7 +93,7 @@ const Terms = () => (
         title: '9. Encerramento e exclusão de logins',
         content: (
           <>
-            <ul className="list-disc pl-5 space-y-1.5"><li><strong>Conta da empresa:</strong> quem administra a empresa pode pedir o encerramento da conta a qualquer momento por <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>. Todos os logins perdem o acesso e todos os dados da empresa são apagados conforme a seção 5 e a Política de Privacidade.</li><li><strong>Logins:</strong> um login pertence à empresa. Quem administra a empresa pode excluir logins em Usuários e Acessos; quem quiser excluir o próprio login deve pedir a um administrador. A exclusão de um login não apaga o que a empresa guarda sobre a pessoa (como a ficha de funcionário e o ponto). A empresa nunca pode ficar sem alguém que a administre: se a única pessoa administradora quiser sair, deve antes passar a administração a outra pessoa ou pedir o encerramento da conta da empresa.</li><li>O operador pode suspender ou encerrar contas que descumpram estes termos ou a lei, avisando sempre que possível.</li></ul>
+            <ul className="list-disc pl-5 space-y-1.5"><li><strong>Conta da empresa:</strong> quem administra a empresa pode pedir o encerramento da conta a qualquer momento por <strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong>. Todos os logins perdem o acesso e todos os dados da empresa são apagados conforme a seção 5 e a Política de Privacidade.</li><li><strong>Logins:</strong> um login pertence à empresa. Quem administra a empresa pode excluir logins em Usuários e Acessos; quem quiser excluir o próprio login deve pedir a um administrador. A exclusão de um login não apaga o que a empresa guarda sobre a pessoa (como a ficha de funcionário e o ponto). A empresa nunca pode ficar sem alguém que a administre: se a única pessoa administradora quiser sair, deve antes passar a administração a outra pessoa ou pedir o encerramento da conta da empresa.</li><li>O operador pode suspender ou encerrar contas que descumpram estes termos ou a lei, avisando sempre que possível.</li></ul>
           </>
         ),
       },
@@ -120,7 +120,7 @@ const Terms = () => (
         title: '12. Contato',
         content: (
           <>
-            <p><strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong></p>
+            <p><strong><a href="mailto:suporte@steera.com.br" className="underline underline-offset-2 hover:text-primary">suporte@steera.com.br</a></strong></p>
           </>
         ),
       },
