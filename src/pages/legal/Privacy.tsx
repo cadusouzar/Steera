@@ -18,7 +18,7 @@ const Privacy = () => (
         title: '1. Quem é o responsável',
         content: (
           <>
-            <p>O Steera é um sistema de gestão operado por <strong>Carlos Eduardo de Souza Ribeiro</strong>, pessoa física, com sede em São Paulo/SP. Para qualquer assunto sobre privacidade e dados pessoais, inclusive como encarregado, o contato é <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>.</p>
+            <p>O Steera é um sistema de gestão. Para qualquer assunto sobre privacidade e dados pessoais, inclusive como encarregado, o contato é <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>.</p>
           </>
         ),
       },
@@ -144,7 +144,7 @@ const Privacy = () => (
         title: '14. Contato',
         content: (
           <>
-            <p>Carlos Eduardo de Souza Ribeiro — São Paulo/SP — <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong></p>
+            <p><strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong></p>
           </>
         ),
       },
