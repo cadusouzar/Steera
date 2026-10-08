@@ -1,4 +1,4 @@
-import { getAccessToken, refreshOnce } from './auth';
+import { getAccessToken, refreshCurrentUser, refreshOnce } from './auth';
 import { ApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -44,6 +44,11 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
     const message = Array.isArray(body.message) ? body.message.join('; ') : body.message;
     // ApiError carrega status + code (ex.: ACCOUNT_TEMPORARILY_LOCKED) — quem chama pode reagir a um
     // código específico sem depender do texto da mensagem; `err.message` continua funcionando igual.
+    // Aceite dos Termos pendente (ex.: versão nova publicada com a sessão aberta): relê o perfil pra o
+    // RequireAuth trocar o app pela tela de aceite, em vez de só mostrar um erro solto.
+    if (res.status === 403 && body.code === 'LEGAL_ACCEPTANCE_REQUIRED') {
+      await refreshCurrentUser().catch(() => undefined);
+    }
     throw new ApiError(message || `Erro ${res.status} ao chamar ${path}`, res.status, body.code, body as Record<string, unknown>);
   }
 

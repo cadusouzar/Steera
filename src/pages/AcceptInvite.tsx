@@ -6,6 +6,7 @@ import { useUrlToken } from '../hooks/useUrlToken';
 import { inputBorderClass } from '../lib/validation';
 import { acceptInvite } from '../lib/auth';
 import { ApiError } from '../lib/apiError';
+import LegalConsentCheckbox from '../components/LegalConsentCheckbox';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
 import { usePasswordStrength } from '../hooks/usePasswordStrength';
 import { isWeakPasswordError } from '../lib/passwordStrength';
@@ -17,6 +18,7 @@ const NO_USER_INPUTS: string[] = [];
 interface Errors {
   password?: string;
   confirmPassword?: string;
+  acceptLegal?: string;
 }
 
 // Igual a ResetPassword.tsx (mesma mecânica de token + senha + confirmação), mas pro login criado
@@ -28,6 +30,7 @@ const AcceptInvite = () => {
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [acceptLegal, setAcceptLegal] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [error, setError] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(!token);
@@ -40,6 +43,7 @@ const AcceptInvite = () => {
     if (password.length < 8) e.password = 'Senha deve ter pelo menos 8 caracteres';
     else if (!isStrong) e.password = isChecking ? 'Aguarde a verificação da força da senha.' : 'Escolha uma senha mais forte para continuar.';
     if (confirmPassword !== password) e.confirmPassword = 'As senhas não coincidem';
+    if (!acceptLegal) e.acceptLegal = 'Aceite os Termos de uso e a Política de Privacidade para continuar.';
     return e;
   };
 
@@ -51,7 +55,7 @@ const AcceptInvite = () => {
     setError(null);
     setIsSubmitting(true);
     try {
-      await acceptInvite(token, password);
+      await acceptInvite(token, password, true);
       navigate('/login', { state: { notice: 'Senha criada. Entre para começar.' } });
     } catch (err) {
       if (err instanceof ApiError && err.status === 400 && isWeakPasswordError(err.message)) {
@@ -116,6 +120,15 @@ const AcceptInvite = () => {
             placeholder="Repita a senha"
           />
         </FormField>
+
+        <LegalConsentCheckbox
+          checked={acceptLegal}
+          onChange={(v) => {
+            setAcceptLegal(v);
+            setErrors((prev) => ({ ...prev, acceptLegal: undefined }));
+          }}
+          error={errors.acceptLegal}
+        />
 
         <button
           type="submit"

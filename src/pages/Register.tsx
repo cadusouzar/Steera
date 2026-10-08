@@ -8,6 +8,7 @@ import { usePasswordStrength } from '../hooks/usePasswordStrength';
 import { buildPasswordUserInputs, isWeakPasswordError } from '../lib/passwordStrength';
 import { register, type RegisterPayload } from '../lib/auth';
 import { fetchAddressByCep, fetchCnpjData } from '../lib/brazilLookups';
+import LegalConsentCheckbox from '../components/LegalConsentCheckbox';
 import SteeraLogo from '../components/brand/SteeraLogo';
 import AuthBackLink from '../components/auth/AuthBackLink';
 import ThemeToggle from '../components/ThemeToggle';
@@ -69,7 +70,9 @@ const EMPTY_FORM: FormState = {
 
 const STEP_TITLES = ['Empresa', 'Endereço', 'Seu acesso'] as const;
 
-type Errors = Partial<Record<keyof FormState, string>>;
+type Errors = Partial<Record<keyof FormState | 'acceptLegal', string>>;
+
+const LEGAL_REQUIRED_MESSAGE = 'Aceite os Termos de uso e a Política de Privacidade para continuar.';
 
 function required(value: string, label: string): string | undefined {
   if (!value.trim()) return `${label} é obrigatório`;
@@ -78,7 +81,7 @@ function required(value: string, label: string): string | undefined {
 }
 
 // `password`: estado do medidor de força (usePasswordStrength) — só usado na etapa 3.
-function validateStep(step: Step, f: FormState, password = { isStrong: false, isChecking: false }): Errors {
+function validateStep(step: Step, f: FormState, password = { isStrong: false, isChecking: false }, acceptedLegal = false): Errors {
   const e: Errors = {};
   if (step === 0) {
     const isPJ = f.personType === 'PJ';
@@ -105,6 +108,7 @@ function validateStep(step: Step, f: FormState, password = { isStrong: false, is
       : password.isStrong ? undefined
       : password.isChecking ? 'Aguarde a verificação da força da senha.' : 'Escolha uma senha mais forte para continuar.';
     e.confirmPassword = f.confirmPassword === f.password ? undefined : 'As senhas não coincidem';
+    e.acceptLegal = acceptedLegal ? undefined : LEGAL_REQUIRED_MESSAGE;
   }
   return Object.fromEntries(Object.entries(e).filter(([, v]) => v)) as Errors;
 }
@@ -124,6 +128,8 @@ const Register = () => {
   const [step, setStep] = useState<Step>(0);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Errors>({});
+  // Aceite dos Termos/Política — fora do FormState (não é texto; vira `acceptLegal: true` no payload).
+  const [acceptLegal, setAcceptLegal] = useState(false);
   const [lookupNotice, setLookupNotice] = useState<string | null>(null);
   // Dados já digitados viram "palavras proibidas" da senha (ex.: "padariacentral2026" é fraca).
   const passwordUserInputs = useMemo(
@@ -169,7 +175,7 @@ const Register = () => {
 
   // Erro de um campo some assim que o campo é escrito de novo (digitação ou autopreenchimento) —
   // antes ficava "CNPJ inválido" embaixo de um CNPJ já corrigido até o próximo "Próximo".
-  const clearFieldErrors = (keys: (keyof FormState)[]) => {
+  const clearFieldErrors = (keys: (keyof Errors)[]) => {
     if (keys.length === 0) return;
     setErrors((prev) => {
       if (!keys.some((k) => k in prev)) return prev;
@@ -291,7 +297,7 @@ const Register = () => {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (step < 2) return goNext();
-    const stepErrors = validateStep(2, form, passwordStrength);
+    const stepErrors = validateStep(2, form, passwordStrength, acceptLegal);
     setErrors(stepErrors);
     if (Object.keys(stepErrors).length) return;
     setError(null);
@@ -313,6 +319,7 @@ const Register = () => {
         name: form.name.trim(),
         email: form.email.trim(),
         password: form.password,
+        acceptLegal: true,
       };
       await register(payload);
       // Decisão de produto: depois do cadastro NÃO entra direto no sistema — volta pro site já
@@ -562,6 +569,19 @@ const Register = () => {
                 </Field>
                 <div className="sm:col-span-2 -mt-1">
                   <PasswordStrengthMeter strength={passwordStrength.strength} isChecking={passwordStrength.isChecking} />
+                </div>
+                <div className="sm:col-span-2">
+                  <LegalConsentCheckbox
+                    checked={acceptLegal}
+                    onChange={(v) => {
+                      setAcceptLegal(v);
+                      clearFieldErrors(['acceptLegal']);
+                    }}
+                    error={errors.acceptLegal}
+                    textClassName="text-[var(--a-ink-3)]"
+                    linkClassName="text-[var(--a-ink)] hover:text-brand"
+                    errorClassName="text-[var(--a-err)]"
+                  />
                 </div>
               </div>
             )}

@@ -4,6 +4,7 @@ import { Loader2, WifiOff } from 'lucide-react';
 import { getCurrentUser, restoreSessionDetailed, subscribeCurrentUser, type CurrentUser } from '../lib/auth';
 import ForcedPasswordChange from './ForcedPasswordChange';
 import EmailVerificationRequired from './EmailVerificationRequired';
+import LegalAcceptanceRequired from './LegalAcceptanceRequired';
 
 // Intervalos entre novas tentativas quando o servidor não pôde responder (o último se repete).
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
@@ -107,6 +108,11 @@ const RequireAuth = () => {
   // ver Account.tsx). Prioridade: troca de senha forçada primeiro (checada acima).
   if (user?.emailVerificationRequired && !user.emailVerified && location.pathname.startsWith('/app')) {
     return <EmailVerificationRequired email={user.email} />;
+  }
+  // Aceite dos Termos de uso e da Política de Privacidade (LGPD) — por último na ordem das telas
+  // obrigatórias: e-mail → senha → aceite. Vale também em /conta*: o backend barra as rotas de negócio.
+  if (user?.legalAcceptancePending) {
+    return <LegalAcceptanceRequired />;
   }
   return <Outlet />;
 };

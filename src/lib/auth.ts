@@ -72,6 +72,10 @@ export interface CurrentUser {
   // /companies/me/users/:id/employee, criar login EMPLOYEE): o vínculo define alcances ancorados na
   // ficha, então quem tem alcance restrito não pode fazê-lo.
   canSelfLinkEmployee?: boolean;
+  // true enquanto a pessoa não aceitou a versão vigente dos Termos de uso e da Política de
+  // Privacidade (todo login antigo começa assim). RequireAuth mostra LegalAcceptanceRequired no lugar
+  // do app; o backend recusa as rotas de negócio com 403 LEGAL_ACCEPTANCE_REQUIRED.
+  legalAcceptancePending: boolean;
 }
 
 export type PermissionScope = 'PROPRIO' | 'EQUIPE' | 'DEPARTAMENTO' | 'EMPRESA';
@@ -123,6 +127,7 @@ interface ApiUser {
   emailVerificationRequired?: boolean;
   permissions?: Record<string, PermissionScope | null>;
   canSelfLinkEmployee?: boolean;
+  legalAcceptancePending?: boolean;
 }
 
 // Access token só em memória — nunca localStorage/sessionStorage, pra
@@ -207,6 +212,7 @@ function toCurrentUser(user: ApiUser): CurrentUser {
     emailVerificationRequired: user.emailVerificationRequired ?? false,
     permissions: user.permissions ?? {},
     canSelfLinkEmployee: user.canSelfLinkEmployee ?? true,
+    legalAcceptancePending: user.legalAcceptancePending ?? false,
   };
 }
 
@@ -257,6 +263,8 @@ export interface RegisterPayload {
   name: string;
   email: string;
   password: string;
+  // Sempre true: o backend recusa o cadastro sem o aceite dos Termos e da Política.
+  acceptLegal: true;
 }
 
 export async function register(payload: RegisterPayload): Promise<CurrentUser> {
@@ -315,6 +323,29 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
 }
 
+// POST /auth/me/legal-acceptance — registra o aceite dos Termos e da Política vigentes. Devolve
+// `{ accessToken, user }` (mesmo formato de login): o token novo já vem com a claim de aceite pendente
+// zerada, e o usuário atualizado faz o RequireAuth liberar o app sem recarregar a página.
+export async function acceptLegalTerms(): Promise<void> {
+  const send = () =>
+    fetch(`${API_URL}/auth/me/legal-acceptance`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({ acceptLegal: true }),
+    });
+  let res = await send();
+  if (res.status === 401 && (await refreshOnce())) res = await send();
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(body.message || 'Não foi possível registrar o aceite', res.status, body.code, body as Record<string, unknown>);
+  }
+  applySession(await res.json());
+}
+
 // ---- Esqueci minha senha / redefinir / confirmar e-mail / aceitar convite ----
 // ("Acesso e sessões", 26/09/2026) — as 4 rotas abaixo são @Public() no backend (sem sessão),
 // exigem o mesmo cabeçalho anti-CSRF de login()/register() acima (AntiCsrfHeaderGuard) e
@@ -371,12 +402,12 @@ export async function verifyEmail(token: string): Promise<void> {
 // POST /auth/accept-invite — 204 sem corpo; login criado por um admin (INVITED) define a própria
 // senha por aqui. Não loga automaticamente (mesmo padrão do backend) — AcceptInvite.tsx manda pro
 // login depois de bem-sucedido, igual ResetPassword.tsx.
-export async function acceptInvite(token: string, password: string): Promise<void> {
+export async function acceptInvite(token: string, password: string, acceptLegal: true): Promise<void> {
   const res = await fetch(`${API_URL}/auth/accept-invite`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-    body: JSON.stringify({ token, password }),
+    body: JSON.stringify({ token, password, acceptLegal }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { message?: string; code?: string });
