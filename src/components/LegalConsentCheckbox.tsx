@@ -33,7 +33,7 @@ const LegalConsentCheckbox = ({
           onChange={(e) => onChange(e.target.checked)}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${id}-error` : undefined}
-          className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-primary"
+          className="mt-px h-[18px] w-[18px] shrink-0 cursor-pointer accent-primary"
         />
         <label htmlFor={id} className={`text-[13px] leading-[1.45] ${textClassName}`}>
           Li e aceito os{' '}
