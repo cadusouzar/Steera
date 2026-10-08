@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { createReadStream } from 'fs';
-import { mkdir, stat, writeFile } from 'fs/promises';
+import { mkdir, stat, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import sharp from 'sharp';
 import { FileAssetPurpose } from '@prisma/client';
@@ -96,5 +96,18 @@ export class FilesService {
     const fullPath = join(STORAGE_ROOT, storagePath.replace(/^attachments[\\/]/, ''));
     await stat(fullPath); // lança se não existir
     return createReadStream(fullPath);
+  }
+
+  // Remove um arquivo que pertence a um único registro (ex.: foto de produto substituída ou produto
+  // excluído definitivamente). Nunca usar para arquivos compartilhados. Apaga o registro primeiro;
+  // um arquivo físico já ausente não é erro.
+  async deleteAsset(id: string, companyId: string): Promise<void> {
+    const asset = await this.prisma.fileAsset.findFirst({ where: { id, companyId } });
+    if (!asset) return;
+    await this.prisma.fileAsset.delete({ where: { id } });
+    const fullPath = join(STORAGE_ROOT, asset.storagePath.replace(/^attachments[\\/]/, ''));
+    await unlink(fullPath).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err;
+    });
   }
 }

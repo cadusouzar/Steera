@@ -44,6 +44,16 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   // advertências, desativar/reativar) — ver EmployeeScopeService.assertCanWriteOwn. Sem escopo: só
   // existe uma "própria ficha". Nenhum módulo legado a concede, então perfis derivados de ADMIN a
   // recebem (getRoleOnlyGatedPermissionCodes) e os de EMPLOYEE não.
+  // Estoque v1 (08/10/2026): todas concedidas pelo módulo OPERACOES (profile-signature.util.ts).
+  // `estoque.custos.ver` decide se custo médio, custo unitário e valor do estoque saem da API.
+  { code: 'estoque.ver', resource: 'estoque', action: 'ver', labelPt: 'Ver Estoque', validScopes: [Scope.EMPRESA] },
+  { code: 'estoque.produtos.gerenciar', resource: 'estoque', action: 'produtos.gerenciar', labelPt: 'Cadastrar/editar Produtos', validScopes: [Scope.EMPRESA] },
+  { code: 'estoque.movimentar', resource: 'estoque', action: 'movimentar', labelPt: 'Registrar entradas e saídas de estoque', validScopes: [Scope.EMPRESA] },
+  { code: 'estoque.ajustar', resource: 'estoque', action: 'ajustar', labelPt: 'Ajustar estoque por contagem', validScopes: [Scope.EMPRESA] },
+  { code: 'estoque.estornar', resource: 'estoque', action: 'estornar', labelPt: 'Estornar movimentações de estoque', validScopes: [Scope.EMPRESA] },
+  { code: 'estoque.custos.ver', resource: 'estoque', action: 'custos.ver', labelPt: 'Ver custos e valor do estoque', validScopes: [Scope.EMPRESA] },
+  { code: 'estoque.exportar', resource: 'estoque', action: 'exportar', labelPt: 'Exportar relatórios de estoque', validScopes: [Scope.EMPRESA] },
+  { code: 'estoque.lixeira.gerenciar', resource: 'estoque', action: 'lixeira.gerenciar', labelPt: 'Excluir e restaurar Produtos', validScopes: [Scope.EMPRESA] },
   { code: 'funcionarios.proprios.gerenciar', resource: 'funcionarios', action: 'proprios.gerenciar', labelPt: 'Alterar os próprios dados', validScopes: [] },
 ];
 

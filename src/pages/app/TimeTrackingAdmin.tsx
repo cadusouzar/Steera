@@ -10,6 +10,7 @@ import {
   type TimePunchType, type WorkScheduleRecord, type WorkLocationRecord, type TimeTrackingSettingsRecord,
 } from '../../lib/api';
 import { getCurrentUser } from '../../lib/auth';
+import { notifyPontoChanged } from '../../hooks/usePontoPendingCount';
 import {
   Button, EmptyState, Field, Input, Modal, Notice, PageHeader, Panel, SegmentedControl, Select, StatusBadge,
   Switch, Table, Tabs, TBody, TD, TH, THead, TR, Textarea, toast, type StatusTone,
@@ -307,6 +308,7 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
       await approveAdjustmentRequest(id);
       const approved = items.find((i) => i.id === id);
       toast.success(approved ? `Ajuste aprovado: ${employeeName(approved.employeeId)}` : 'Ajuste aprovado');
+      notifyPontoChanged();
       setRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível aprovar a solicitação.');
@@ -322,6 +324,7 @@ function AdjustmentsTab({ employeeName }: { employeeName: (id: string) => string
     try {
       await rejectAdjustmentRequest(rejecting.id, reason);
       toast.success(`Ajuste rejeitado: ${employeeName(rejecting.employeeId)}`);
+      notifyPontoChanged();
       setRejecting(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {
@@ -417,6 +420,7 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
       await reviewJustification(id, 'approve');
       const approved = items.find((i) => i.id === id);
       toast.success(approved ? `Justificativa aprovada: ${employeeName(approved.employeeId)}` : 'Justificativa aprovada');
+      notifyPontoChanged();
       setRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível aprovar a justificativa.');
@@ -432,6 +436,7 @@ function JustificationsTab({ employeeName }: { employeeName: (id: string) => str
     try {
       await reviewJustification(rejecting.id, 'reject', reason);
       toast.success(`Justificativa rejeitada: ${employeeName(rejecting.employeeId)}`);
+      notifyPontoChanged();
       setRejecting(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {

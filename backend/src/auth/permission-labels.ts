@@ -31,6 +31,14 @@ const AREA_BY_CODE: Record<string, string> = {
   'ponto.feriados.gerenciar': 'Feriados',
   'usuarios.gerenciar': 'Usuários e perfis',
   'campos-personalizados.gerenciar': 'Campos personalizados',
+  'estoque.ver': 'Estoque',
+  'estoque.produtos.gerenciar': 'Produtos',
+  'estoque.movimentar': 'Movimentações de estoque',
+  'estoque.ajustar': 'Ajustes de estoque',
+  'estoque.estornar': 'Estornos de estoque',
+  'estoque.custos.ver': 'Custos do estoque',
+  'estoque.exportar': 'Exportação do estoque',
+  'estoque.lixeira.gerenciar': 'Lixeira de produtos',
 };
 
 function capitalize(value: string): string {

@@ -6,9 +6,13 @@ interface Props {
   entity: CustomFieldEntity;
   values: Record<string, unknown>;
   onChange: (values: Record<string, unknown>) => void;
+  // Edição de um registro existente: um campo vazio é um valor real (nulo), nunca o padrão do campo.
+  applyDefaults?: boolean;
+  // Destaca campos obrigatórios ainda vazios (ex.: produto restaurado da lixeira).
+  highlightMissing?: string[];
 }
 
-const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) => {
+const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange, applyDefaults = true, highlightMissing = [] }) => {
   const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -38,7 +42,7 @@ const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) 
           // ausente do payload e o backend aplica o mesmo default na escrita (ver
           // `CustomFieldValuesService.resolveValuesForCreate`) — nunca é escrito aqui, só exibido.
           const rawValue = values[field.columnName];
-          const value = rawValue !== undefined ? rawValue : parseDefaultForDisplay(field);
+          const value = rawValue !== undefined || !applyDefaults ? rawValue : parseDefaultForDisplay(field);
           return (
             <div key={field.id} className={needsFullWidth(field.type) ? 'md:col-span-2' : undefined}>
               <label id={`cf-label-${field.id}`} htmlFor={`cf-input-${field.id}`} className="block text-[13px] font-medium text-foreground mb-1.5">
@@ -49,6 +53,9 @@ const CustomFieldsFormSection: React.FC<Props> = ({ entity, values, onChange }) 
                 id: `cf-input-${field.id}`,
                 labelId: `cf-label-${field.id}`,
               })}
+              {highlightMissing.includes(field.columnName) && (
+                <p className="text-[12px] text-danger mt-1.5" role="alert">Campo obrigatório ainda não preenchido.</p>
+              )}
             </div>
           );
         })}

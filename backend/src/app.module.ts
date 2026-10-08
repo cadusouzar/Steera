@@ -23,6 +23,7 @@ import { LeavesModule } from './leaves/leaves.module';
 import { HolidaysModule } from './holidays/holidays.module';
 import { BillingModule } from './billing/billing.module';
 import { ClientsModule } from './clients/clients.module';
+import { StockModule } from './stock/stock.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReceivablesModule } from './receivables/receivables.module';
@@ -82,6 +83,7 @@ import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
     HolidaysModule,
     BillingModule,
     ClientsModule,
+    StockModule,
     CustomFieldsModule,
     ReceivablesModule,
     SubscriptionsModule,

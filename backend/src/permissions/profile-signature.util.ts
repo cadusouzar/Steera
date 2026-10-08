@@ -19,7 +19,10 @@ export const MODULE_TO_PERMISSIONS: Record<string, string[]> = {
   PONTO_REGISTRO: ['ponto.registrar'],
   PONTO_ADMINISTRACAO: ['ponto.administrar', 'ponto.feriados.gerenciar'],
   COMERCIAL: ['comercial.ver'],
-  OPERACOES: ['operacoes.ver'],
+  OPERACOES: [
+    'operacoes.ver', 'estoque.ver', 'estoque.produtos.gerenciar', 'estoque.movimentar', 'estoque.ajustar',
+    'estoque.estornar', 'estoque.custos.ver', 'estoque.exportar', 'estoque.lixeira.gerenciar',
+  ],
   FINANCAS: ['financas.lancamentos.ver', 'financas.lancamentos.gerenciar'],
   RH: [], // legado morto, nunca atribuído a login novo, nunca concede nada
 };

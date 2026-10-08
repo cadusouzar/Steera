@@ -165,10 +165,10 @@ enum UserStatus {
 }
 
 model User {
-  id                        String         @id @default(cuid())
+  id                        String            @id @default(cuid())
   companyId                 String
-  company                   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  email                     String         @unique
+  company                   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email                     String            @unique
   // Nome do responsável — informado pelo fundador no cadastro; logins criados pelo admin ficam null.
   name                      String?
   passwordHash              String
@@ -184,27 +184,27 @@ model User {
   // projeto usa `include: { employee: ... }` (todo lugar que precisa do Employee vinculado já faz a
   // busca manual em duas etapas, ver `TimeManagementAuthService.resolveOwnEmployee`), então remover
   // a relação Prisma não quebra nenhum join existente.
-  employeeId                String?        @unique
+  employeeId                String?           @unique
   profileId                 String?
-  profile                   Profile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  profile                   Profile?          @relation(fields: [profileId], references: [id], onDelete: SetNull)
   modules                   AppModule[]
-  status                    UserStatus     @default(ACTIVE)
+  status                    UserStatus        @default(ACTIVE)
   // Incrementado a cada senha errada (nunca por e-mail inexistente — não há o que incrementar);
   // zerado num login bem-sucedido ou numa ação de admin (unblock/reset de senha). Ver
   // AuthService.login().
-  failedLoginAttempts       Int            @default(0)
+  failedLoginAttempts       Int               @default(0)
   // Fim do bloqueio temporário por excesso de senha errada (5 seguidas → +15min). null = sem bloqueio.
   lockedUntil               DateTime?
   // null = e-mail não confirmado. Logins anteriores a 26/09/2026 foram marcados como confirmados.
   emailVerifiedAt           DateTime?
   // true só pra quem nasce em POST /auth/register — torna a confirmação BLOQUEANTE (EmailVerifiedGuard).
-  emailVerificationRequired Boolean        @default(false)
+  emailVerificationRequired Boolean           @default(false)
   userTokens                UserToken[]
   legalAcceptances          LegalAcceptance[]
-  mustChangePassword        Boolean        @default(false)
-  hasFullPontoAccess        Boolean        @default(true)
-  createdAt                 DateTime       @default(now())
-  updatedAt                 DateTime       @updatedAt
+  mustChangePassword        Boolean           @default(false)
+  hasFullPontoAccess        Boolean           @default(true)
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
   refreshTokens             RefreshToken[]
 
   @@index([companyId])
@@ -358,6 +358,10 @@ model Company {
   auditLogs              AuditLog[]
   tenantMigrations       TenantMigration[]
   customFieldDefinitions CustomFieldDefinition[]
+  products               Product[]
+  productCategories      ProductCategory[]
+  productBrands          ProductBrand[]
+  stockMovements         StockMovement[]
 }
 
 model Role {
@@ -815,6 +819,7 @@ enum FileAssetPurpose {
   TIME_PUNCH_PHOTO
   ADJUSTMENT_ATTACHMENT
   JUSTIFICATION_ATTACHMENT
+  PRODUCT_PHOTO
 }
 
 model FileAsset {
@@ -832,6 +837,7 @@ model FileAsset {
   timeEventPhotos          TimeEvent[]
   adjustmentAttachments    TimeAdjustmentRequest[]
   justificationAttachments TimeJustification[]
+  productPhotos            Product[]
 
   @@index([companyId])
 }
@@ -938,4 +944,157 @@ model TenantMigration {
 
   @@unique([companyId, migrationName])
   @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------------------------
+// Estoque v1 (08/10/2026) — ver docs/superpowers/specs/2026-10-08-estoque-v1-design.md e
+// DECISOES-TECNICAS no vault. Tabelas de TENANT (schema da empresa + RLS). Saldo, valor e custo
+// médio do produto só mudam por StockMovementsService.apply() — nunca por update direto.
+// ---------------------------------------------------------------------------------------------
+
+model ProductCategory {
+  id        String    @id @default(cuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model ProductBrand {
+  id        String    @id @default(cuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Product {
+  id              String           @id @default(cuid())
+  companyId       String
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name            String
+  // Sempre em maiúsculas (normalizado na aplicação). Único entre TODOS os produtos da empresa,
+  // inclusive lixeira e arquivados — só a exclusão física libera o código.
+  sku             String
+  barcode         String? // texto: preserva zeros à esquerda
+  description     String?
+  photoAssetId    String?
+  photoAsset      FileAsset?       @relation(fields: [photoAssetId], references: [id], onDelete: SetNull)
+  categoryId      String?
+  category        ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  brandId         String?
+  brand           ProductBrand?    @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  unit            String           @default("UN") // ver stock-units.ts
+  status          ProductStatus    @default(ACTIVE)
+  location        String? // só descritiva (ex.: "Prateleira A3") — não é depósito
+  referenceCost   Decimal?         @db.Decimal(18, 4) // sugestão para entradas; não reavalia o saldo
+  salePrice       Decimal?         @db.Decimal(18, 2) // não afeta a avaliação do estoque
+  minStock        Decimal?         @db.Decimal(18, 3) // null = alerta de mínimo desativado
+  targetStock     Decimal?         @db.Decimal(18, 3)
+  // Calculados — só StockMovementsService.apply() escreve. Guardados com 6 casas (valor e custo) para
+  // não perder precisão entre movimentações; a interface exibe 2 casas (valor) e 4 (custo).
+  balance         Decimal          @default(0) @db.Decimal(18, 3)
+  stockValue      Decimal          @default(0) @db.Decimal(20, 6)
+  averageCost     Decimal          @default(0) @db.Decimal(18, 6)
+  lastSequence    Int              @default(0)
+  // Lixeira: trashedAt preenchido e archivedAt nulo. Arquivado: archivedAt preenchido (permanente).
+  trashedAt       DateTime?
+  trashedByUserId String?
+  trashedByName   String?
+  archivedAt      DateTime?
+  createdByUserId String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  movements       StockMovement[]
+
+  @@unique([companyId, sku])
+  @@index([companyId])
+  @@index([companyId, barcode])
+  @@index([trashedAt])
+}
+
+enum StockMovementType {
+  INITIAL
+  ENTRY
+  EXIT
+  ADJUSTMENT
+  REVERSAL
+}
+
+enum StockMovementReason {
+  INITIAL_BALANCE
+  MANUAL_ENTRY
+  PURCHASE_RECEIVED
+  CUSTOMER_RETURN
+  OTHER_ENTRY
+  MANUAL_EXIT
+  INTERNAL_CONSUMPTION
+  LOSS
+  DAMAGE
+  SUPPLIER_RETURN
+  OTHER_EXIT
+  COUNT_ADJUSTMENT
+  REVERSAL
+}
+
+// Origem da movimentação. Só MANUAL existe nesta versão; integrações futuras (vendas, compras)
+// ganham um valor novo e preenchem sourceType/sourceId, sempre passando por apply().
+enum StockMovementOrigin {
+  MANUAL
+}
+
+model StockMovement {
+  id                String              @id @default(cuid())
+  companyId         String
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  sequence          Int // ordem por produto (1, 2, 3...)
+  type              StockMovementType
+  reason            StockMovementReason
+  quantity          Decimal             @db.Decimal(18, 3) // sempre positiva
+  quantityDelta     Decimal             @db.Decimal(18, 3) // com sinal
+  balanceBefore     Decimal             @db.Decimal(18, 3)
+  balanceAfter      Decimal             @db.Decimal(18, 3)
+  unitCost          Decimal             @db.Decimal(18, 6) // custo unitário aplicado
+  valueDelta        Decimal             @db.Decimal(20, 6) // impacto no valor do estoque (com sinal)
+  valueBefore       Decimal             @db.Decimal(20, 6)
+  valueAfter        Decimal             @db.Decimal(20, 6)
+  averageCostBefore Decimal             @db.Decimal(18, 6)
+  averageCostAfter  Decimal             @db.Decimal(18, 6)
+  notes             String?
+  documentRef       String?
+  // Congelados no momento do registro (User é tabela central, sem FK cross-schema).
+  performedByUserId String
+  performedByName   String
+  productNameAtTime String
+  productSkuAtTime  String
+  reversalOfId      String?             @unique // @unique: o banco barra estornar duas vezes
+  reversalOf        StockMovement?      @relation("StockReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy        StockMovement?      @relation("StockReversal")
+  requestId         String? // idempotência: reenvio do mesmo pedido devolve a mesma movimentação
+  origin            StockMovementOrigin @default(MANUAL)
+  sourceType        String?
+  sourceId          String?
+  createdAt         DateTime            @default(now())
+
+  @@unique([productId, sequence])
+  @@unique([companyId, requestId])
+  @@index([companyId, createdAt])
+  @@index([productId, createdAt])
 }

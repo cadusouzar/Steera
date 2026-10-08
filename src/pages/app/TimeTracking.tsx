@@ -9,6 +9,7 @@ import {
 } from '../../lib/api';
 import RollingText from '../../components/motion/RollingText';
 import { reloadAfterSave } from '../../lib/reloadAfterSave';
+import { notifyPontoChanged } from '../../hooks/usePontoPendingCount';
 import {
   Button, ButtonLink, ConfirmDialog, Drawer, Field, Input, Modal, Notice, PageHeader, Panel, Select,
   StatusBadge, Table, TBody, TD, TH, THead, TR, Textarea, toast, type StatusTone,
@@ -412,6 +413,7 @@ const TimeTracking = () => {
         attachment: maintenanceAttachment ?? undefined,
       });
       toast.success('Solicitação de ajuste enviada');
+      notifyPontoChanged();
       setMaintenanceModalOpen(false);
       bump();
     } catch (err) {
@@ -426,6 +428,7 @@ const TimeTracking = () => {
     try {
       await cancelAdjustmentRequest(id);
       toast.success('Solicitação de ajuste cancelada');
+      notifyPontoChanged();
       setConfirmCancelRequest(null);
       bump();
     } catch (err) {

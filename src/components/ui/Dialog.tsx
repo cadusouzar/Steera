@@ -220,17 +220,19 @@ interface ConfirmDialogProps {
   /** Exige digitar este texto exato antes de confirmar (ações irreversíveis). */
   confirmText?: string;
   busy?: boolean;
+  /** Mantém a confirmação desligada (ex.: a ação está bloqueada e o conteúdo explica por quê). */
+  confirmDisabled?: boolean;
   children?: ReactNode;
 }
 
 // "Tem certeza?" padrão. Com `confirmText`, o botão só libera depois de a pessoa digitar o texto.
 export const ConfirmDialog = ({
-  open, onClose, onConfirm, title, description, confirmLabel, cancelLabel = 'Cancelar', tone = 'default', confirmText, busy = false, children,
+  open, onClose, onConfirm, title, description, confirmLabel, cancelLabel = 'Cancelar', tone = 'default', confirmText, busy = false, confirmDisabled = false, children,
 }: ConfirmDialogProps) => {
   const [typed, setTyped] = useState('');
   const inputId = useId();
   useEffect(() => { if (!open) setTyped(''); }, [open]);
-  const blocked = confirmText !== undefined && typed.trim() !== confirmText;
+  const blocked = confirmDisabled || (confirmText !== undefined && typed.trim() !== confirmText);
 
   return (
     <Modal

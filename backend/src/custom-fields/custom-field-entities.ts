@@ -2,6 +2,7 @@ export const CUSTOM_FIELD_ENTITIES = {
   client: 'Client',
   role: 'Role',
   employee: 'Employee',
+  product: 'Product',
 } as const;
 
 export type CustomFieldEntityKey = keyof typeof CUSTOM_FIELD_ENTITIES;

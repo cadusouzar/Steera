@@ -1,6 +1,7 @@
 import { useId, useRef, type KeyboardEvent } from 'react';
 import { LayoutGroup, motion } from 'framer-motion';
 import type { LucideIcon } from 'lucide-react';
+import RollingCount from '../motion/RollingCount';
 
 // Abas do kit (01/10/2026): o traço da aba ativa desliza até a aba escolhida (mesmo vocabulário do
 // realce da sidebar). Teclado: setas esquerda/direita, Home/End — padrão WAI-ARIA de tablist.
@@ -9,6 +10,10 @@ export interface TabItem<T extends string> {
   id: T;
   label: string;
   icon?: LucideIcon;
+  /** Número de pendências ao lado do rótulo (some quando 0 ou ausente). */
+  count?: number | null;
+  /** Rótulo acessível do número, ex.: "3 produtos para repor". */
+  countLabel?: string;
 }
 
 interface TabsProps<T extends string> {
@@ -59,6 +64,7 @@ const Tabs = <T extends string>({ tabs, value, onChange, label, className = '' }
             >
               {Icon && <Icon size={16} strokeWidth={1.7} aria-hidden="true" />}
               {tab.label}
+              {!!tab.count && tab.count > 0 && <RollingCount value={tab.count} label={tab.countLabel ?? String(tab.count)} />}
               {active && (
                 <motion.span
                   layoutId="tab-indicator"

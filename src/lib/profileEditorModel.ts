@@ -229,6 +229,7 @@ export type AreaKey =
   | 'ponto'
   | 'financeiro'
   | 'comercial'
+  | 'estoque'
   | 'administracao'
   | 'outras';
 
@@ -246,6 +247,19 @@ export const INICIO_ITEMS: CheckboxItem[] = [
 export const COMERCIAL_ITEMS: CheckboxItem[] = [
   { code: 'comercial.ver', label: 'Ver a área Comercial', summary: 'Pode ver a área Comercial' },
   { code: 'operacoes.ver', label: 'Ver a área de Operações', summary: 'Pode ver a área de Operações' },
+];
+
+// Estoque v1 (08/10/2026): uma permissão por ação. "Ver custos" decide se custo médio, custos e valor
+// do estoque aparecem para a pessoa (o backend nem envia esses números sem ela).
+export const ESTOQUE_ITEMS: CheckboxItem[] = [
+  { code: 'estoque.ver', label: 'Ver produtos, saldos e movimentações', summary: 'Pode ver o estoque' },
+  { code: 'estoque.produtos.gerenciar', label: 'Cadastrar e editar produtos', hint: 'Inclui categorias, marcas, foto e inativar.', summary: 'Pode cadastrar e editar produtos' },
+  { code: 'estoque.movimentar', label: 'Registrar entradas e saídas', summary: 'Pode registrar entradas e saídas' },
+  { code: 'estoque.ajustar', label: 'Ajustar o saldo por contagem', summary: 'Pode ajustar o saldo por contagem' },
+  { code: 'estoque.estornar', label: 'Estornar movimentações', summary: 'Pode estornar movimentações' },
+  { code: 'estoque.custos.ver', label: 'Ver custos e o valor do estoque', hint: 'Sem isto, custos não aparecem em telas, relatórios nem planilhas.', summary: 'Pode ver custos e o valor do estoque' },
+  { code: 'estoque.exportar', label: 'Exportar planilhas do estoque', summary: 'Pode exportar planilhas do estoque' },
+  { code: 'estoque.lixeira.gerenciar', label: 'Excluir produtos e restaurar da lixeira', summary: 'Pode excluir e restaurar produtos' },
 ];
 
 export const ADMINISTRACAO_ITEMS: CheckboxItem[] = [
@@ -337,6 +351,8 @@ export function buildAreas(catalog: CatalogIndex): AreaDef[] {
   if (pairComplete(LEVEL_AREAS.financeiro.pair)) areas.push({ key: 'financeiro', title: 'Financeiro', codes: [LEVEL_AREAS.financeiro.pair.verCode, LEVEL_AREAS.financeiro.pair.manageCode] });
   const comercial = present(catalog, COMERCIAL_ITEMS.map((i) => i.code));
   if (comercial.length) areas.push({ key: 'comercial', title: 'Comercial e Operações', codes: comercial });
+  const estoque = present(catalog, ESTOQUE_ITEMS.map((i) => i.code));
+  if (estoque.length) areas.push({ key: 'estoque', title: 'Estoque', codes: estoque });
   const administracao = present(catalog, ADMINISTRACAO_ITEMS.map((i) => i.code));
   if (administracao.length) areas.push({ key: 'administracao', title: 'Administração', codes: administracao });
 
@@ -425,6 +441,8 @@ export function summarizeArea(map: GrantMap, catalog: CatalogIndex, area: AreaDe
     }
     case 'comercial':
       return checkboxSummary(map, COMERCIAL_ITEMS);
+    case 'estoque':
+      return checkboxSummary(map, ESTOQUE_ITEMS);
     case 'administracao':
       return checkboxSummary(map, ADMINISTRACAO_ITEMS);
     case 'outras':

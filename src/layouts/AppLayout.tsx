@@ -16,6 +16,7 @@ import { can, useCurrentUser } from '../lib/auth';
 import { PLAN_ITEM_LABELS } from '../lib/planCatalog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePontoPendingCount } from '../hooks/usePontoPendingCount';
+import { useStockPendingCount } from '../hooks/useStockPendingCount';
 import AppSidebar, { type NavEntry, type NavGroup, type NavLink, type NavSection } from './AppSidebar';
 import SteeraLogo from '../components/brand/SteeraLogo';
 import { BRAND_NAME } from '../lib/brand';
@@ -132,6 +133,8 @@ const AppLayout = () => {
   useEffect(() => setIsMobileNavOpen(false), [location.pathname]);
 
   const pontoPending = usePontoPendingCount(showPontoAdmin && !lockOf('PONTO_ADMINISTRACAO'), location.pathname);
+  const showEstoque = hasModule('OPERACOES') && hasPermission('estoque.ver');
+  const stockPending = useStockPendingCount(showEstoque && !lockOf('OPERACOES'), location.pathname);
 
   const sections = useMemo<NavSection[]>(() => {
     const main: NavEntry[] = [];
@@ -182,7 +185,14 @@ const AppLayout = () => {
         : {
           kind: 'group', key: 'operacoes', label: 'Operações', icon: Package,
           children: [
-            { kind: 'link', key: 'estoque', to: '/app/estoque', label: 'Estoque' },
+            // Estoque v1 (08/10/2026): dados reais; o link exige a permissão de ver o estoque.
+            // Badge: produtos ativos esgotados ou com estoque baixo (mesmo padrão do Ponto).
+            ...(showEstoque
+              ? [{
+                kind: 'link' as const, key: 'estoque', to: '/app/estoque', label: 'Estoque',
+                badge: stockPending ? { count: stockPending, label: stockPending === 1 ? '1 produto precisa de reposição' : `${stockPending} produtos precisam de reposição` } : null,
+              }]
+              : []),
             { kind: 'link', key: 'compras', to: '/app/compras', label: 'Compras / Cotações' },
             // Antes era um <a href="#"> que não levava a lugar nenhum.
             { kind: 'disabled', key: 'logistica', label: 'Logística', note: 'Em breve' },
@@ -214,7 +224,7 @@ const AppLayout = () => {
     return [{ key: 'main', entries: main }, { key: 'admin', entries: admin }];
     // Recalcula quando o login (módulos/permissões/plano) ou a contagem de pendências mudam.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, pontoPending]);
+  }, [currentUser, pontoPending, stockPending]);
 
   const sidebarProps = { sections, isActive, openGroups, onToggleGroup: toggleGroup, brand: BRAND };
 

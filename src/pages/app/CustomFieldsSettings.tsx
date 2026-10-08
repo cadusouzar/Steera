@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   AlignLeft, Ban, Banknote, Briefcase, Building2, Calendar, CalendarClock, Hash, HeartHandshake, List, ListChecks,
-  Mail, Pencil, Phone, Plus, RotateCcw, SquareUser, ToggleLeft, Trash2, Type, Users, X, type LucideIcon,
+  Mail, Package, Pencil, Phone, Plus, RotateCcw, SquareUser, ToggleLeft, Trash2, Type, Users, X, type LucideIcon,
 } from 'lucide-react';
 import {
   Button, ConfirmDialog, EmptyState, Field, Input, Menu, Modal, Notice, PageHeader, SegmentedControl, Switch,
@@ -22,6 +22,7 @@ const ENTITY_TABS: { id: CustomFieldEntity; label: string; icon: LucideIcon }[] 
   { id: 'client', label: 'Clientes', icon: HeartHandshake },
   { id: 'role', label: 'Cargos', icon: Briefcase },
   { id: 'employee', label: 'Funcionários', icon: Users },
+  { id: 'product', label: 'Produtos', icon: Package },
 ];
 
 const entityLabel = (entity: CustomFieldEntity) => ENTITY_TABS.find((t) => t.id === entity)?.label ?? '';
@@ -414,7 +415,7 @@ const CustomFieldsSettings = () => {
       <div className="max-w-6xl mx-auto">
         <PageHeader
           title="Campos personalizados"
-          description="Campos próprios da sua empresa nos cadastros de Clientes, Cargos e Funcionários."
+          description="Campos próprios da sua empresa nos cadastros de Clientes, Cargos, Funcionários e Produtos."
           actions={canManageFields ? <Button icon={Plus} onClick={openCreateModal}>Novo campo</Button> : undefined}
         />
 

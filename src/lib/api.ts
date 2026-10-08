@@ -56,6 +56,10 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
   return res.json() as Promise<T>;
 }
 
+// Exposto para módulos de API separados por área (ex.: src/lib/stock.ts), que reaproveitam o mesmo
+// tratamento de token, renovação silenciosa e erros.
+export { request as apiRequest, API_URL };
+
 // ---- Shapes returned by the backend ----
 interface ApiClient {
   id: string;
@@ -1788,7 +1792,7 @@ export type CustomFieldType =
   | 'TEXT' | 'LONG_TEXT' | 'NUMBER' | 'CURRENCY' | 'DATE' | 'DATETIME'
   | 'BOOLEAN' | 'SELECT' | 'MULTI_SELECT' | 'EMAIL' | 'PHONE' | 'CPF' | 'CNPJ';
 
-export type CustomFieldEntity = 'client' | 'role' | 'employee';
+export type CustomFieldEntity = 'client' | 'role' | 'employee' | 'product';
 
 export interface CustomFieldDefinition {
   id: string;

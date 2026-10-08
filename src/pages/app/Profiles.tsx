@@ -8,6 +8,7 @@ import type { PermissionCatalogEntry, Profile } from '../../lib/api';
 import {
   ADMINISTRACAO_ITEMS,
   COMERCIAL_ITEMS,
+  ESTOQUE_ITEMS,
   FUNCIONARIOS_EXTRAS,
   INICIO_ITEMS,
   LEVEL_AREAS,
@@ -389,6 +390,8 @@ const AreaPanel = (props: PanelProps) => {
       return <PontoPanel {...props} />;
     case 'comercial':
       return <CheckboxList items={COMERCIAL_ITEMS} grants={grants} catalog={catalog} onChange={onChange} caller={caller} />;
+    case 'estoque':
+      return <CheckboxList items={ESTOQUE_ITEMS} grants={grants} catalog={catalog} onChange={onChange} caller={caller} />;
     case 'administracao':
       return <CheckboxList items={ADMINISTRACAO_ITEMS} grants={grants} catalog={catalog} onChange={onChange} caller={caller} />;
     case 'outras':
