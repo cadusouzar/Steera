@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ScrollText } from 'lucide-react';
 import FlowBackground from './FlowBackground';
@@ -16,14 +16,32 @@ const LegalAcceptanceRequired = () => {
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Trava síncrona: dois cliques no mesmo quadro não podem gravar o aceite duas vezes (o backend não
+  // tem constraint única).
+  const inFlight = useRef(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  // Quem navega por teclado/leitor de tela cai direto no título da tela.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  // Falha ao enviar: foco no erro, para ser anunciado e lido.
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
 
   const handleAccept = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setError(null);
     setIsSubmitting(true);
     try {
       await acceptLegalTerms();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível registrar o aceite.');
+      inFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -42,13 +60,13 @@ const LegalAcceptanceRequired = () => {
           <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mx-auto mb-6">
             <ScrollText size={28} aria-hidden="true" />
           </div>
-          <h1 className="text-2xl font-heading font-bold mb-2 text-foreground">Atualizamos nossos Termos e Política</h1>
+          <h1 ref={headingRef} tabIndex={-1} className="outline-none text-2xl font-heading font-bold mb-2 text-foreground">Atualizamos nossos Termos e Política</h1>
           <p className="text-foreground/60 text-sm mb-6">
             Para continuar usando o {BRAND_NAME}, leia e aceite os Termos de uso e a Política de Privacidade.
           </p>
 
           {error && (
-            <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 mb-4 text-sm text-red-600 dark:text-red-400">
+            <div ref={errorRef} tabIndex={-1} role="alert" className="rounded-xl border border-danger/30 bg-danger/[0.06] p-3 mb-4 text-sm text-danger outline-none">
               {error}
             </div>
           )}
