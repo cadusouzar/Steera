@@ -10,7 +10,7 @@ const Terms = () => (
     effectiveDate={formatLegalDate(LEGAL_VERSIONS.TERMS.effectiveDate)}
     intro={
       <>
-        <p>Estes termos regem o uso do Steera, sistema de gestão de pessoas, ponto e clientes operado por <strong>Carlos Eduardo de Souza Ribeiro</strong>, pessoa física, com sede em São Paulo/SP (contato: <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>). Ao criar uma conta, aceitar um convite ou usar o sistema, você concorda com estes termos e com a <Link to="/privacidade" className="underline underline-offset-2 hover:text-primary">Política de Privacidade</Link>.</p>
+        <p>Estes termos regem o uso do Steera, sistema de gestão de pessoas, ponto e clientes (contato: <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong>). Ao criar uma conta, aceitar um convite ou usar o sistema, você concorda com estes termos e com a <Link to="/privacidade" className="underline underline-offset-2 hover:text-primary">Política de Privacidade</Link>.</p>
       </>
     }
     sections={[
@@ -111,7 +111,7 @@ const Terms = () => (
         title: '11. Lei aplicável e foro',
         content: (
           <>
-            <p>Estes termos seguem as leis do Brasil. Fica eleito o foro da Comarca de São Paulo/SP, ressalvado o direito do consumidor de propor ação no foro do seu domicílio, quando aplicável.</p>
+            <p>Estes termos seguem as leis do Brasil. O consumidor pode propor ação no foro do seu domicílio, quando aplicável.</p>
           </>
         ),
       },
@@ -120,7 +120,7 @@ const Terms = () => (
         title: '12. Contato',
         content: (
           <>
-            <p>Carlos Eduardo de Souza Ribeiro — São Paulo/SP — <strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong></p>
+            <p><strong><a href="mailto:carlos@steera.com.br" className="underline underline-offset-2 hover:text-primary">carlos@steera.com.br</a></strong></p>
           </>
         ),
       },
