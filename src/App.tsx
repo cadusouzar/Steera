@@ -9,6 +9,8 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import VerifyEmail from './pages/VerifyEmail';
 import AcceptInvite from './pages/AcceptInvite';
+import Terms from './pages/legal/Terms';
+import Privacy from './pages/legal/Privacy';
 import AppLayout from './layouts/AppLayout';
 import RequireAuth from './components/RequireAuth';
 import Account from './pages/Account';
@@ -47,6 +49,8 @@ function App() {
           <Route path="/redefinir-senha" element={<ResetPassword />} />
           <Route path="/confirmar-email" element={<VerifyEmail />} />
           <Route path="/aceitar-convite" element={<AcceptInvite />} />
+          <Route path="/termos" element={<Terms />} />
+          <Route path="/privacidade" element={<Privacy />} />
 
           <Route element={<RequireAuth />}>
             {/* Área "Minha conta" do site (fora do ERP/AppLayout) — só leitura. */}
