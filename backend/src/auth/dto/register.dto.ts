@@ -1,4 +1,5 @@
 import { Trim } from '../../common/trim.transform';
+import { IsLegalAcceptance } from './accept-legal.dto';
 import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 export const BRAZILIAN_STATES = [
@@ -30,4 +31,6 @@ export class RegisterDto {
   @Trim() @IsString() @MinLength(1) @MaxLength(255) name!: string;
   @IsEmail() email!: string;
   @IsString() @MinLength(8) @MaxLength(128) password!: string;
+  // LGPD (07/10/2026): caixa "Li e aceito os Termos de uso e a Política de Privacidade".
+  @IsLegalAcceptance() acceptLegal!: boolean;
 }

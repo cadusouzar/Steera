@@ -350,7 +350,7 @@ describe('Acesso e sessões — confirmação de e-mail, convites e bloqueio tem
       const weak = await request(app.getHttpServer())
         .post('/auth/accept-invite')
         .set(CSRF_HEADER)
-        .send({ token, password: 'Senha@123' })
+        .send({ token, password: 'Senha@123', acceptLegal: true })
         .expect(400);
       expect(weak.body.message).toMatch(/^Senha fraca\./);
 

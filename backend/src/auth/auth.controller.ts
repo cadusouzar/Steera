@@ -3,6 +3,7 @@ import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
+import { AcceptLegalDto } from './dto/accept-legal.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LinkEmployeeDto } from './dto/link-employee.dto';
@@ -16,6 +17,7 @@ import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { CurrentUser, AuthenticatedUser } from './decorators/current-user.decorator';
 import { AllowDuringForcedPasswordChange } from './decorators/allow-during-forced-password-change.decorator';
+import { AllowPendingLegalAcceptance } from './decorators/allow-pending-legal-acceptance.decorator';
 import { AllowUnverifiedEmail } from './decorators/allow-unverified-email.decorator';
 import { Public } from './decorators/public.decorator';
 import { AntiCsrfHeaderGuard } from './guards/anti-csrf-header.guard';
@@ -23,6 +25,15 @@ import { FriendlyThrottlerGuard } from './guards/friendly-throttler.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { loginEmailTracker } from './login-throttle.util';
 import { refreshIpTracker, refreshSessionTracker } from './refresh-throttle.util';
+import { LegalAcceptanceMeta } from '../legal/legal-acceptance.service';
+
+// IP e navegador de quem aceitou os Termos/Política (LGPD — Etapa A), gravados em LegalAcceptance
+// como prova do aceite. `req.ip` respeita o `trust proxy` do Express — sem ele configurado (atrás de
+// um proxy em produção) vem o IP do proxy; ver pendências no vault (DECISOES-TECNICAS).
+function legalMetaFrom(req: Request): LegalAcceptanceMeta {
+  const userAgent = req.headers['user-agent'];
+  return { ip: req.ip ?? null, userAgent: typeof userAgent === 'string' ? userAgent : null };
+}
 
 // `me`/`me/password` levam @UseGuards(JwtAuthGuard) explícito aqui, mesmo
 // sabendo que a Task 4 vai registrar esse mesmo guard globalmente — sem
@@ -58,8 +69,8 @@ export class AuthController {
   @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
   @Post('register')
-  register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
-    return this.auth.register(dto, res);
+  register(@Body() dto: RegisterDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    return this.auth.register(dto, res, legalMetaFrom(req));
   }
 
   // Só o throttler "default", por IP: 100/15min ("Acesso e sessões", 26/09/2026 — era 5/5min). Um
@@ -152,8 +163,8 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 900_000 } })
   @HttpCode(204)
   @Post('accept-invite')
-  acceptInvite(@Body() dto: AcceptInviteDto) {
-    return this.auth.acceptInvite(dto.token, dto.password);
+  acceptInvite(@Body() dto: AcceptInviteDto, @Req() req: Request) {
+    return this.auth.acceptInvite(dto.token, dto.password, legalMetaFrom(req));
   }
 
   // Confirmação de e-mail ("Acesso e sessões", 26/09/2026). verify-email é @Public(): o link pode
@@ -175,6 +186,7 @@ export class AuthController {
   // dos guards de método, e dentro do @UseGuards abaixo o JwtAuthGuard ainda vem antes do
   // FriendlyThrottlerGuard. O `?? req.ip` é só uma rede de segurança que nunca deveria disparar.
   @AllowUnverifiedEmail()
+  @AllowPendingLegalAcceptance()
   @UseGuards(JwtAuthGuard, FriendlyThrottlerGuard)
   @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 3, ttl: 3_600_000, getTracker: (req) => `user:${req.user?.userId ?? req.ip}` } })
@@ -201,6 +213,7 @@ export class AuthController {
   // emailVerificationRequired) pra mostrar o aviso de confirmação — ver EmailVerifiedGuard.
   @AllowDuringForcedPasswordChange()
   @AllowUnverifiedEmail()
+  @AllowPendingLegalAcceptance()
   @UseGuards(JwtAuthGuard)
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
@@ -219,6 +232,7 @@ export class AuthController {
   // usuário travado sem saída (ver JwtAuthGuard).
   @AllowDuringForcedPasswordChange()
   @AllowUnverifiedEmail()
+  @AllowPendingLegalAcceptance()
   @UseGuards(JwtAuthGuard, FriendlyThrottlerGuard)
   @SkipThrottle({ 'login-email': true, 'refresh-ip': true })
   @Throttle({ default: { limit: 10, ttl: 900_000 } })
@@ -230,15 +244,31 @@ export class AuthController {
   // Área "Minha conta" do site: o próprio login edita o nome. Identidade só de req.user (nunca do
   // body); e-mail não é editável.
   @AllowUnverifiedEmail()
+  @AllowPendingLegalAcceptance()
   @UseGuards(JwtAuthGuard)
   @Patch('me')
   updateMe(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateMeDto) {
     return this.auth.updateMe(user.userId, dto);
   }
 
+  // Aceite (ou reaceite) da versão vigente dos Termos de uso e da Política de Privacidade (LGPD —
+  // Etapa A): a saída do estado LEGAL_ACCEPTANCE_REQUIRED, por isso @AllowPendingLegalAcceptance()
+  // (e @AllowUnverifiedEmail(): a tela de aceite pode aparecer antes da confirmação de e-mail).
+  // Devolve o perfil e um access token novo já sem a pendência — mesmo padrão de changePassword()
+  // pra mudanças de claim (o token antigo também passaria, porque o guard relê o banco, mas
+  // pagando uma consulta a cada requisição até expirar).
+  @AllowUnverifiedEmail()
+  @AllowPendingLegalAcceptance()
+  @UseGuards(JwtAuthGuard)
+  @Post('me/legal-acceptance')
+  acceptLegal(@CurrentUser() user: AuthenticatedUser, @Body() _dto: AcceptLegalDto, @Req() req: Request) {
+    return this.auth.acceptLegal(user.userId, legalMetaFrom(req));
+  }
+
   // Dados cadastrais da empresa (razão social, fantasia, telefone, endereço) — só ADMIN; documento
   // e tipo de pessoa nunca mudam por aqui. companyId vem do JWT, nunca do body.
   @AllowUnverifiedEmail()
+  @AllowPendingLegalAcceptance()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Patch('me/company')

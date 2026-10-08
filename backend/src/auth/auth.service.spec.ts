@@ -11,6 +11,7 @@ import { UserTokensService } from './user-tokens/user-tokens.service';
 import { InviteMailer } from './user-tokens/invite-mailer';
 import { accountLockedError } from './account-lock.util';
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
+import { LegalAcceptanceService } from '../legal/legal-acceptance.service';
 import * as passwordUtil from './password.util';
 
 // Senha que passa no medidor de força (zxcvbn >= 3) — toda senha NOVA definida nestes testes usa ela.
@@ -23,6 +24,7 @@ describe('AuthService', () => {
   let authorization: any;
   let email: { send: jest.Mock };
   let userTokens: { issue: jest.Mock; peek: jest.Mock; consume: jest.Mock; hasRecentPending: jest.Mock };
+  let legal: { record: jest.Mock; isPending: jest.Mock };
   const fakeRes = { cookie: jest.fn(), clearCookie: jest.fn() } as any;
   // E-mails (aviso de trava, esqueci minha senha) saem em segundo plano, sem a resposta esperar por
   // eles (anti-enumeração por latência) — os testes que olham o envio esperam a fila esvaziar.
@@ -51,6 +53,7 @@ describe('AuthService', () => {
     name: 'Carlos Eduardo',
     email: 'a@b.com',
     password: STRONG_PASSWORD,
+    acceptLegal: true as const,
   };
 
   beforeEach(async () => {
@@ -92,9 +95,11 @@ describe('AuthService', () => {
       consume: jest.fn(),
       hasRecentPending: jest.fn().mockResolvedValue(false),
     };
+    legal = { record: jest.fn().mockResolvedValue(undefined), isPending: jest.fn().mockResolvedValue(false) };
     const module = await Test.createTestingModule({
       providers: [
         AuthService,
+        { provide: LegalAcceptanceService, useValue: legal },
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: { sign: jest.fn(() => 'signed.jwt.token') } },
         { provide: AuthorizationService, useValue: authorization },
@@ -1796,6 +1801,138 @@ describe('AuthService', () => {
         expect(message.html).toContain('/confirmar-email?token=raw-verify-token-2');
         expect(context).toBe('email-verification');
       });
+    });
+  });
+
+  // LGPD — Etapa A (07/10/2026): aceite dos Termos de uso e da Política de Privacidade.
+  describe('aceite dos Termos e da Política', () => {
+    const meta = { ip: '10.0.0.9', userAgent: 'Mozilla/5.0' };
+
+    describe('register', () => {
+      beforeEach(() => {
+        prisma.company.create.mockImplementation(async ({ data }: any) => ({ id: 'companyreg1234567890123456', ...data }));
+        prisma.profile.create.mockResolvedValue({ id: 'p1' });
+        prisma.user.create.mockImplementation(async ({ data }: any) => ({
+          id: 'u1', employeeId: null, mustChangePassword: false, hasFullPontoAccess: true, emailVerifiedAt: null, ...data,
+        }));
+      });
+
+      it('grava o aceite dentro da MESMA transação (mesmo client) em que o User é criado, depois dele', async () => {
+        await service.register({ ...baseRegisterDto }, fakeRes, meta);
+        expect(legal.record).toHaveBeenCalledTimes(1);
+        const [userId, recordedMeta, client] = legal.record.mock.calls[0];
+        expect(userId).toBe('u1');
+        expect(recordedMeta).toEqual(meta);
+        // O mock de $transaction repassa o próprio `prisma` como `tx` — o client recebido precisa ser
+        // exatamente ele (o mesmo do tx.user.create), nunca chamado sem client de transação.
+        expect(client).toBe(prisma);
+        expect(legal.record.mock.invocationCallOrder[0]).toBeGreaterThan(prisma.user.create.mock.invocationCallOrder[0]);
+      });
+
+      it('falha ao gravar o aceite desfaz o cadastro (o erro sobe da transação)', async () => {
+        legal.record.mockRejectedValue(new Error('aceite falhou'));
+        await expect(service.register({ ...baseRegisterDto }, fakeRes, meta)).rejects.toThrow('aceite falhou');
+      });
+
+      it('assina legalAcceptancePending e devolve no user público', async () => {
+        const result = await service.register({ ...baseRegisterDto }, fakeRes, meta);
+        expect(result.user.legalAcceptancePending).toBe(false);
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.objectContaining({ legalAcceptancePending: false }),
+          expect.anything(),
+        );
+      });
+    });
+
+    it('acceptInvite grava o aceite depois de ativar o login', async () => {
+      userTokens.peek.mockResolvedValue('u5');
+      userTokens.consume.mockResolvedValue('u5');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u5', email: 'novo@teste.com', status: 'INVITED' });
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.acceptInvite('token-valido', STRONG_PASSWORD, meta);
+
+      expect(legal.record).toHaveBeenCalledWith('u5', meta);
+      expect(legal.record.mock.invocationCallOrder[0]).toBeGreaterThan(prisma.user.updateMany.mock.invocationCallOrder[0]);
+    });
+
+    it('acceptInvite recusado (corrida com block) não grava aceite', async () => {
+      userTokens.peek.mockResolvedValue('u5');
+      userTokens.consume.mockResolvedValue('u5');
+      prisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u5', email: 'novo@teste.com', status: 'INVITED' });
+      prisma.user.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.acceptInvite('token-valido', STRONG_PASSWORD, meta)).rejects.toBeInstanceOf(BadRequestException);
+      expect(legal.record).not.toHaveBeenCalled();
+    });
+
+    it('login de conta sem aceite assina legalAcceptancePending: true e expõe no user', async () => {
+      legal.isPending.mockResolvedValue(true);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1', companyId: 'c1', role: 'ADMIN', modules: [], status: 'ACTIVE', passwordHash: 'h',
+        mustChangePassword: false, hasFullPontoAccess: true, failedLoginAttempts: 0, lockedUntil: null,
+        emailVerificationRequired: false, emailVerifiedAt: new Date(),
+      });
+      jest.spyOn(passwordUtil, 'verifyPassword').mockResolvedValue(true);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'rt1' });
+
+      const result = await service.login({ email: 'x@x.com', password: 'y' }, fakeRes);
+
+      expect(legal.isPending).toHaveBeenCalledWith('u1');
+      expect(result.user.legalAcceptancePending).toBe(true);
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ legalAcceptancePending: true }),
+        expect.anything(),
+      );
+    });
+
+    it('refresh relê o estado ATUAL do aceite', async () => {
+      legal.isPending.mockResolvedValue(true);
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt1', userId: 'u1', expiresAt: new Date(Date.now() + 10_000), revokedAt: null, replacedByTokenId: null,
+        user: {
+          id: 'u1', companyId: 'c1', role: 'ADMIN', modules: [], status: 'ACTIVE', hasFullPontoAccess: true,
+          emailVerificationRequired: false, emailVerifiedAt: null,
+        },
+      });
+      prisma.refreshToken.create.mockResolvedValue({ id: 'rt2' });
+
+      await service.refresh('algum-valor', fakeRes);
+
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ legalAcceptancePending: true }),
+        expect.anything(),
+      );
+    });
+
+    it('getProfile expõe legalAcceptancePending', async () => {
+      legal.isPending.mockResolvedValue(true);
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        id: 'u1', email: 'a@b.com', companyId: 'c1', role: 'ADMIN', modules: [], mustChangePassword: false,
+        employeeId: null, hasFullPontoAccess: true, emailVerificationRequired: false, emailVerifiedAt: null,
+      });
+
+      const profile = await service.getProfile('u1');
+
+      expect(profile.legalAcceptancePending).toBe(true);
+    });
+
+    it('acceptLegal grava o aceite do próprio login e devolve o perfil + um access token novo', async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        id: 'u1', email: 'a@b.com', companyId: 'c1', role: 'ADMIN', modules: [], mustChangePassword: false,
+        employeeId: null, hasFullPontoAccess: true, emailVerificationRequired: false, emailVerifiedAt: null,
+      });
+
+      const result = await service.acceptLegal('u1', meta);
+
+      expect(legal.record).toHaveBeenCalledWith('u1', meta);
+      expect(legal.record.mock.invocationCallOrder[0]).toBeLessThan(legal.isPending.mock.invocationCallOrder[0]);
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(result.user).toMatchObject({ id: 'u1', legalAcceptancePending: false });
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ legalAcceptancePending: false }),
+        expect.anything(),
+      );
     });
   });
 });

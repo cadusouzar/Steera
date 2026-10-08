@@ -11,6 +11,8 @@ export interface AuthenticatedUser {
   // Opcional só pra não obrigar todo fixture de teste existente a declarar o campo — JwtStrategy
   // sempre popula (true/false). Ver EmailVerifiedGuard.
   emailVerificationPending?: boolean;
+  // Mesmo raciocínio, pro aceite dos Termos/Política — ver LegalAcceptanceGuard.
+  legalAcceptancePending?: boolean;
 }
 
 export const CurrentUser = createParamDecorator(

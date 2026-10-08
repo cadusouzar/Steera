@@ -200,6 +200,7 @@ model User {
   // true só pra quem nasce em POST /auth/register — torna a confirmação BLOQUEANTE (EmailVerifiedGuard).
   emailVerificationRequired Boolean        @default(false)
   userTokens                UserToken[]
+  legalAcceptances          LegalAcceptance[]
   mustChangePassword        Boolean        @default(false)
   hasFullPontoAccess        Boolean        @default(true)
   createdAt                 DateTime       @default(now())
@@ -241,6 +242,28 @@ model UserToken {
   createdAt DateTime      @default(now())
 
   @@index([userId, type])
+}
+
+enum LegalDocument {
+  TERMS
+  PRIVACY
+}
+
+// Aceite dos Termos de uso / Política de Privacidade (LGPD — Etapa A, 07/10/2026). Histórico: uma
+// linha por documento por versão aceita, só INSERT pela aplicação (nunca editada). As versões atuais
+// vivem em código (src/legal/legal-versions.ts). Central, sem RLS (mesmo tratamento de UserToken/
+// RefreshToken) e fora de TENANT_TABLE_NAMES.
+model LegalAcceptance {
+  id         String        @id @default(cuid())
+  userId     String
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document   LegalDocument
+  version    Int
+  acceptedAt DateTime      @default(now())
+  ip         String?
+  userAgent  String?       @db.VarChar(300)
+
+  @@index([userId, document, version])
 }
 
 enum Scope {

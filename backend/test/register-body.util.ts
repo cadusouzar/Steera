@@ -50,6 +50,8 @@ export function buildRegisterBody(opts: {
     name: 'Responsável de Teste',
     email: opts.email,
     password: opts.password,
+    // LGPD (07/10/2026): caixa obrigatória de aceite dos Termos de uso/Política de Privacidade.
+    acceptLegal: true,
     ...opts.overrides,
   };
 }

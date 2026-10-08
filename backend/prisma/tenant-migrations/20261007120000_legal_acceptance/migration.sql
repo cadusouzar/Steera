@@ -1,0 +1,1 @@
+CREATE TYPE "LegalDocument" AS ENUM ('TERMS', 'PRIVACY');

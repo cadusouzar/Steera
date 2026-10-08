@@ -12,6 +12,8 @@ export interface JwtPayload {
   permissions: Record<string, string | null>;
   // emailVerificationRequired && !emailVerifiedAt no momento da emissão — ver EmailVerifiedGuard.
   emailVerificationPending: boolean;
+  // Faltava aceitar a versão vigente dos Termos/Política no momento da emissão — ver LegalAcceptanceGuard.
+  legalAcceptancePending: boolean;
 }
 
 @Injectable()
@@ -39,6 +41,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // Tokens emitidos antes desta claim existir não a carregam: `?? false` = tratar como
       // confirmado (todos os logins anteriores foram marcados confirmados no backfill).
       emailVerificationPending: payload.emailVerificationPending ?? false,
+      // Diferente da claim acima, aqui o padrão é `true`: não houve backfill de aceite (contas
+      // anteriores a 07/10/2026 NÃO aceitaram), então um token emitido antes desta claim existir
+      // manda o LegalAcceptanceGuard consultar o banco — que decide (aceito passa, pendente é barrado).
+      legalAcceptancePending: payload.legalAcceptancePending ?? true,
     };
   }
 }

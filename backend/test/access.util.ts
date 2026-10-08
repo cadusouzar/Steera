@@ -18,7 +18,7 @@ export async function acceptInvite(app: INestApplication, inviteUrl: string, pas
   await request(app.getHttpServer())
     .post('/auth/accept-invite')
     .set('x-requested-with', 'XMLHttpRequest')
-    .send({ token, password })
+    .send({ token, password, acceptLegal: true })
     .expect(204);
 }
 

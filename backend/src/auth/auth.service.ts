@@ -31,6 +31,7 @@ import { generateRefreshTokenValue, hashRefreshToken } from './refresh-token.uti
 import { UnknownLoginFailureTracker } from './unknown-login-failures';
 import { INVALID_OR_EXPIRED_MESSAGE, SELF_SERVICE_EMAIL_COOLDOWN_MS, UserTokensService } from './user-tokens/user-tokens.service';
 import { InviteMailer } from './user-tokens/invite-mailer';
+import { LegalAcceptanceMeta, LegalAcceptanceService } from '../legal/legal-acceptance.service';
 
 // `RH` de propósito fora daqui — não é mais atribuído a login novo nenhum, nem o fundador (ver
 // RH_CARGOS/RH_FUNCIONARIOS no schema). O fundador via /auth/register continua recebendo TODOS os
@@ -97,6 +98,7 @@ export class AuthService {
     private readonly userTokens: UserTokensService,
     private readonly unknownLoginFailures: UnknownLoginFailureTracker,
     private readonly inviteMailer: InviteMailer,
+    private readonly legal: LegalAcceptanceService,
   ) {}
 
   private async signAccessToken(user: {
@@ -130,6 +132,10 @@ export class AuthService {
         // login/refresh/changePassword: relido agora), então a claim nunca herda um estado velho de
         // um token anterior.
         emailVerificationPending: isEmailVerificationPending(user),
+        // Aceite dos Termos/Política (LGPD — Etapa A): mesmo papel da claim acima, pro
+        // LegalAcceptanceGuard. Lido do banco AGORA (nunca herdado de um token anterior) — cobre
+        // login/register/refresh/changePassword/acceptLegal de uma vez, já que todos assinam por aqui.
+        legalAcceptancePending: await this.legal.isPending(user.id),
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m', algorithm: 'HS256' },
     );
@@ -173,7 +179,7 @@ export class AuthService {
       phone?: string | null; zipCode?: string | null; street?: string | null; number?: string | null;
       complement?: string | null; district?: string | null; city?: string | null; state?: string | null;
     } | null;
-  }, permissions: Record<string, string | null>) {
+  }, permissions: Record<string, string | null>, legalAcceptancePending: boolean) {
     const company = user.company;
     return {
       id: user.id,
@@ -191,6 +197,8 @@ export class AuthService {
       // e-mail" (bloqueante só quando emailVerificationRequired && !emailVerified).
       emailVerified: !!user.emailVerifiedAt,
       emailVerificationRequired: !!user.emailVerificationRequired,
+      // Falta aceitar a versão vigente dos Termos/Política — o frontend mostra a tela de reaceite.
+      legalAcceptancePending,
       companyName: user.company?.name ?? null,
       planTier: user.company?.planTier ?? null,
       // Fix pós-revisão (26/09/2026): derivado do catálogo por planTier — nunca mais da coluna
@@ -293,7 +301,7 @@ export class AuthService {
     }
   }
 
-  async register(dto: RegisterDto, res: Response) {
+  async register(dto: RegisterDto, res: Response, legalMeta: LegalAcceptanceMeta = {}) {
     // Normaliza/valida ANTES da transação: erro de documento/telefone nunca chega a pegar o lock
     // global de provisionamento.
     const document = normalizeDocument(dto.personType, dto.document);
@@ -417,6 +425,11 @@ export class AuthService {
               emailVerifiedAt: null,
             },
           });
+          // Aceite dos Termos/Política (LGPD — Etapa A) na MESMA transação e com o MESMO `tx` do
+          // tx.user.create acima: LegalAcceptance é central como User, e este `tx` é o client central
+          // (runAsSystem = bypass, nunca redirecionado pra um client de tenant). Falhou o aceite,
+          // o cadastro inteiro é desfeito — nunca existe um fundador sem o aceite registrado.
+          await this.legal.record(createdUser.id, legalMeta, tx);
           return { user: createdUser, company };
         }),
       );
@@ -440,7 +453,8 @@ export class AuthService {
     // escopo (acabou de ser criado nesta mesma transação), sem precisar de
     // include nenhum.
     const permissions = await this.getEffectivePermissionsAsSystem(user.id);
-    return { accessToken, user: this.toPublicUser({ ...user, company }, permissions) };
+    const legalAcceptancePending = await this.legal.isPending(user.id);
+    return { accessToken, user: this.toPublicUser({ ...user, company }, permissions, legalAcceptancePending) };
   }
 
   async login(dto: { email: string; password: string }, res: Response) {
@@ -537,7 +551,8 @@ export class AuthService {
     const refreshValue = await this.issueRefreshToken(user.id);
     this.setRefreshCookie(res, refreshValue);
     const permissions = await this.getEffectivePermissionsAsSystem(user.id);
-    return { accessToken, user: this.toPublicUser(user, permissions) };
+    const legalAcceptancePending = await this.legal.isPending(user.id);
+    return { accessToken, user: this.toPublicUser(user, permissions, legalAcceptancePending) };
   }
 
   // Gasta o mesmo tempo de um argon2.verify de verdade, sem nenhum hash real a conferir (e-mail sem
@@ -769,7 +784,7 @@ export class AuthService {
   // corrida com um block() concorrente entre a leitura e a escrita — se o admin bloqueou no meio, o
   // update não casa nada e o BLOCKED fica. runAsSystem: rota @Public(), mesmo raciocínio de
   // resetPassword().
-  async acceptInvite(rawToken: string, password: string): Promise<void> {
+  async acceptInvite(rawToken: string, password: string, legalMeta: LegalAcceptanceMeta = {}): Promise<void> {
     // peek() antes de consume(): mesmo motivo de resetPassword() — senha fraca não queima o convite.
     const userId = await this.userTokens.peek(rawToken, 'INVITE');
     const user = await runAsSystem(() => this.prisma.user.findUniqueOrThrow({ where: { id: userId } }));
@@ -792,6 +807,10 @@ export class AuthService {
       }),
     );
     if (count === 0) throw new BadRequestException(INVALID_OR_EXPIRED_MESSAGE);
+    // Aceite dos Termos/Política (LGPD — Etapa A), depois de ativar o login. Fora da transação da
+    // ativação de propósito (como no plano): se falhar, o login fica ativo SEM aceite e a pessoa
+    // simplesmente vê a tela de reaceite ao entrar — nunca um login ativo liberado sem aceite.
+    await runAsSystem(() => this.legal.record(userId, legalMeta));
   }
 
   async refresh(refreshCookieValue: string | undefined, res: Response) {
@@ -957,7 +976,20 @@ export class AuthService {
       include: { company: { select: PUBLIC_COMPANY_SELECT } },
     });
     const permissions = await this.getEffectivePermissionsAsSystem(userId);
-    return this.toPublicUser(user, permissions);
+    const legalAcceptancePending = await this.legal.isPending(userId);
+    return this.toPublicUser(user, permissions, legalAcceptancePending);
+  }
+
+  // POST /auth/me/legal-acceptance — grava o aceite da versão vigente dos Termos/Política pelo
+  // próprio login (idempotente: repetir não duplica) e devolve o perfil + um access token novo já
+  // sem a pendência (o token antigo também passaria — o LegalAcceptanceGuard relê o banco —, mas
+  // pagando uma consulta por requisição até expirar). Identidade só de req.user.
+  async acceptLegal(userId: string, legalMeta: LegalAcceptanceMeta) {
+    await this.legal.record(userId, legalMeta);
+    const user = await this.getProfile(userId);
+    const row = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const accessToken = await this.signAccessToken(row);
+    return { accessToken, user };
   }
 
   // Único caminho pelo qual um login se auto-vincula a um Employee já

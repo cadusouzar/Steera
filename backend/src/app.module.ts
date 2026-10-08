@@ -6,6 +6,8 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { THROTTLERS } from './app-throttlers';
 import { AuthModule } from './auth/auth.module';
 import { EmailVerifiedGuard } from './auth/guards/email-verified.guard';
+import { LegalAcceptanceGuard } from './auth/guards/legal-acceptance.guard';
+import { LegalModule } from './legal/legal.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PlanGuard } from './plans/plan.guard';
 import { PlansModule } from './plans/plans.module';
@@ -67,6 +69,7 @@ import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
     PrismaModule,
     EmailModule,
     AuthModule,
+    LegalModule,
     UserTokensModule,
     CompanyModule,
     RolesModule,
@@ -106,6 +109,10 @@ import { UserTokensModule } from './auth/user-tokens/user-tokens.module';
     // do PlanGuard — enquanto o e-mail não for confirmado, só as rotas @AllowUnverifiedEmail()/
     // @Public() passam (ver email-verified.guard.ts).
     { provide: APP_GUARD, useClass: EmailVerifiedGuard },
+    // Aceite dos Termos de uso/Política de Privacidade (LGPD — Etapa A): logo depois do
+    // EmailVerifiedGuard, mesma estrutura — enquanto faltar o aceite da versão vigente, só as rotas
+    // @AllowPendingLegalAcceptance()/@Public() passam (ver legal-acceptance.guard.ts).
+    { provide: APP_GUARD, useClass: LegalAcceptanceGuard },
     { provide: APP_GUARD, useClass: PlanGuard },
     // Backstop de RLS (defesa em profundidade): estabelece o contexto de
     // tenant (companyId autenticado) usado pela extensão do Prisma em

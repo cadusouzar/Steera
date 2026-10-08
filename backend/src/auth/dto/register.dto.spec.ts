@@ -22,6 +22,7 @@ describe('RegisterDto', () => {
     name: 'Carlos Eduardo',
     email: 'a@b.com',
     password: 'senha12345678',
+    acceptLegal: true,
   };
 
   const errorsFor = async (overrides: Record<string, unknown>) =>
